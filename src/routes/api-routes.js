@@ -17,6 +17,8 @@ import { handleListModels, handleAccountModels, handleAccountUsage } from './mod
 import { handleGetHaikuModel, handleSetHaikuModel, handleGetKiloModels, handleGetAccountStrategy, handleSetAccountStrategy } from './settings-route.js';
 import { handleGetLogs, handleStreamLogs } from './logs-route.js';
 import { handleGetClaudeConfig, handleSetProxyMode, handleSetDirectMode, handleSetClaudeApiEndpoint } from './claude-config-route.js';
+import { handleCodexResponses, handleCodexModels, handleCodexCatchAll } from './codex-route.js';
+import { handleSetCodexProxy, handleGetCodexConfig, handleSetCodexDirect } from './codex-config-route.js';
 import {
   handleListAccounts,
   handleAccountStatus,
@@ -52,6 +54,7 @@ export function registerApiRoutes(app, { port }) {
   app.post('/v1/chat/completions', handleChatCompletion);
 
   // ─── Models ────────────────────────────────────────────────────────────────
+  app.get('/models', handleListModels);
   app.get('/v1/models', handleListModels);
   app.get('/accounts/models', handleAccountModels);
   app.get('/accounts/usage', handleAccountUsage);
@@ -85,6 +88,21 @@ export function registerApiRoutes(app, { port }) {
   app.post('/claude/config/proxy', (req, res) => handleSetProxyMode(req, res, { port }));
   app.post('/claude/config/direct', handleSetDirectMode);
   app.post('/claude/config/set', handleSetClaudeApiEndpoint);
+
+  // ─── Codex WebSocket probe — 426 tells it to use HTTPS silently ──────────
+  app.get('/responses', (req, res) => res.status(426).end());
+  app.get('/v1/responses', (req, res) => res.status(426).end());
+
+  // ─── Codex CLI Configuration ─────────────────────────────────────────────
+  app.get('/codex/config', handleGetCodexConfig);
+  app.post('/codex/config/proxy', (req, res) => handleSetCodexProxy(req, res, { port }));
+  app.post('/codex/config/direct', handleSetCodexDirect);
+
+  // ─── Codex CLI Passthrough (OpenAI Responses API) ────────────────────────
+  app.post('/backend-api/codex/responses', handleCodexResponses);
+  app.get('/backend-api/codex/models', handleCodexModels);
+  // Catch-all for other backend-api requests Codex may send
+  app.all('/backend-api/*', handleCodexCatchAll);
 
   // ─── Logs ──────────────────────────────────────────────────────────────────
   app.get('/api/logs', handleGetLogs);

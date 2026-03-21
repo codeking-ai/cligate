@@ -100,16 +100,27 @@ export async function handleAddAccount(req, res) {
   activeCallbackServers.set(callbackPort, serverResult);
 
   serverResult.promise
-    .then(result => {
+    .then(async code => {
       activeCallbackServers.delete(callbackPort);
-      if (result?.code) {
-        return exchangeCodeForTokens(result.code, verifier, callbackPort)
-          .then(async tokens => {
-            const accountInfo = extractAccountInfo(tokens);
-            await _upsertAccount(accountInfo);
-            logger.info(`Added account: ${accountInfo.email}`);
-          });
-      }
+      if (!code) return;
+
+      const tokens = await exchangeCodeForTokens(code, verifier, callbackPort);
+      const info = extractAccountInfo(tokens.accessToken);
+
+      const accountInfo = {
+        email: info?.email || 'unknown',
+        accountId: info?.accountId,
+        planType: info?.planType || 'free',
+        accessToken: tokens.accessToken,
+        refreshToken: tokens.refreshToken,
+        idToken: tokens.idToken,
+        expiresAt: info?.expiresAt || (Date.now() + tokens.expiresIn * 1000),
+        addedAt: new Date().toISOString(),
+        lastUsed: new Date().toISOString()
+      };
+
+      await _upsertAccount(accountInfo);
+      logger.info(`Added account: ${accountInfo.email} (${accountInfo.planType})`);
     })
     .catch(err => {
       activeCallbackServers.delete(callbackPort);
@@ -135,7 +146,19 @@ export async function handleAddAccountManual(req, res) {
   try {
     const { code: extractedCode } = extractCodeFromInput(code);
     const tokens = await exchangeCodeForTokens(extractedCode, verifier);
-    const accountInfo = extractAccountInfo(tokens);
+    const info = extractAccountInfo(tokens.accessToken);
+
+    const accountInfo = {
+      email: info?.email || 'unknown',
+      accountId: info?.accountId,
+      planType: info?.planType || 'free',
+      accessToken: tokens.accessToken,
+      refreshToken: tokens.refreshToken,
+      idToken: tokens.idToken,
+      expiresAt: info?.expiresAt || (Date.now() + tokens.expiresIn * 1000),
+      addedAt: new Date().toISOString(),
+      lastUsed: new Date().toISOString()
+    };
 
     await _upsertAccount(accountInfo);
     logger.info(`Added account via manual OAuth: ${accountInfo.email}`);

@@ -8,6 +8,7 @@ import cors from 'cors';
 
 import { ensureAccountsPersist, startAutoRefresh } from './account-manager.js';
 import { registerApiRoutes } from './routes/api-routes.js';
+import { handleResponses } from './routes/responses-route.js';
 
 export function createServer({ port }) {
   ensureAccountsPersist();
@@ -15,7 +16,7 @@ export function createServer({ port }) {
 
   const app = express();
   app.disable('x-powered-by');
-  
+
   // High-level request logging
   app.use((req, res, next) => {
     const start = Date.now();
@@ -39,9 +40,17 @@ export function createServer({ port }) {
       'http://127.0.0.1'
     ],
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'Content-Encoding',
+                     'ChatGPT-Account-ID', 'OpenAI-Organization'],
     credentials: false
   }));
+
+  // Register /responses BEFORE express.json() —
+  // Codex CLI sends zstd-compressed bodies that express.json() cannot parse.
+  // This route reads the raw body and forwards it as-is.
+  app.post('/responses', handleResponses);
+  app.post('/v1/responses', handleResponses);
+
   app.use(express.json({ limit: '10mb' }));
 
   registerApiRoutes(app, { port });
