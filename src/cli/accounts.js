@@ -10,7 +10,7 @@ import { homedir } from 'os';
 import { join } from 'path';
 import crypto from 'crypto';
 
-const CONFIG_DIR = join(homedir(), '.codex-claude-proxy');
+const CONFIG_DIR = join(homedir(), '.proxypool-hub');
 const ACCOUNTS_FILE = join(CONFIG_DIR, 'accounts.json');
 const DEFAULT_PORT = 8081;
 
@@ -493,7 +493,7 @@ async function main() {
     const port = parseInt(args.find(a => a.startsWith('--port='))?.split('=')[1]) || DEFAULT_PORT;
 
     console.log('╔════════════════════════════════════════╗');
-    console.log('║   Codex Proxy Account Manager         ║');
+    console.log('║   ProxyPool Hub Account Manager       ║');
     console.log('║   Use --no-browser for headless mode   ║');
     console.log('╚════════════════════════════════════════╝');
 
@@ -526,18 +526,18 @@ async function main() {
             case 'help':
             default:
                 console.log('\nUsage:');
-                console.log('  codex-claude-proxy accounts add           Add account (opens browser)');
-                console.log('  codex-claude-proxy accounts add --no-browser  Add account (manual code)');
-                console.log('  codex-claude-proxy accounts list         List all accounts');
-                console.log('  codex-claude-proxy accounts remove       Remove accounts interactively');
-                console.log('  codex-claude-proxy accounts verify       Verify account tokens');
-                console.log('  codex-claude-proxy accounts clear        Remove all accounts');
-                console.log('  codex-claude-proxy accounts help         Show this help');
+                console.log('  proxypool-hub accounts add           Add account (opens browser)');
+                console.log('  proxypool-hub accounts add --no-browser  Add account (manual code)');
+                console.log('  proxypool-hub accounts list         List all accounts');
+                console.log('  proxypool-hub accounts remove       Remove accounts interactively');
+                console.log('  proxypool-hub accounts verify       Verify account tokens');
+                console.log('  proxypool-hub accounts clear        Remove all accounts');
+                console.log('  proxypool-hub accounts help         Show this help');
                 console.log('\nOptions:');
                 console.log('  --no-browser    Manual authorization code input (for headless/VM servers)');
                 console.log('  --port=<port>   Server port (default: 8081)');
                 console.log('\nHeadless/VM Usage:');
-                console.log('  1. Run: codex-claude-proxy accounts add --no-browser');
+                console.log('  1. Run: proxypool-hub accounts add --no-browser');
                 console.log('  2. Copy the URL shown and open in browser on another device');
                 console.log('  3. After login, paste the callback URL back in terminal');
                 break;

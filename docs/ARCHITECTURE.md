@@ -24,7 +24,7 @@ This proxy forwards requests from Anthropic-compatible clients (like Claude Code
 ## Project Structure
 
 ```
-codex-claude-proxy/
+proxypool-hub/
 ├── package.json
 ├── README.md
 ├── docs/

@@ -73,7 +73,7 @@ document.addEventListener('alpine:init', () => {
             }
         },
         
-        configPath: '~/.codex-claude-proxy/accounts.json',
+        configPath: '~/.proxypool-hub/accounts.json',
         
         logs: [],
         logSearchQuery: '',

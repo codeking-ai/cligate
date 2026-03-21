@@ -4,7 +4,7 @@
 
 ### Main Registry
 
-**Location:** `~/.codex-claude-proxy/accounts.json`
+**Location:** `~/.proxypool-hub/accounts.json`
 
 ```json
 {
@@ -33,7 +33,7 @@
 
 ### Per-Account Tokens
 
-**Location:** `~/.codex-claude-proxy/accounts/<email>/auth.json`
+**Location:** `~/.proxypool-hub/accounts/<email>/auth.json`
 
 ```json
 {
@@ -196,7 +196,7 @@ On server startup:
 
 ## Security
 
-- Tokens stored locally in `~/.codex-claude-proxy/`
+- Tokens stored locally in `~/.proxypool-hub/`
 - Directory permissions: user read/write only
 - Never logged or exposed in API responses
 - Per-account isolation via separate directories

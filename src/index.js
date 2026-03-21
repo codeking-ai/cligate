@@ -1,5 +1,5 @@
 /**
- * Codex Claude Proxy
+ * ProxyPool Hub
  * Entry point
  */
 
@@ -13,7 +13,7 @@ startServer({ port: PORT });
 
 console.log(`
 ╔══════════════════════════════════════════════════════════════╗
-║                 Codex Claude Proxy v1.0.5                    ║
+║                  ProxyPool Hub v1.0.5                         ║
 ║                   (Direct API Mode)                          ║
 ╠══════════════════════════════════════════════════════════════╣
 ║  Server:   http://localhost:${PORT}                          ║
@@ -30,7 +30,7 @@ console.log(`
 ╠══════════════════════════════════════════════════════════════╣
 ║  Support:                                                    ║
 ║    ★ Give it a star on GitHub!                               ║
-║    https://github.com/Ayush-Kotlin-Dev/codex-claude-proxy    ║
+║    https://github.com/yiyao-ai/proxypool-hub                 ║
 ╚══════════════════════════════════════════════════════════════╝
 `);
 

@@ -1,11 +1,11 @@
 {
-  "name": "codex-claude-proxy",
+  "name": "proxypool-hub",
   "version": "1.0.5",
   "description": "Multi-account proxy server for OpenAI Codex CLI with Claude API compatibility",
   "type": "module",
   "main": "src/index.js",
   "bin": {
-    "codex-claude-proxy": "./bin/cli.js"
+    "proxypool-hub": "./bin/cli.js"
   },
   "files": [
     "src",
@@ -22,12 +22,12 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Ayush-Kotlin-Dev/codex-claude-proxy.git"
+    "url": "git+https://github.com/yiyao-ai/proxypool-hub.git"
   },
   "bugs": {
-    "url": "https://github.com/Ayush-Kotlin-Dev/codex-claude-proxy/issues"
+    "url": "https://github.com/yiyao-ai/proxypool-hub/issues"
   },
-  "homepage": "https://github.com/Ayush-Kotlin-Dev/codex-claude-proxy#readme",
+  "homepage": "https://github.com/yiyao-ai/proxypool-hub#readme",
   "scripts": {
     "start": "node src/index.js",
     "portfolio:dev": "npm --prefix apps/portfolio run dev",

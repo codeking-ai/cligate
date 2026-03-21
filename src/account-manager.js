@@ -9,7 +9,7 @@ import { homedir } from 'os';
 import { refreshAccessToken, extractAccountInfo } from './oauth.js';
 import { getAccountQuota as fetchQuota } from './model-api.js';
 
-const CONFIG_DIR = join(homedir(), '.codex-claude-proxy');
+const CONFIG_DIR = join(homedir(), '.proxypool-hub');
 const ACCOUNTS_FILE = join(CONFIG_DIR, 'accounts.json');
 const ACCOUNTS_DIR = join(CONFIG_DIR, 'accounts');
 

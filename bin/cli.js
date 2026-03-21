@@ -16,12 +16,12 @@ const command = args[0];
 
 function showHelp() {
   console.log(`
-codex-claude-proxy v${packageJson.version}
+proxypool-hub v${packageJson.version}
 
 Proxy server for using ChatGPT Codex models with Claude Code CLI.
 
 USAGE:
-  codex-claude-proxy <command> [options]
+  proxypool-hub <command> [options]
 
 COMMANDS:
   start                 Start the proxy server (default port: 8081)
@@ -41,15 +41,15 @@ ENVIRONMENT:
   PORT                  Server port (default: 8081)
 
 EXAMPLES:
-  codex-claude-proxy start
-  PORT=3000 codex-claude-proxy start
-  codex-claude-proxy accounts add
-  codex-claude-proxy accounts add --no-browser
-  codex-claude-proxy accounts list
-  codex-claude-proxy accounts verify
+  proxypool-hub start
+  PORT=3000 proxypool-hub start
+  proxypool-hub accounts add
+  proxypool-hub accounts add --no-browser
+  proxypool-hub accounts list
+  proxypool-hub accounts verify
 
 HEADLESS/VM USAGE:
-  1. Run: codex-claude-proxy accounts add --no-browser
+  1. Run: proxypool-hub accounts add --no-browser
   2. Copy the URL shown and open in browser on another device
   3. After login, paste the callback URL back in terminal
 
@@ -102,7 +102,7 @@ async function main() {
 
     default:
       console.error(`Unknown command: ${command}`);
-      console.error('Run "codex-claude-proxy --help" for usage information.');
+      console.error('Run "proxypool-hub --help" for usage information.');
       process.exit(1);
   }
 }

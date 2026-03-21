@@ -1,10 +1,10 @@
-# Codex Claude Proxy
+# ProxyPool Hub
 
 ![Architecture banner](./images/f757093f-507b-4453-994e-f8275f8b07a9.png)
 
 [![MIT License](https://img.shields.io/badge/License-MIT-green.svg)](https://choosealicense.com/licenses/mit/)
 [![Node.js Version](https://img.shields.io/badge/Node.js-18%2B-blue.svg)](https://nodejs.org/)
-[![GitHub stars](https://img.shields.io/github/stars/Ayush-Kotlin-Dev/codex-claude-proxy?style=social)](https://github.com/Ayush-Kotlin-Dev/codex-claude-proxy)
+[![GitHub stars](https://img.shields.io/github/stars/yiyao-ai/proxypool-hub?style=social)](https://github.com/yiyao-ai/proxypool-hub)
 
 > **Use Claude Code CLI with the power of ChatGPT Codex models.**
 > A local proxy that translates Anthropic API requests into ChatGPT Codex calls, enabling you to use the `claude` CLI tool with your ChatGPT Free/Plus/Pro subscription.
@@ -57,14 +57,14 @@ You don't need to install anything if you just want to run it:
 
 ```bash
 # Run directly with npx
-npx codex-claude-proxy@latest start
+npx proxypool-hub@latest start
 ```
 
 Or install globally to use the CLI commands anywhere:
 
 ```bash
-npm install -g codex-claude-proxy
-codex-claude-proxy start
+npm install -g proxypool-hub
+proxypool-hub start
 ```
 
 ---
@@ -74,7 +74,7 @@ codex-claude-proxy start
 ### 1. Start the Proxy
 
 ```bash
-npx codex-claude-proxy@latest start
+npx proxypool-hub@latest start
 ```
 The server will start at `http://localhost:8081`.
 
@@ -90,10 +90,10 @@ The server will start at `http://localhost:8081`.
 
 ```bash
 # Desktop (opens browser)
-codex-claude-proxy accounts add
+proxypool-hub accounts add
 
 # Headless/VM server (manual code input)
-codex-claude-proxy accounts add --no-browser
+proxypool-hub accounts add --no-browser
 ```
 
 For **headless/VM servers** without a browser:
@@ -174,7 +174,7 @@ This project is an independent open-source tool and is not affiliated with, endo
 
 <div align="center">
   <p>If you find this project useful, please give it a star! ⭐️</p>
-  <a href="https://github.com/Ayush-Kotlin-Dev/codex-claude-proxy">
-    <img src="https://img.shields.io/github/stars/Ayush-Kotlin-Dev/codex-claude-proxy?style=social" alt="Star on GitHub">
+  <a href="https://github.com/yiyao-ai/proxypool-hub">
+    <img src="https://img.shields.io/github/stars/yiyao-ai/proxypool-hub?style=social" alt="Star on GitHub">
   </a>
 </div>

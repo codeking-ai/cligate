@@ -14,11 +14,11 @@ test('Web UI loads and includes core navigation', async () => {
   const html = await res.text();
 
   // Basic smoke checks that are resilient to styling changes.
-  assert.ok(html.includes('<title>Codex Claude Proxy</title>'));
-  assert.ok(html.includes('Dashboard'));
-  assert.ok(html.includes('Accounts'));
-  assert.ok(html.includes('Server Logs'));
-  assert.ok(html.includes('Settings'));
+  assert.ok(html.includes('<title>ProxyPool Hub</title>'));
+  assert.ok(html.includes('dashboard'));
+  assert.ok(html.includes('accounts'));
+  assert.ok(html.includes('logs'));
+  assert.ok(html.includes('settings'));
 });
 
 test('Web UI loads app bundle and has a logs container', async () => {
@@ -38,13 +38,11 @@ test('UI Quick Test and Haiku test controls are present', async () => {
   assert.equal(res.status, 200);
   const html = await res.text();
 
-  // Find the two test panels by their headings.
-  assert.ok(html.includes('Quick Test'));
-  assert.ok(html.includes('Haiku (Kilo) Test'));
-
-  // Buttons: labels should remain stable.
-  assert.ok(html.includes('>Test<'));
-  assert.ok(html.includes('>Test Haiku<'));
+  // i18n keys referenced in the template via t('...')
+  assert.ok(html.includes("t('quickTest')"));
+  assert.ok(html.includes("t('haikuKiloTest')"));
+  assert.ok(html.includes("t('test')"));
+  assert.ok(html.includes("t('testHaiku')"));
 });
 
 test('app.js defines expected Alpine state keys (smoke)', async () => {

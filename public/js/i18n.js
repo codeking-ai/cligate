@@ -1,8 +1,8 @@
 const i18n = {
   en: {
     // Header
-    codexProxy: 'CODEX PROXY',
-    claudeProxySystem: 'CLAUDE PROXY SYSTEM',
+    codexProxy: 'PROXYPOOL HUB',
+    claudeProxySystem: 'AI PROXY SYSTEM',
     starOnGithub: 'Star on GitHub',
     online: 'Online',
     offline: 'Offline',
@@ -150,8 +150,8 @@ const i18n = {
 
   zh: {
     // Header
-    codexProxy: 'CODEX PROXY',
-    claudeProxySystem: 'CLAUDE 代理系统',
+    codexProxy: 'PROXYPOOL HUB',
+    claudeProxySystem: 'AI 代理系统',
     starOnGithub: '在 GitHub 上加星',
     online: '在线',
     offline: '离线',

@@ -1,19 +1,19 @@
 # CLAUDE.md
-# Codex Claude Proxy - AI Agent Instructions
+# ProxyPool Hub - AI Agent Instructions
 
 ## Welcome Claude Code
-You are an autonomous agent running inside the `codex-claude-proxy` repository via an OpenClaw bot. This file provides the core context and operational instructions for your task.
+You are an autonomous agent running inside the `proxypool-hub` repository via an OpenClaw bot. This file provides the core context and operational instructions for your task.
 
 ### Your Mission
 Your goal is to independently investigate the project, find an area for improvement, and **add a valuable feature**, **fix a bug**, or **enhance the proxy's functionality**. The aim is to make the proxy robust, feature-rich, and capable of long-term survival.
 
 This file provides guidance to Claude Code (`claude.ai/code`) when working with code in this repository. You are an autonomous agent tasked by OpenClaw to analyze and systematically improve this codebase based on these instructions.
 
-for more context or if have any doubt related to project check our prject doc at codex-claude-proxy/docs
+for more context or if have any doubt related to project check our prject doc at proxypool-hub/docs
 
 ## Project Overview
 
-**Codex Claude Proxy** is a local proxy server (`localhost:8081`) that translates Anthropic API requests from the Claude Code CLI into ChatGPT's internal Codex Responses API format (`chatgpt.com/backend-api/codex/responses`). It enables users to run Claude Code natively using their ChatGPT Free/Plus/Pro accounts, fully supporting native tool calling, streaming, and account management.
+**ProxyPool Hub** is a local proxy server (`localhost:8081`) that translates Anthropic API requests from the Claude Code CLI into ChatGPT's internal Codex Responses API format (`chatgpt.com/backend-api/codex/responses`). It enables users to run Claude Code natively using their ChatGPT Free/Plus/Pro accounts, fully supporting native tool calling, streaming, and account management.
 
 The proxy bypasses Cloudflare protections, translates Anthropic formatted requests into flat `function_call` payload arrays, and seamlessly orchestrates credentials by dynamically injecting active tokens into `~/.claude/settings.json` or `~/.codex/auth.json`. 
 
@@ -80,7 +80,7 @@ public/
 
 - **src/format-converter.js**: Handles unnesting Anthropic `tool_use`/`tool_result` array objects from message contents into the discrete top-level `function_call` structure demanded by ChatGPT's Responses API. Prefixing function call IDs with `fc_`.
 - **src/response-streamer.js**: Binds to `response.output_item.added`, `response.completed`, and text delta stream chunks from OpenAI and maps them exactly to `message_start`, `content_block_delta`, and `message_stop` events.
-- **src/account-manager.js**: Reads `~/.codex-claude-proxy/` and proactively background-refreshes OAuth refresh tokens exactly 5 minutes before the 1hr expiry deadline.
+- **src/account-manager.js**: Reads `~/.proxypool-hub/` and proactively background-refreshes OAuth refresh tokens exactly 5 minutes before the 1hr expiry deadline.
 - **src/model-mapper.js**: Performs translation like `claude-opus-4-5` → `gpt-5.3-codex`. Supports `/settings/haiku-model` overrides which swap the OpenRouter backbone for Haiku endpoints (like `kimi-k2.5`).
 - **src/oauth.js**: Coordinates PKCE challenge mechanisms via local port 1455. Generates URIs and exchanges OAuth codes headlessly.
 
