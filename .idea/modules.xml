@@ -2,7 +2,7 @@
 <project version="4">
   <component name="ProjectModuleManager">
     <modules>
-      <module fileurl="file://$PROJECT_DIR$/.idea/codex-claude-proxy.iml" filepath="$PROJECT_DIR$/.idea/codex-claude-proxy.iml" />
+      <module fileurl="file://$PROJECT_DIR$/.idea/proxypool_hub.iml" filepath="$PROJECT_DIR$/.idea/proxypool_hub.iml" />
     </modules>
   </component>
 </project>
