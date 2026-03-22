@@ -14,6 +14,7 @@ import { listAccounts } from '../account-manager.js';
 import { getServerSettings } from '../server-settings.js';
 import { selectKey, recordUsage, recordError, recordRateLimit, hasKeysForTypes, getKeyRateLimitInfo } from '../api-key-manager.js';
 import { recordRequest } from '../usage-tracker.js';
+import { resolveModel } from '../model-mapping.js';
 
 /**
  * POST /v1/chat/completions
@@ -88,7 +89,12 @@ async function _handleChatViaApiKey(res, body, requestedModel, keyTypes, startTi
       if (!provider) continue;
 
       try {
-        const response = await provider.sendRequest(body);
+        // Map model name to provider-native model
+        const mappedModel = resolveModel(type, body.model);
+        const mappedBody = { ...body, model: mappedModel };
+        logger.info(`[Chat] Model mapping: ${body.model} → ${mappedModel} (${type})`);
+
+        const response = await provider.sendRequest(mappedBody);
         const durationMs = Date.now() - startTime;
 
         if (response.status === 429) {
@@ -105,7 +111,7 @@ async function _handleChatViaApiKey(res, body, requestedModel, keyTypes, startTi
         const responseBody = await response.text();
         if (!response.ok) {
           recordError(provider.id);
-          recordRequest({ provider: type, keyId: provider.id, model: body.model, durationMs, success: false, error: responseBody.slice(0, 200) });
+          recordRequest({ provider: type, keyId: provider.id, model: mappedModel, durationMs, success: false, error: responseBody.slice(0, 200) });
           res.status(response.status).type('json').send(responseBody);
           return;
         }
@@ -117,10 +123,10 @@ async function _handleChatViaApiKey(res, body, requestedModel, keyTypes, startTi
           outputTokens = parsed.usage?.completion_tokens || 0;
         } catch { /* ignore */ }
 
-        const cost = provider.estimateCost(body.model, inputTokens, outputTokens);
-        recordUsage(provider.id, { inputTokens, outputTokens, model: body.model });
-        recordRequest({ provider: type, keyId: provider.id, model: body.model, inputTokens, outputTokens, cost, durationMs, success: true });
-        logger.info(`[Chat] OK via API key | ${type}/${provider.name} | model=${body.model} | ${inputTokens}+${outputTokens} tokens | $${cost.toFixed(4)} | ${durationMs}ms`);
+        const cost = provider.estimateCost(mappedModel, inputTokens, outputTokens);
+        recordUsage(provider.id, { inputTokens, outputTokens, model: mappedModel });
+        recordRequest({ provider: type, keyId: provider.id, model: mappedModel, inputTokens, outputTokens, cost, durationMs, success: true });
+        logger.info(`[Chat] OK via API key | ${type}/${provider.name} | ${body.model}→${mappedModel} | ${inputTokens}+${outputTokens} tokens | $${cost.toFixed(4)} | ${durationMs}ms`);
         res.status(200).type('json').send(responseBody);
         return;
       } catch (error) {

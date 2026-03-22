@@ -29,6 +29,14 @@ document.addEventListener('alpine:init', () => {
         strategySaving: false,
         routingPriority: 'account-first',
         routingSaving: false,
+
+        // Model mapping
+        modelMappingData: null,
+        modelMappingProviders: [],
+        modelMappingSaving: false,
+        testMappingInput: '',
+        testMappingResult: null,
+        testMappingResults: {},
         kiloModels: [],
         kiloModelsLoading: false,
 
@@ -133,6 +141,7 @@ document.addEventListener('alpine:init', () => {
             }
             if (tab === 'apikeys') this.loadApiKeys();
             if (tab === 'usage') this.loadUsageData();
+            if (tab === 'settings' && !this.modelMappingData) this.loadModelMappings();
         },
 
         async api(endpoint, options = {}) {
@@ -526,6 +535,75 @@ document.addEventListener('alpine:init', () => {
             } else {
                 this.showToast(data?.error || this.t('routingUpdateFailed'), 'error');
             }
+        },
+
+        // ─── Model Mapping ─────────────────────────────────────────────
+
+        async loadModelMappings() {
+            const { ok, data } = await this.api('/api/model-mappings');
+            if (ok && data) {
+                this.modelMappingData = data;
+                // Only show providers that have API keys configured
+                const allProviders = Object.keys(data.providers || {});
+                try {
+                    const keysResp = await this.api('/api/keys');
+                    const keys = keysResp.ok ? (Array.isArray(keysResp.data) ? keysResp.data : keysResp.data?.keys || []) : [];
+                    if (keys.length > 0) {
+                        const configuredTypes = new Set(keys.map(k => k.type));
+                        this.modelMappingProviders = allProviders.filter(p => configuredTypes.has(p));
+                    } else {
+                        this.modelMappingProviders = [];
+                    }
+                } catch {
+                    this.modelMappingProviders = [];
+                }
+            }
+        },
+
+        async updateModelMapping(provider, tier, model) {
+            this.modelMappingSaving = true;
+            const { ok, data } = await this.api(`/api/model-mappings/provider/${provider}`, {
+                method: 'PUT',
+                body: JSON.stringify({ [tier]: model })
+            });
+            this.modelMappingSaving = false;
+            if (ok && data?.providers) {
+                this.modelMappingData.providers = data.providers;
+                this.showToast(`${provider} ${tier} → ${model}`, 'success');
+                // Re-test if there's an active test
+                if (this.testMappingInput) this.testModelMapping();
+            } else {
+                this.showToast(data?.error || this.t('updateFailed'), 'error');
+            }
+        },
+
+        async resetModelMappings() {
+            const { ok, data } = await this.api('/api/model-mappings/reset', { method: 'POST' });
+            if (ok && data?.providers) {
+                this.modelMappingData.providers = data.providers;
+                this.showToast(this.t('modelMappingReset'), 'success');
+                if (this.testMappingInput) this.testModelMapping();
+            }
+        },
+
+        async testModelMapping() {
+            if (!this.testMappingInput.trim()) {
+                this.testMappingResult = null;
+                this.testMappingResults = {};
+                return;
+            }
+            // Test against all shown providers
+            const results = {};
+            let tier = null;
+            for (const provider of this.modelMappingProviders) {
+                const { ok, data } = await this.api(`/api/model-mappings/resolve?model=${encodeURIComponent(this.testMappingInput)}&provider=${encodeURIComponent(provider)}`);
+                if (ok && data) {
+                    results[provider] = data.resolved;
+                    if (!tier) tier = data.tier;
+                }
+            }
+            this.testMappingResult = tier ? { tier } : null;
+            this.testMappingResults = results;
         },
 
         async setClaudeCodeProxyTestConfig() {

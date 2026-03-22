@@ -20,6 +20,7 @@ import { handleGetClaudeConfig, handleSetProxyMode, handleSetDirectMode, handleS
 import { handleListApiKeys, handleAddApiKey, handleRemoveApiKey, handleUpdateApiKey, handleValidateApiKey, handleGetApiKeyStats } from './api-keys-route.js';
 import { handleGetUsageOverview, handleGetUsageHistory, handleGetDailyStats, handleGetMonthlyStats, handleGetProviderStats, handleGetModelStats } from './usage-route.js';
 import { handleGatewayChat, handleGatewayMessages, handleListProviders } from './gateway-route.js';
+import { handleGetModelMappings, handleSetProviderMapping, handleResetModelMappings, handleResolveModel } from './model-mapping-route.js';
 import { handleCodexResponses, handleCodexModels, handleCodexCatchAll } from './codex-route.js';
 import { handleSetCodexProxy, handleGetCodexConfig, handleSetCodexDirect } from './codex-config-route.js';
 import {
@@ -128,6 +129,12 @@ export function registerApiRoutes(app, { port }) {
   app.get('/api/usage/monthly', handleGetMonthlyStats);
   app.get('/api/usage/providers', handleGetProviderStats);
   app.get('/api/usage/models', handleGetModelStats);
+
+  // ─── Model Mapping ──────────────────────────────────────────────────────
+  app.get('/api/model-mappings', handleGetModelMappings);
+  app.put('/api/model-mappings/provider/:provider', handleSetProviderMapping);
+  app.post('/api/model-mappings/reset', handleResetModelMappings);
+  app.get('/api/model-mappings/resolve', handleResolveModel);
 
   // ─── API Gateway (proxy via API keys) ────────────────────────────────────
   app.post('/api/gateway/chat', handleGatewayChat);

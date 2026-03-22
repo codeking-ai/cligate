@@ -701,6 +701,119 @@
                         </div>
                     </div>
                 </div>
+
+                <!-- Model Mapping -->
+                <div class="view-card mt-6">
+                    <div class="flex items-center justify-between mb-4">
+                        <div class="flex items-center gap-2.5">
+                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" class="w-4 h-4 text-neon-green">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 21a4 4 0 01-4-4V5a2 2 0 012-2h4a2 2 0 012 2v12a4 4 0 01-4 4zm0 0h12a2 2 0 002-2v-4a2 2 0 00-2-2h-2.343M11 7.343l1.657-1.657a2 2 0 012.828 0l2.829 2.829a2 2 0 010 2.828l-8.486 8.485M7 17h.01"></path>
+                            </svg>
+                            <h3 class="text-xs font-mono text-gray-400 uppercase tracking-widest" x-text="t('modelMapping')"></h3>
+                        </div>
+                        <button class="btn btn-xs btn-outline text-gray-400 hover:text-white gap-1"
+                            @click="resetModelMappings()" :disabled="modelMappingSaving">
+                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" class="w-3 h-3">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+                            </svg>
+                            <span x-text="t('resetDefaults')"></span>
+                        </button>
+                    </div>
+                    <p class="text-xs text-gray-500 mb-4" x-text="t('modelMappingDesc')"></p>
+
+                    <template x-if="modelMappingData && modelMappingProviders.length === 0">
+                        <div class="text-center py-6">
+                            <p class="text-gray-500 text-sm" x-text="t('noProvidersConfigured')"></p>
+                            <button class="btn btn-xs btn-outline text-neon-purple mt-2" @click="setActiveTab('apikeys')" x-text="t('addApiKey')"></button>
+                        </div>
+                    </template>
+                    <template x-if="modelMappingData && modelMappingProviders.length > 0">
+                        <div>
+                            <!-- Tier × Provider table -->
+                            <div class="overflow-x-auto">
+                                <table class="w-full text-sm">
+                                    <thead>
+                                        <tr class="border-b border-space-border/30">
+                                            <th class="text-left py-2 px-2 text-xs font-mono text-gray-500 uppercase" x-text="t('tier')"></th>
+                                            <template x-for="provider in modelMappingProviders" :key="provider">
+                                                <th class="text-left py-2 px-2 text-xs font-mono uppercase"
+                                                    :class="{
+                                                        'text-neon-green': provider === 'gemini',
+                                                        'text-neon-cyan': provider === 'openai' || provider === 'azure-openai',
+                                                        'text-orange-400': provider === 'anthropic',
+                                                        'text-purple-400': provider === 'vertex-ai'
+                                                    }"
+                                                    x-text="provider"></th>
+                                            </template>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <template x-for="tier in modelMappingData.tierOrder" :key="tier">
+                                            <tr class="border-b border-space-border/20 hover:bg-space-800/30">
+                                                <td class="py-2 px-2">
+                                                    <div class="flex items-center gap-2">
+                                                        <span class="inline-flex items-center h-5 px-2 rounded text-[10px] font-mono font-bold"
+                                                            :class="{
+                                                                'bg-red-500/20 text-red-400': tier === 'flagship',
+                                                                'bg-blue-500/20 text-blue-400': tier === 'standard',
+                                                                'bg-green-500/20 text-green-400': tier === 'fast',
+                                                                'bg-yellow-500/20 text-yellow-400': tier === 'reasoning'
+                                                            }"
+                                                            x-text="tier"></span>
+                                                    </div>
+                                                    <div class="text-[10px] text-gray-600 mt-0.5" x-text="modelMappingData.tiers[tier]?.description"></div>
+                                                </td>
+                                                <template x-for="provider in modelMappingProviders" :key="provider + '-' + tier">
+                                                    <td class="py-2 px-2">
+                                                        <select class="select select-xs bg-space-800 border-space-border/30 text-white w-full max-w-[180px] font-mono text-xs"
+                                                            :value="modelMappingData.providers[provider]?.[tier] || ''"
+                                                            @change="updateModelMapping(provider, tier, $event.target.value)">
+                                                            <template x-for="m in (modelMappingData.providerModels[provider] || [])" :key="m">
+                                                                <option :value="m" x-text="m" :selected="m === modelMappingData.providers[provider]?.[tier]"></option>
+                                                            </template>
+                                                        </select>
+                                                    </td>
+                                                </template>
+                                            </tr>
+                                        </template>
+                                    </tbody>
+                                </table>
+                            </div>
+
+                            <!-- Test mapping -->
+                            <div class="mt-4 p-3 bg-space-800/50 rounded-lg border border-space-border/20">
+                                <div class="text-xs font-mono text-gray-500 mb-2" x-text="t('testMapping')"></div>
+                                <div class="flex flex-wrap items-center gap-2">
+                                    <input type="text" class="input input-xs bg-space-900 border-space-border/30 text-white font-mono w-40"
+                                        :placeholder="t('testMappingPlaceholder')"
+                                        x-model="testMappingInput"
+                                        @input.debounce.300ms="testModelMapping()">
+                                    <template x-if="testMappingResult">
+                                        <div class="flex items-center gap-2 text-xs font-mono">
+                                            <span class="inline-flex items-center h-5 px-2 rounded bg-space-700 text-gray-300" x-text="testMappingResult.tier"></span>
+                                            <span class="text-gray-500">&rarr;</span>
+                                            <template x-for="provider in modelMappingProviders" :key="'test-' + provider">
+                                                <span class="inline-flex items-center h-5 px-2 rounded bg-space-700"
+                                                    :class="{
+                                                        'text-neon-green': provider === 'gemini',
+                                                        'text-neon-cyan': provider === 'openai' || provider === 'azure-openai',
+                                                        'text-orange-400': provider === 'anthropic',
+                                                        'text-purple-400': provider === 'vertex-ai'
+                                                    }">
+                                                    <span x-text="provider + ': '"></span>
+                                                    <span x-text="testMappingResults[provider] || '—'"></span>
+                                                </span>
+                                            </template>
+                                        </div>
+                                    </template>
+                                </div>
+                            </div>
+                        </div>
+                    </template>
+                    <template x-if="!modelMappingData">
+                        <div class="text-center text-gray-500 text-sm py-4" x-text="t('loading')"></div>
+                    </template>
+                </div>
             </div>
 
             <!-- ─── API Keys View ────────────────────────────────────────── -->

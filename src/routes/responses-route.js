@@ -16,6 +16,7 @@ import { selectKey, recordUsage, recordError, recordRateLimit, hasKeysForTypes, 
 import { recordRequest } from '../usage-tracker.js';
 import zlib from 'zlib';
 import { sendResponsesSSE } from '../utils/responses-sse.js';
+import { resolveModel } from '../model-mapping.js';
 
 const UPSTREAM_URL = 'https://chatgpt.com/backend-api/codex/responses';
 const MAX_RETRIES = 5;
@@ -228,6 +229,14 @@ function _responsesToChatBody(parsed) {
 
     // Convert input array to messages
     if (Array.isArray(parsed.input)) {
+        // Build call_id → function name lookup for tool result messages
+        const callIdToName = {};
+        for (const item of parsed.input) {
+            if (item.type === 'function_call' && item.name) {
+                callIdToName[item.call_id || item.id || ''] = item.name;
+            }
+        }
+
         for (const item of parsed.input) {
             if (item.type === 'message') {
                 const role = item.role === 'developer' ? 'system' : item.role;
@@ -249,9 +258,11 @@ function _responsesToChatBody(parsed) {
                     }]
                 });
             } else if (item.type === 'function_call_output') {
+                const callId = item.call_id || item.id || '';
                 messages.push({
                     role: 'tool',
-                    tool_call_id: item.call_id || item.id || '',
+                    tool_call_id: callId,
+                    name: callIdToName[callId] || 'unknown',
                     content: item.output || ''
                 });
             }
@@ -343,8 +354,12 @@ async function _handleResponsesViaApiKey(res, parsed, modelId, isStreaming, keyT
             if (!provider) continue;
 
             try {
-                console.log(`[Codex Proxy] >>> API KEY fallback | ${type}/${provider.name} | model=${modelId}`);
-                const response = await provider.sendRequest(chatBody);
+                // Map model name to provider-native model
+                const mappedModel = resolveModel(type, modelId);
+                const mappedBody = { ...chatBody, model: mappedModel };
+                console.log(`[Codex Proxy] >>> API KEY fallback | ${type}/${provider.name} | ${modelId}→${mappedModel}`);
+
+                const response = await provider.sendRequest(mappedBody);
                 const durationMs = Date.now() - startTime;
 
                 if (response.status === 429) {
@@ -361,7 +376,7 @@ async function _handleResponsesViaApiKey(res, parsed, modelId, isStreaming, keyT
                 const responseBody = await response.text();
                 if (!response.ok) {
                     recordError(provider.id);
-                    recordRequest({ provider: type, keyId: provider.id, model: modelId, durationMs, success: false, error: responseBody.slice(0, 200) });
+                    recordRequest({ provider: type, keyId: provider.id, model: mappedModel, durationMs, success: false, error: responseBody.slice(0, 200) });
                     res.status(response.status).type('json').send(responseBody);
                     return;
                 }
@@ -375,9 +390,9 @@ async function _handleResponsesViaApiKey(res, parsed, modelId, isStreaming, keyT
 
                 const inputTokens = chatResponse.usage?.prompt_tokens || 0;
                 const outputTokens = chatResponse.usage?.completion_tokens || 0;
-                const cost = provider.estimateCost(modelId, inputTokens, outputTokens);
-                recordUsage(provider.id, { inputTokens, outputTokens, model: modelId });
-                recordRequest({ provider: type, keyId: provider.id, model: modelId, inputTokens, outputTokens, cost, durationMs, success: true });
+                const cost = provider.estimateCost(mappedModel, inputTokens, outputTokens);
+                recordUsage(provider.id, { inputTokens, outputTokens, model: mappedModel });
+                recordRequest({ provider: type, keyId: provider.id, model: mappedModel, inputTokens, outputTokens, cost, durationMs, success: true });
 
                 const responsesFormat = _chatToResponsesFormat(chatResponse, modelId);
                 console.log(`[Codex Proxy] <<< API KEY OK | ${type}/${provider.name} | model=${modelId} | ${durationMs}ms`);

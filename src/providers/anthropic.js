@@ -9,12 +9,16 @@ const DEFAULT_BASE_URL = 'https://api.anthropic.com';
 const API_VERSION = '2023-06-01';
 
 const PRICING = {
-    'claude-sonnet-4-5-20250514':  { input: 3.00, output: 15.00 },
+    'claude-opus-4-6':             { input: 15.00, output: 75.00 },
+    'claude-opus-4-6-20250219':    { input: 15.00, output: 75.00 },
+    'claude-sonnet-4-6':           { input: 3.00, output: 15.00 },
+    'claude-sonnet-4-6-20250219':  { input: 3.00, output: 15.00 },
+    'claude-opus-4-5':             { input: 15.00, output: 75.00 },
     'claude-opus-4-5-20250514':    { input: 15.00, output: 75.00 },
+    'claude-sonnet-4-5':           { input: 3.00, output: 15.00 },
+    'claude-sonnet-4-5-20250514':  { input: 3.00, output: 15.00 },
+    'claude-haiku-4-5':            { input: 0.80, output: 4.00 },
     'claude-haiku-4-5-20251001':   { input: 0.80, output: 4.00 },
-    'claude-3-5-sonnet-20241022':  { input: 3.00, output: 15.00 },
-    'claude-3-5-haiku-20241022':   { input: 0.80, output: 4.00 },
-    'claude-3-opus-20240229':      { input: 15.00, output: 75.00 },
 };
 
 // Aliases for convenience
@@ -22,6 +26,8 @@ const MODEL_ALIASES = {
     'claude-sonnet-4-5': 'claude-sonnet-4-5-20250514',
     'claude-opus-4-5': 'claude-opus-4-5-20250514',
     'claude-haiku-4-5': 'claude-haiku-4-5-20251001',
+    'claude-opus-4-6': 'claude-opus-4-6-20250219',
+    'claude-sonnet-4-6': 'claude-sonnet-4-6-20250219',
 };
 
 export class AnthropicProvider extends BaseProvider {

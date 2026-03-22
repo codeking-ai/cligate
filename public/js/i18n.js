@@ -154,6 +154,17 @@ const i18n = {
     claudeSettingsUpdated: 'Updated Claude Code settings.json (API URL + API key).',
     claudeSettingsFailed: 'Failed to update Claude Code settings.json',
 
+    // Model Mapping
+    modelMapping: 'Model Mapping',
+    modelMappingDesc: 'Map CLI model names to provider-native models via capability tiers. Works automatically with any CLI tool (Codex, Claude Code, etc.).',
+    tier: 'Tier',
+    resetDefaults: 'Reset',
+    testMapping: 'Test mapping:',
+    testMappingPlaceholder: 'e.g. gpt-5.4-mini',
+    modelMappingReset: 'Model mappings reset to defaults',
+    updateFailed: 'Update failed',
+    noProvidersConfigured: 'No API key providers configured. Add an API key first to configure model mappings.',
+
     // API Keys page
     apiKeys: 'API Keys',
     manageApiKeys: 'Manage API keys',
@@ -392,6 +403,17 @@ const i18n = {
 
     claudeSettingsUpdated: '已更新 Claude Code settings.json（API 地址 + API 密钥）。',
     claudeSettingsFailed: '更新 Claude Code settings.json 失败',
+
+    // Model Mapping
+    modelMapping: '模型映射',
+    modelMappingDesc: '通过能力分级自动将 CLI 模型名映射到各服务商原生模型。适用于任何 CLI 工具（Codex、Claude Code 等）。',
+    tier: '级别',
+    resetDefaults: '重置',
+    testMapping: '测试映射：',
+    testMappingPlaceholder: '例如 gpt-5.4-mini',
+    modelMappingReset: '模型映射已重置为默认值',
+    updateFailed: '更新失败',
+    noProvidersConfigured: '尚未配置 API 密钥供应商。请先添加 API 密钥以配置模型映射。',
 
     // API Keys page
     apiKeys: 'API 密钥',
