@@ -1,0 +1,104 @@
+/**
+ * Azure OpenAI Provider
+ * Forwards requests to Azure OpenAI Service endpoints.
+ *
+ * Required config:
+ *   - apiKey:          Azure API key
+ *   - baseUrl:         Resource endpoint, e.g. https://my-resource.openai.azure.com
+ *   - deploymentName:  The deployment name created in Azure portal
+ *   - apiVersion:      API version, e.g. 2024-10-21
+ */
+
+import { BaseProvider } from './base.js';
+
+const DEFAULT_API_VERSION = '2024-10-21';
+
+const PRICING = {
+    'gpt-4o':          { input: 2.50, output: 10.00 },
+    'gpt-4o-mini':     { input: 0.15, output: 0.60 },
+    'gpt-4-turbo':     { input: 10.00, output: 30.00 },
+    'gpt-4':           { input: 30.00, output: 60.00 },
+    'gpt-35-turbo':    { input: 0.50, output: 1.50 },
+    'gpt-3.5-turbo':   { input: 0.50, output: 1.50 },
+    'o1':              { input: 15.00, output: 60.00 },
+    'o1-mini':         { input: 3.00, output: 12.00 },
+    'o3':              { input: 10.00, output: 40.00 },
+    'o3-mini':         { input: 1.10, output: 4.40 },
+    'o4-mini':         { input: 1.10, output: 4.40 },
+};
+
+export class AzureOpenAIProvider extends BaseProvider {
+    constructor(config) {
+        super({
+            ...config,
+            type: 'azure-openai',
+            baseUrl: config.baseUrl || ''
+        });
+        this.deploymentName = config.deploymentName || '';
+        this.apiVersion = config.apiVersion || DEFAULT_API_VERSION;
+    }
+
+    /**
+     * Build the chat completions URL.
+     * Format: https://{resource}.openai.azure.com/openai/deployments/{deployment}/chat/completions?api-version={version}
+     */
+    _buildChatUrl() {
+        const base = this.baseUrl.replace(/\/+$/, '');
+        return `${base}/openai/deployments/${this.deploymentName}/chat/completions?api-version=${this.apiVersion}`;
+    }
+
+    async sendRequest(body) {
+        const url = this._buildChatUrl();
+        const response = await fetch(url, {
+            method: 'POST',
+            headers: {
+                'api-key': this.apiKey,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(body)
+        });
+        return response;
+    }
+
+    async validateKey() {
+        try {
+            const url = this._buildChatUrl();
+            const response = await fetch(url, {
+                method: 'POST',
+                headers: {
+                    'api-key': this.apiKey,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    max_tokens: 1,
+                    messages: [{ role: 'user', content: 'hi' }]
+                })
+            });
+            // 200 or 400 means key & deployment are valid; 401/403 means auth failed
+            return response.status !== 401 && response.status !== 403;
+        } catch {
+            return false;
+        }
+    }
+
+    estimateCost(model, inputTokens, outputTokens) {
+        const pricing = PRICING[model] || PRICING[this.deploymentName];
+        if (!pricing) return 0;
+        return (inputTokens / 1_000_000) * pricing.input +
+               (outputTokens / 1_000_000) * pricing.output;
+    }
+
+    toJSON() {
+        return {
+            ...super.toJSON(),
+            deploymentName: this.deploymentName,
+            apiVersion: this.apiVersion
+        };
+    }
+
+    static get pricing() {
+        return PRICING;
+    }
+}
+
+export default AzureOpenAIProvider;

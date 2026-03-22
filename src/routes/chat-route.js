@@ -10,6 +10,10 @@ import { resolveModelRouting } from '../model-mapper.js';
 import { getCredentialsOrError, sendAuthError } from '../middleware/credentials.js';
 import { handleStreamError } from '../middleware/sse.js';
 import { logger } from '../utils/logger.js';
+import { listAccounts } from '../account-manager.js';
+import { getServerSettings } from '../server-settings.js';
+import { selectKey, recordUsage, recordError, recordRateLimit } from '../api-key-manager.js';
+import { recordRequest } from '../usage-tracker.js';
 
 /**
  * POST /v1/chat/completions
@@ -23,35 +27,128 @@ export async function handleChatCompletion(req, res) {
 
   const { isKilo, kiloTarget, upstreamModel } = resolveModelRouting(requestedModel);
 
-  let creds = null;
-  if (!isKilo) {
-    creds = await getCredentialsOrError();
-    if (!creds) {
-      logger.response(401, { error: 'No active account' });
-      return sendAuthError(res, 'No active account. Add an account via /accounts/add');
+  // Kilo routing — unchanged
+  if (isKilo) {
+    const anthropicRequest = _buildAnthropicRequest(body, upstreamModel);
+    logger.request('POST', '/v1/chat/completions', { model: upstreamModel, account: 'kilo', messages: body.messages?.length || 0 });
+    try {
+      const response = await sendKiloMessage(anthropicRequest, kiloTarget);
+      const duration = Date.now() - startTime;
+      logger.response(200, { model: upstreamModel, tokens: response.usage?.output_tokens || 0, duration });
+      return res.json(_buildOpenAIResponse(response, requestedModel));
+    } catch (error) {
+      return handleStreamError(res, error, upstreamModel, startTime);
     }
   }
 
-  const anthropicRequest = _buildAnthropicRequest(body, upstreamModel);
+  const settings = getServerSettings();
+  const priority = settings.routingPriority || 'account-first';
+  const hasAccounts = listAccounts().total > 0;
+  // Try openai, azure-openai, gemini, vertex-ai keys for chat completions
+  const chatKeyTypes = ['openai', 'azure-openai', 'gemini', 'vertex-ai'];
+  const hasApiKeys = chatKeyTypes.some(t => !!selectKey(t));
 
-  logger.request('POST', '/v1/chat/completions', {
-    model: upstreamModel,
-    account: isKilo ? 'kilo' : creds.email,
-    messages: body.messages?.length || 0,
-    tools: body.tools?.length || 0
-  });
+  if (priority === 'apikey-first' && hasApiKeys) {
+    const result = await _handleChatViaApiKey(res, body, requestedModel, chatKeyTypes, startTime);
+    if (result !== false) return;
+    if (hasAccounts) return _handleChatViaAccountPool(res, body, requestedModel, upstreamModel, startTime);
+    return sendAuthError(res, 'No available API keys or accounts');
+  }
+
+  // account-first (default)
+  if (hasAccounts) {
+    const result = await _handleChatViaAccountPool(res, body, requestedModel, upstreamModel, startTime);
+    if (result !== false) return;
+  }
+  if (hasApiKeys) {
+    const result = await _handleChatViaApiKey(res, body, requestedModel, chatKeyTypes, startTime);
+    if (result !== false) return;
+  }
+
+  if (!hasAccounts && !hasApiKeys) {
+    return sendAuthError(res, 'No accounts or API keys configured. Add them in the dashboard.');
+  }
+  return handleStreamError(res, new Error('All accounts and API keys exhausted'), requestedModel, startTime);
+}
+
+/**
+ * Handle chat completion via API key pool.
+ */
+async function _handleChatViaApiKey(res, body, requestedModel, keyTypes, startTime) {
+  const MAX_KEY_RETRIES = 3;
+  for (let attempt = 0; attempt < MAX_KEY_RETRIES; attempt++) {
+    for (const type of keyTypes) {
+      const provider = selectKey(type);
+      if (!provider) continue;
+
+      try {
+        const response = await provider.sendRequest(body);
+        const durationMs = Date.now() - startTime;
+
+        if (response.status === 429) {
+          const retryAfter = response.headers?.get?.('retry-after');
+          recordRateLimit(provider.id, retryAfter ? parseInt(retryAfter) * 1000 : 60000);
+          logger.warn(`[Chat] API key rate limited: ${provider.name} (${type})`);
+          continue;
+        }
+        if (response.status === 401 || response.status === 403) {
+          recordError(provider.id);
+          continue;
+        }
+
+        const responseBody = await response.text();
+        if (!response.ok) {
+          recordError(provider.id);
+          recordRequest({ provider: type, keyId: provider.id, model: body.model, durationMs, success: false, error: responseBody.slice(0, 200) });
+          res.status(response.status).type('json').send(responseBody);
+          return;
+        }
+
+        let inputTokens = 0, outputTokens = 0;
+        try {
+          const parsed = JSON.parse(responseBody);
+          inputTokens = parsed.usage?.prompt_tokens || 0;
+          outputTokens = parsed.usage?.completion_tokens || 0;
+        } catch { /* ignore */ }
+
+        const cost = provider.estimateCost(body.model, inputTokens, outputTokens);
+        recordUsage(provider.id, { inputTokens, outputTokens, model: body.model });
+        recordRequest({ provider: type, keyId: provider.id, model: body.model, inputTokens, outputTokens, cost, durationMs, success: true });
+        logger.info(`[Chat] OK via API key | ${type}/${provider.name} | model=${body.model} | ${inputTokens}+${outputTokens} tokens | $${cost.toFixed(4)} | ${durationMs}ms`);
+        res.status(200).type('json').send(responseBody);
+        return;
+      } catch (error) {
+        recordError(provider.id);
+        recordRequest({ provider: type, keyId: provider.id, model: body.model, durationMs: Date.now() - startTime, success: false, error: error.message });
+        logger.error(`[Chat] API key error: ${provider.name} - ${error.message}`);
+        continue;
+      }
+    }
+  }
+  return false;
+}
+
+/**
+ * Handle chat completion via ChatGPT account pool (original logic).
+ */
+async function _handleChatViaAccountPool(res, body, requestedModel, upstreamModel, startTime) {
+  const creds = await getCredentialsOrError();
+  if (!creds) {
+    return false;
+  }
+
+  const anthropicRequest = _buildAnthropicRequest(body, upstreamModel);
+  logger.request('POST', '/v1/chat/completions', { model: upstreamModel, account: creds.email, messages: body.messages?.length || 0, tools: body.tools?.length || 0 });
 
   try {
-    const response = isKilo
-      ? await sendKiloMessage(anthropicRequest, kiloTarget)
-      : await sendMessage(anthropicRequest, creds.accessToken, creds.accountId);
-
+    const response = await sendMessage(anthropicRequest, creds.accessToken, creds.accountId);
     const duration = Date.now() - startTime;
     logger.response(200, { model: upstreamModel, tokens: response.usage?.output_tokens || 0, duration });
-
     res.json(_buildOpenAIResponse(response, requestedModel));
+    return;
   } catch (error) {
     handleStreamError(res, error, upstreamModel, startTime);
+    return;
   }
 }
 

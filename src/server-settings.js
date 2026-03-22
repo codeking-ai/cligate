@@ -6,7 +6,8 @@ const SETTINGS_FILE = join(CONFIG_DIR, 'settings.json');
 
 const DEFAULT_SETTINGS = {
     haikuKiloModel: 'minimax/minimax-m2.5:free',
-    accountStrategy: 'sticky'
+    accountStrategy: 'sticky',
+    routingPriority: 'account-first'   // 'account-first' | 'apikey-first'
 };
 
 function ensureConfigDir() {

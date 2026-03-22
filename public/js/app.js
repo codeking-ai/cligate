@@ -27,6 +27,8 @@ document.addEventListener('alpine:init', () => {
         accountStrategy: 'sticky',
         haikuModelSaving: false,
         strategySaving: false,
+        routingPriority: 'account-first',
+        routingSaving: false,
         kiloModels: [],
         kiloModelsLoading: false,
 
@@ -104,6 +106,7 @@ document.addEventListener('alpine:init', () => {
             this.startLogStream();
             this.loadHaikuModelSetting();
             this.loadAccountStrategySetting();
+            this.loadRoutingPrioritySetting();
             this.loadKiloModels();
 
             window.addEventListener('resize', () => {
@@ -128,6 +131,8 @@ document.addEventListener('alpine:init', () => {
             if (window.innerWidth < 1024) {
                 this.sidebarOpen = false;
             }
+            if (tab === 'apikeys') this.loadApiKeys();
+            if (tab === 'usage') this.loadUsageData();
         },
 
         async api(endpoint, options = {}) {
@@ -500,6 +505,29 @@ document.addEventListener('alpine:init', () => {
             }
         },
 
+        async loadRoutingPrioritySetting() {
+            const { ok, data } = await this.api('/settings/routing-priority');
+            if (ok && data?.routingPriority) {
+                this.routingPriority = data.routingPriority;
+            }
+        },
+
+        async setRoutingPriority(priority) {
+            if (this.routingSaving || this.routingPriority === priority) return;
+            this.routingSaving = true;
+            const { ok, data } = await this.api('/settings/routing-priority', {
+                method: 'POST',
+                body: JSON.stringify({ routingPriority: priority })
+            });
+            this.routingSaving = false;
+            if (ok && data?.routingPriority) {
+                this.routingPriority = data.routingPriority;
+                this.showToast(this.t('routingUpdated'), 'success');
+            } else {
+                this.showToast(data?.error || this.t('routingUpdateFailed'), 'error');
+            }
+        },
+
         async setClaudeCodeProxyTestConfig() {
             const { ok, data, error } = await this.api('/claude/config/set', {
                 method: 'POST',
@@ -557,7 +585,7 @@ document.addEventListener('alpine:init', () => {
         getLogDetails(message) {
             if (!message) return null;
             const details = {};
-            
+
             const patterns = [
                 ['model', /model=([^\s|,]+)/],
                 ['account', /account=([^\s|,]+)/],
@@ -569,15 +597,159 @@ document.addEventListener('alpine:init', () => {
                 ['status', /status=(\d+)/],
                 ['error', /error=([^\s|]+)/]
             ];
-            
+
             for (const [key, pattern] of patterns) {
                 const match = message.match(pattern);
                 if (match) {
                     details[key] = match[1];
                 }
             }
-            
+
             return Object.keys(details).length > 0 ? details : null;
+        },
+
+        // ─── API Keys Management ──────────────────────────────────────────
+        keyPlaceholders: {
+            'openai':       { name: 'My OpenAI Key',       key: 'sk-...',                           url: 'https://api.openai.com/v1' },
+            'anthropic':    { name: 'My Anthropic Key',    key: 'sk-ant-...',                       url: 'https://api.anthropic.com' },
+            'gemini':       { name: 'My Gemini Key',       key: 'AIza...',                          url: 'https://generativelanguage.googleapis.com/v1beta' },
+            'azure-openai': { name: 'My Azure OpenAI Key', key: 'xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx', url: 'https://{resource}.openai.azure.com' },
+            'vertex-ai':    { name: 'My Vertex AI Key',    key: 'ya29... or API key',               url: 'https://{region}-aiplatform.googleapis.com/v1/projects/{project}/locations/{region}/publishers/google/models' },
+        },
+        apiKeysList: [],
+        apiKeyStats: { totalKeys: 0, activeKeys: 0, totalRequests: 0, totalCost: 0 },
+        showAddKeyModal: false,
+        newKeyType: 'openai',
+        newKeyName: '',
+        newKeyValue: '',
+        newKeyBaseUrl: '',
+        newKeyExtra: { deploymentName: '', apiVersion: '2024-10-21', projectId: '', location: 'us-central1' },
+
+        async loadApiKeys() {
+            const { ok, data } = await this.api('/api/keys');
+            if (ok) {
+                this.apiKeysList = data.keys || [];
+                if (data.stats) {
+                    this.apiKeyStats = {
+                        totalKeys: data.stats.totalKeys || 0,
+                        activeKeys: data.stats.activeKeys || 0,
+                        totalRequests: data.stats.totalRequests || 0,
+                        totalCost: data.stats.totalCost || 0
+                    };
+                }
+            }
+        },
+
+        async submitAddKey() {
+            if (!this.newKeyValue.trim()) {
+                this.showToast(this.t('apiKeyRequired'), 'error');
+                return;
+            }
+            const type = this.newKeyType;
+            const body = {
+                type,
+                name: this.newKeyName.trim() || `${type}-key`,
+                apiKey: this.newKeyValue.trim()
+            };
+
+            if (type === 'azure-openai') {
+                if (!this.newKeyBaseUrl.trim()) {
+                    this.showToast(this.t('azureEndpointRequired'), 'error');
+                    return;
+                }
+                if (!this.newKeyExtra.deploymentName.trim()) {
+                    this.showToast(this.t('azureDeploymentRequired'), 'error');
+                    return;
+                }
+                body.baseUrl = this.newKeyBaseUrl.trim();
+                body.deploymentName = this.newKeyExtra.deploymentName.trim();
+                body.apiVersion = this.newKeyExtra.apiVersion.trim() || '2024-10-21';
+            } else if (type === 'vertex-ai') {
+                if (!this.newKeyExtra.projectId.trim()) {
+                    this.showToast(this.t('vertexProjectRequired'), 'error');
+                    return;
+                }
+                body.projectId = this.newKeyExtra.projectId.trim();
+                body.location = this.newKeyExtra.location.trim() || 'us-central1';
+            } else if (this.newKeyBaseUrl.trim()) {
+                body.baseUrl = this.newKeyBaseUrl.trim();
+            }
+
+            const { ok, data } = await this.api('/api/keys', {
+                method: 'POST',
+                body: JSON.stringify(body)
+            });
+            if (ok && data?.success) {
+                this.showToast(this.t('apiKeyAdded'), 'success');
+                this.showAddKeyModal = false;
+                this.newKeyType = 'openai';
+                this.newKeyName = '';
+                this.newKeyValue = '';
+                this.newKeyBaseUrl = '';
+                this.newKeyExtra = { deploymentName: '', apiVersion: '2024-10-21', projectId: '', location: 'us-central1' };
+                this.loadApiKeys();
+            } else {
+                this.showToast(data?.error || this.t('apiKeyAddFailed'), 'error');
+            }
+        },
+
+        async toggleApiKey(id, enabled) {
+            const { ok } = await this.api(`/api/keys/${id}`, {
+                method: 'PUT',
+                body: JSON.stringify({ enabled })
+            });
+            if (ok) {
+                this.loadApiKeys();
+            } else {
+                this.showToast(this.t('apiKeyUpdateFailed'), 'error');
+            }
+        },
+
+        async deleteApiKey(id) {
+            const { ok } = await this.api(`/api/keys/${id}`, { method: 'DELETE' });
+            if (ok) {
+                this.showToast(this.t('apiKeyDeleted'), 'success');
+                this.loadApiKeys();
+            } else {
+                this.showToast(this.t('apiKeyDeleteFailed'), 'error');
+            }
+        },
+
+        async validateApiKey(id) {
+            const { ok, data } = await this.api(`/api/keys/${id}/validate`, { method: 'POST' });
+            if (ok && data?.valid) {
+                this.showToast(this.t('apiKeyValid'), 'success');
+            } else {
+                this.showToast(data?.error || this.t('apiKeyInvalid'), 'error');
+            }
+            this.loadApiKeys();
+        },
+
+        // ─── Usage & Costs ────────────────────────────────────────────────
+        usageOverview: { today: {}, allTime: {}, keys: {} },
+        dailyStats: [],
+        usageHistory: [],
+
+        async loadUsageData() {
+            const [overviewRes, dailyRes, historyRes] = await Promise.all([
+                this.api('/api/usage/overview'),
+                this.api('/api/usage/daily?days=7'),
+                this.api('/api/usage/history?limit=50')
+            ]);
+            if (overviewRes.ok && overviewRes.data) {
+                this.usageOverview = overviewRes.data;
+            }
+            if (dailyRes.ok && dailyRes.data?.stats) {
+                this.dailyStats = dailyRes.data.stats;
+            }
+            if (historyRes.ok && historyRes.data?.history) {
+                this.usageHistory = historyRes.data.history;
+            }
+        },
+
+        async refreshUsageData() {
+            await this.loadUsageData();
+            this.showToast(this.t('usageRefreshed'), 'success');
         }
     }));
 });

@@ -12,6 +12,7 @@ import { getServerSettings, setServerSettings } from '../server-settings.js';
 import { fetchFreeModels } from '../kilo-models.js';
 
 const VALID_STRATEGIES = ['sticky', 'round-robin'];
+const VALID_ROUTING = ['account-first', 'apikey-first'];
 
 /**
  * GET /settings/haiku-model
@@ -104,10 +105,37 @@ export function handleSetAccountStrategy(req, res) {
   res.json({ success: true, accountStrategy: settings.accountStrategy });
 }
 
-export default { 
-  handleGetHaikuModel, 
+/**
+ * GET /settings/routing-priority
+ */
+export function handleGetRoutingPriority(req, res) {
+  const settings = getServerSettings();
+  res.json({ success: true, routingPriority: settings.routingPriority });
+}
+
+/**
+ * POST /settings/routing-priority
+ */
+export function handleSetRoutingPriority(req, res) {
+  const { routingPriority } = req.body || {};
+
+  if (!VALID_ROUTING.includes(routingPriority)) {
+    return res.status(400).json({
+      success: false,
+      error: `Invalid routingPriority. Use one of: ${VALID_ROUTING.join(', ')}`
+    });
+  }
+
+  const settings = setServerSettings({ routingPriority });
+  res.json({ success: true, routingPriority: settings.routingPriority });
+}
+
+export default {
+  handleGetHaikuModel,
   handleSetHaikuModel,
   handleGetKiloModels,
   handleGetAccountStrategy,
-  handleSetAccountStrategy
+  handleSetAccountStrategy,
+  handleGetRoutingPriority,
+  handleSetRoutingPriority
 };

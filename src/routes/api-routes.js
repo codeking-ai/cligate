@@ -14,9 +14,12 @@ import { getStatus, ACCOUNTS_FILE } from '../account-manager.js';
 import { handleMessages } from './messages-route.js';
 import { handleChatCompletion, handleCountTokens } from './chat-route.js';
 import { handleListModels, handleAccountModels, handleAccountUsage } from './models-route.js';
-import { handleGetHaikuModel, handleSetHaikuModel, handleGetKiloModels, handleGetAccountStrategy, handleSetAccountStrategy } from './settings-route.js';
+import { handleGetHaikuModel, handleSetHaikuModel, handleGetKiloModels, handleGetAccountStrategy, handleSetAccountStrategy, handleGetRoutingPriority, handleSetRoutingPriority } from './settings-route.js';
 import { handleGetLogs, handleStreamLogs } from './logs-route.js';
 import { handleGetClaudeConfig, handleSetProxyMode, handleSetDirectMode, handleSetClaudeApiEndpoint } from './claude-config-route.js';
+import { handleListApiKeys, handleAddApiKey, handleRemoveApiKey, handleUpdateApiKey, handleValidateApiKey, handleGetApiKeyStats } from './api-keys-route.js';
+import { handleGetUsageOverview, handleGetUsageHistory, handleGetDailyStats, handleGetMonthlyStats, handleGetProviderStats, handleGetModelStats } from './usage-route.js';
+import { handleGatewayChat, handleGatewayMessages, handleListProviders } from './gateway-route.js';
 import { handleCodexResponses, handleCodexModels, handleCodexCatchAll } from './codex-route.js';
 import { handleSetCodexProxy, handleGetCodexConfig, handleSetCodexDirect } from './codex-config-route.js';
 import {
@@ -65,6 +68,8 @@ export function registerApiRoutes(app, { port }) {
   app.get('/settings/kilo-models', handleGetKiloModels);
   app.get('/settings/account-strategy', handleGetAccountStrategy);
   app.post('/settings/account-strategy', handleSetAccountStrategy);
+  app.get('/settings/routing-priority', handleGetRoutingPriority);
+  app.post('/settings/routing-priority', handleSetRoutingPriority);
 
   // ─── Account Management ───────────────────────────────────────────────────
   app.get('/accounts', handleListAccounts);
@@ -107,6 +112,27 @@ export function registerApiRoutes(app, { port }) {
   // ─── Logs ──────────────────────────────────────────────────────────────────
   app.get('/api/logs', handleGetLogs);
   app.get('/api/logs/stream', handleStreamLogs);
+
+  // ─── API Key Management ──────────────────────────────────────────────────
+  app.get('/api/keys', handleListApiKeys);
+  app.post('/api/keys', handleAddApiKey);
+  app.put('/api/keys/:id', handleUpdateApiKey);
+  app.delete('/api/keys/:id', handleRemoveApiKey);
+  app.post('/api/keys/:id/validate', handleValidateApiKey);
+  app.get('/api/keys/stats', handleGetApiKeyStats);
+
+  // ─── Usage & Analytics ───────────────────────────────────────────────────
+  app.get('/api/usage/overview', handleGetUsageOverview);
+  app.get('/api/usage/history', handleGetUsageHistory);
+  app.get('/api/usage/daily', handleGetDailyStats);
+  app.get('/api/usage/monthly', handleGetMonthlyStats);
+  app.get('/api/usage/providers', handleGetProviderStats);
+  app.get('/api/usage/models', handleGetModelStats);
+
+  // ─── API Gateway (proxy via API keys) ────────────────────────────────────
+  app.post('/api/gateway/chat', handleGatewayChat);
+  app.post('/api/gateway/messages', handleGatewayMessages);
+  app.get('/api/gateway/providers', handleListProviders);
 }
 
 export default { registerApiRoutes };
