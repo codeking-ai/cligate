@@ -17,6 +17,7 @@ import { selectKey, recordUsage, recordError, recordRateLimit, hasKeysForTypes, 
 import { recordRequest } from '../usage-tracker.js';
 import { sendResponsesSSE } from '../utils/responses-sse.js';
 import { resolveModel } from '../model-mapping.js';
+import { logRequest } from '../request-logger.js';
 
 const UPSTREAM_BASE = 'https://chatgpt.com/backend-api';
 const MAX_RETRIES = 5;
@@ -314,6 +315,7 @@ async function _handleCodexViaApiKey(res, body, modelId, isStreaming, keyTypes, 
                 if (!response.ok) {
                     recordError(provider.id);
                     recordRequest({ provider: type, keyId: provider.id, model: mappedModel, durationMs, success: false, error: responseBody.slice(0, 200) });
+                    logRequest({ route: '/backend-api/codex/responses', provider: type, keyId: provider.id, model: modelId, mappedModel, requestBody: body, responseBody, durationMs, status: response.status, success: false, error: responseBody.slice(0, 200) });
                     logger.warn(`[Codex] API key error ${response.status}: ${provider.name} - ${responseBody.slice(0, 200)}`);
                     continue;
                 }
@@ -329,6 +331,7 @@ async function _handleCodexViaApiKey(res, body, modelId, isStreaming, keyTypes, 
                 const cost = provider.estimateCost(mappedModel, inputTokens, outputTokens);
                 recordUsage(provider.id, { inputTokens, outputTokens, model: mappedModel });
                 recordRequest({ provider: type, keyId: provider.id, model: mappedModel, inputTokens, outputTokens, cost, durationMs, success: true });
+                logRequest({ route: '/backend-api/codex/responses', provider: type, keyId: provider.id, model: modelId, mappedModel, requestBody: body, responseBody, inputTokens, outputTokens, cost, durationMs, status: 200, success: true });
 
                 const codexResponse = _chatToCodexResponse(chatResponse, modelId);
                 console.log(`[Codex Proxy] <<< API KEY OK | ${type}/${provider.name} | ${modelId}→${mappedModel} | ${durationMs}ms`);

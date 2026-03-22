@@ -186,6 +186,8 @@ const i18n = {
     baseUrlOptional: 'Base URL (optional)',
     enabled: 'Enabled',
     disabled: 'Disabled',
+    actionEnable: 'Enable',
+    actionDisable: 'Disable',
     validate: 'Validate',
     validKey: 'Valid',
     invalidKey: 'Invalid',
@@ -246,6 +248,20 @@ const i18n = {
     duration: 'Duration',
     successLabel: 'Success',
     failedLabel: 'Failed',
+
+    // Request Logs
+    requestLogs: 'Request Logs',
+    requestLogsDesc: 'Request & Response History',
+    allProviders: 'All Providers',
+    errorsOnly: 'Errors Only',
+    records: 'records',
+    requestBody: 'Request Body',
+    responseBody: 'Response Body',
+    noRequestLogs: 'No request logs found',
+    prev: 'Prev',
+    next: 'Next',
+    requestLoggingEnabled: 'Request logging enabled',
+    requestLoggingDisabled: 'Request logging disabled',
 
     // Language
     langLabel: 'EN',
@@ -438,6 +454,8 @@ const i18n = {
     baseUrlOptional: '基础 URL（可选）',
     enabled: '已启用',
     disabled: '已禁用',
+    actionEnable: '启用',
+    actionDisable: '禁用',
     validate: '验证',
     validKey: '有效',
     invalidKey: '无效',
@@ -500,6 +518,20 @@ const i18n = {
     failedLabel: '失败',
 
     // Language
+    // Request Logs
+    requestLogs: '请求日志',
+    requestLogsDesc: '请求与响应记录',
+    allProviders: '全部供应商',
+    errorsOnly: '仅错误',
+    records: '条记录',
+    requestBody: '请求内容',
+    responseBody: '响应内容',
+    noRequestLogs: '暂无请求日志',
+    prev: '上一页',
+    next: '下一页',
+    requestLoggingEnabled: '请求日志已启用',
+    requestLoggingDisabled: '请求日志已禁用',
+
     langLabel: '中文',
   }
 };

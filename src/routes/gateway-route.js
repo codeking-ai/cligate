@@ -10,6 +10,7 @@
 import { selectKey, recordUsage, recordError, recordRateLimit } from '../api-key-manager.js';
 import { recordRequest } from '../usage-tracker.js';
 import { logger } from '../utils/logger.js';
+import { logRequest } from '../request-logger.js';
 
 const MAX_RETRIES = 3;
 
@@ -76,6 +77,7 @@ export async function handleGatewayChat(req, res) {
                     provider: type, keyId: provider.id, model: body.model,
                     inputTokens, outputTokens, cost, durationMs, success: true
                 });
+                logRequest({ route: '/api/gateway/chat', provider: type, keyId: provider.id, model: body.model, requestBody: body, responseBody, inputTokens, outputTokens, cost, durationMs, status: 200, success: true });
 
                 logger.info(`[Gateway] OK | ${type}/${provider.name} | model=${body.model} | ${inputTokens}+${outputTokens} tokens | $${cost.toFixed(4)} | ${durationMs}ms`);
                 return res.status(200).type('json').send(responseBody);
@@ -154,6 +156,7 @@ export async function handleGatewayMessages(req, res) {
             provider: 'anthropic', keyId: provider.id, model: body.model,
             inputTokens, outputTokens, cost, durationMs, success: true
         });
+        logRequest({ route: '/api/gateway/messages', provider: 'anthropic', keyId: provider.id, model: body.model, requestBody: body, responseBody, inputTokens, outputTokens, cost, durationMs, status: 200, success: true });
 
         logger.info(`[Gateway] OK | anthropic/${provider.name} | model=${body.model} | ${inputTokens}+${outputTokens} tokens | $${cost.toFixed(4)} | ${durationMs}ms`);
         return res.status(200).type('json').send(responseBody);

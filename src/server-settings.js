@@ -7,7 +7,9 @@ const SETTINGS_FILE = join(CONFIG_DIR, 'settings.json');
 const DEFAULT_SETTINGS = {
     haikuKiloModel: 'minimax/minimax-m2.5:free',
     accountStrategy: 'sticky',
-    routingPriority: 'account-first'   // 'account-first' | 'apikey-first'
+    routingPriority: 'account-first',   // 'account-first' | 'apikey-first'
+    enableRequestLogging: true,          // Log full request/response content
+    requestLogRetentionDays: 7           // Days to keep request logs
 };
 
 function ensureConfigDir() {

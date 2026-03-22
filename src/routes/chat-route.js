@@ -15,6 +15,7 @@ import { getServerSettings } from '../server-settings.js';
 import { selectKey, recordUsage, recordError, recordRateLimit, hasKeysForTypes, getKeyRateLimitInfo } from '../api-key-manager.js';
 import { recordRequest } from '../usage-tracker.js';
 import { resolveModel } from '../model-mapping.js';
+import { logRequest } from '../request-logger.js';
 
 /**
  * POST /v1/chat/completions
@@ -112,6 +113,7 @@ async function _handleChatViaApiKey(res, body, requestedModel, keyTypes, startTi
         if (!response.ok) {
           recordError(provider.id);
           recordRequest({ provider: type, keyId: provider.id, model: mappedModel, durationMs, success: false, error: responseBody.slice(0, 200) });
+          logRequest({ route: '/v1/chat/completions', provider: type, keyId: provider.id, model: body.model, mappedModel, requestBody: body, responseBody, durationMs, status: response.status, success: false, error: responseBody.slice(0, 200) });
           logger.warn(`[Chat] API key error ${response.status}: ${provider.name} - ${responseBody.slice(0, 200)}`);
           continue;
         }
@@ -126,6 +128,7 @@ async function _handleChatViaApiKey(res, body, requestedModel, keyTypes, startTi
         const cost = provider.estimateCost(mappedModel, inputTokens, outputTokens);
         recordUsage(provider.id, { inputTokens, outputTokens, model: mappedModel });
         recordRequest({ provider: type, keyId: provider.id, model: mappedModel, inputTokens, outputTokens, cost, durationMs, success: true });
+        logRequest({ route: '/v1/chat/completions', provider: type, keyId: provider.id, model: body.model, mappedModel, requestBody: body, responseBody, inputTokens, outputTokens, cost, durationMs, status: 200, success: true });
         logger.info(`[Chat] OK via API key | ${type}/${provider.name} | ${body.model}→${mappedModel} | ${inputTokens}+${outputTokens} tokens | $${cost.toFixed(4)} | ${durationMs}ms`);
         res.status(200).type('json').send(responseBody);
         return;

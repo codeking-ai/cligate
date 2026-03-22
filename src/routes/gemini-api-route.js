@@ -11,6 +11,7 @@ import { selectKey, recordRateLimit, recordError, recordUsage, hasKeysForTypes }
 import { resolveModel } from '../model-mapping.js';
 import { logger } from '../utils/logger.js';
 import { recordRequest as recordUsageRequest } from '../usage-tracker.js';
+import { logRequest } from '../request-logger.js';
 
 const DEFAULT_GEMINI_BASE = 'https://generativelanguage.googleapis.com/v1beta';
 

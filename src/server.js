@@ -9,10 +9,16 @@ import cors from 'cors';
 import { ensureAccountsPersist, startAutoRefresh } from './account-manager.js';
 import { registerApiRoutes } from './routes/api-routes.js';
 import { handleResponses } from './routes/responses-route.js';
+import { setRequestLoggingEnabled } from './request-logger.js';
+import { getServerSettings } from './server-settings.js';
 
 export function createServer({ port }) {
   ensureAccountsPersist();
   startAutoRefresh();
+
+  // Sync request logging state from persisted settings
+  const settings = getServerSettings();
+  setRequestLoggingEnabled(settings.enableRequestLogging !== false);
 
   const app = express();
   app.disable('x-powered-by');

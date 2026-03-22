@@ -17,6 +17,7 @@ import { recordRequest } from '../usage-tracker.js';
 import zlib from 'zlib';
 import { sendResponsesSSE } from '../utils/responses-sse.js';
 import { resolveModel } from '../model-mapping.js';
+import { logRequest } from '../request-logger.js';
 
 const UPSTREAM_URL = 'https://chatgpt.com/backend-api/codex/responses';
 const MAX_RETRIES = 5;
@@ -377,6 +378,7 @@ async function _handleResponsesViaApiKey(res, parsed, modelId, isStreaming, keyT
                 if (!response.ok) {
                     recordError(provider.id);
                     recordRequest({ provider: type, keyId: provider.id, model: mappedModel, durationMs, success: false, error: responseBody.slice(0, 200) });
+                    logRequest({ route: '/responses', provider: type, keyId: provider.id, model: modelId, mappedModel, requestBody: parsed, responseBody, durationMs, status: response.status, success: false, error: responseBody.slice(0, 200) });
                     logger.warn(`[Codex Proxy] API key error ${response.status}: ${provider.name} - ${responseBody.slice(0, 200)}`);
                     continue; // Try next provider instead of returning error
                 }
@@ -393,6 +395,7 @@ async function _handleResponsesViaApiKey(res, parsed, modelId, isStreaming, keyT
                 const cost = provider.estimateCost(mappedModel, inputTokens, outputTokens);
                 recordUsage(provider.id, { inputTokens, outputTokens, model: mappedModel });
                 recordRequest({ provider: type, keyId: provider.id, model: mappedModel, inputTokens, outputTokens, cost, durationMs, success: true });
+                logRequest({ route: '/responses', provider: type, keyId: provider.id, model: modelId, mappedModel, requestBody: parsed, responseBody, inputTokens, outputTokens, cost, durationMs, status: 200, success: true });
 
                 const responsesFormat = _chatToResponsesFormat(chatResponse, modelId);
                 console.log(`[Codex Proxy] <<< API KEY OK | ${type}/${provider.name} | model=${modelId} | ${durationMs}ms`);

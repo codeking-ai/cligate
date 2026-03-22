@@ -828,6 +828,67 @@ document.addEventListener('alpine:init', () => {
         async refreshUsageData() {
             await this.loadUsageData();
             this.showToast(this.t('usageRefreshed'), 'success');
+        },
+
+        // ─── Request Logs ──────────────────────────────────────────────────
+        reqLogEntries: [],
+        reqLogDates: [],
+        reqLogTotal: 0,
+        reqLogOffset: 0,
+        reqLogFilter: { date: '', provider: '', errorsOnly: false },
+        reqLogSettings: { enabled: true, retentionDays: 7 },
+
+        async loadRequestLogs() {
+            // Load dates first if empty
+            if (this.reqLogDates.length === 0) {
+                const datesRes = await this.api('/api/request-logs/dates');
+                if (datesRes.ok && datesRes.data?.dates) {
+                    this.reqLogDates = datesRes.data.dates;
+                    if (!this.reqLogFilter.date && this.reqLogDates.length > 0) {
+                        this.reqLogFilter.date = this.reqLogDates[0];
+                    }
+                }
+            }
+            // Load settings
+            const settingsRes = await this.api('/api/request-logs/settings');
+            if (settingsRes.ok && settingsRes.data) {
+                this.reqLogSettings = settingsRes.data;
+            }
+
+            const params = new URLSearchParams();
+            if (this.reqLogFilter.date) params.set('date', this.reqLogFilter.date);
+            params.set('limit', '50');
+            params.set('offset', String(this.reqLogOffset));
+            if (this.reqLogFilter.provider) params.set('provider', this.reqLogFilter.provider);
+            if (this.reqLogFilter.errorsOnly) params.set('errorsOnly', 'true');
+
+            const res = await this.api(`/api/request-logs?${params}`);
+            if (res.ok && res.data) {
+                this.reqLogEntries = (res.data.entries || []).map(e => ({ ...e, _expanded: false }));
+                this.reqLogTotal = res.data.total || 0;
+            }
+        },
+
+        async toggleRequestLogging(enabled) {
+            const res = await this.api('/api/request-logs/settings', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ enabled })
+            });
+            if (res.ok && res.data) {
+                this.reqLogSettings = res.data;
+                this.showToast(enabled ? this.t('requestLoggingEnabled') : this.t('requestLoggingDisabled'), 'success');
+            }
+        },
+
+        formatLogBody(body) {
+            if (!body) return '';
+            try {
+                const parsed = JSON.parse(body);
+                return JSON.stringify(parsed, null, 2);
+            } catch {
+                return body;
+            }
         }
     }));
 });

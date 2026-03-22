@@ -9,6 +9,7 @@ import { listAccounts, getActiveAccount, save } from '../account-manager.js';
 import { getServerSettings } from '../server-settings.js';
 import { selectKey, recordUsage, recordError, recordRateLimit } from '../api-key-manager.js';
 import { recordRequest } from '../usage-tracker.js';
+import { logRequest } from '../request-logger.js';
 
 const MAX_RETRIES = 5;
 const MAX_WAIT_BEFORE_ERROR_MS = 120000;
@@ -109,6 +110,7 @@ async function _handleViaApiKey(req, res, body, requestedModel, startTime) {
             if (!response.ok) {
                 recordError(provider.id);
                 recordRequest({ provider: 'anthropic', keyId: provider.id, model: body.model, durationMs, success: false, error: responseBody.slice(0, 200) });
+                logRequest({ route: '/v1/messages', provider: 'anthropic', keyId: provider.id, model: body.model, requestBody: body, responseBody, durationMs, status: response.status, success: false, error: responseBody.slice(0, 200) });
                 logger.warn(`[Messages] API key error ${response.status}: ${provider.name} - ${responseBody.slice(0, 200)}`);
                 continue;
             }
@@ -123,6 +125,7 @@ async function _handleViaApiKey(req, res, body, requestedModel, startTime) {
             const cost = provider.estimateCost(body.model, inputTokens, outputTokens);
             recordUsage(provider.id, { inputTokens, outputTokens, model: body.model });
             recordRequest({ provider: 'anthropic', keyId: provider.id, model: body.model, inputTokens, outputTokens, cost, durationMs, success: true });
+            logRequest({ route: '/v1/messages', provider: 'anthropic', keyId: provider.id, model: body.model, requestBody: body, responseBody, inputTokens, outputTokens, cost, durationMs, status: 200, success: true });
             logger.info(`[Messages] OK via API key | ${provider.name} | model=${body.model} | ${inputTokens}+${outputTokens} tokens | $${cost.toFixed(4)} | ${durationMs}ms`);
             res.status(200).type('json').send(responseBody);
             return;

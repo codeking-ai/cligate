@@ -25,6 +25,7 @@ import { handleCodexResponses, handleCodexModels, handleCodexCatchAll } from './
 import { handleSetCodexProxy, handleGetCodexConfig, handleSetCodexDirect } from './codex-config-route.js';
 import { handleGeminiApiProxy } from './gemini-api-route.js';
 import { handleGetGeminiCliConfig, handleSetGeminiCliProxy, handleSetGeminiCliDirect } from './gemini-config-route.js';
+import { handleGetRequestLogs, handleGetLogDates, handleGetLogSettings, handleUpdateLogSettings } from './request-logs-route.js';
 import {
   handleListAccounts,
   handleAccountStatus,
@@ -147,6 +148,12 @@ export function registerApiRoutes(app, { port }) {
   app.put('/api/model-mappings/provider/:provider', handleSetProviderMapping);
   app.post('/api/model-mappings/reset', handleResetModelMappings);
   app.get('/api/model-mappings/resolve', handleResolveModel);
+
+  // ─── Request Logs ─────────────────────────────────────────────────────────
+  app.get('/api/request-logs', handleGetRequestLogs);
+  app.get('/api/request-logs/dates', handleGetLogDates);
+  app.get('/api/request-logs/settings', handleGetLogSettings);
+  app.put('/api/request-logs/settings', handleUpdateLogSettings);
 
   // ─── API Gateway (proxy via API keys) ────────────────────────────────────
   app.post('/api/gateway/chat', handleGatewayChat);

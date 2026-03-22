@@ -9,15 +9,15 @@ const DEFAULT_BASE_URL = 'https://api.openai.com/v1';
 
 // Pricing per 1M tokens (USD) — approximate, updated as needed
 const PRICING = {
-    'gpt-5.4':         { input: 2.50, output: 10.00 },
-    'gpt-5.4-pro':     { input: 10.00, output: 40.00 },
-    'gpt-5.4-mini':    { input: 0.30, output: 1.25 },
-    'gpt-5.4-nano':    { input: 0.10, output: 0.40 },
+    'gpt-5.4':         { input: 2.50, output: 15.00 },
+    'gpt-5.4-pro':     { input: 30.00, output: 180.00 },
+    'gpt-5.4-mini':    { input: 0.75, output: 4.50 },
+    'gpt-5.4-nano':    { input: 0.20, output: 1.25 },
     'gpt-5.3-codex':   { input: 2.50, output: 10.00 },
-    'gpt-5.2':         { input: 2.00, output: 8.00 },
+    'gpt-5.2':         { input: 1.75, output: 14.00 },
     'gpt-4o':          { input: 2.50, output: 10.00 },
     'gpt-4o-mini':     { input: 0.15, output: 0.60 },
-    'o3':              { input: 10.00, output: 40.00 },
+    'o3':              { input: 2.00, output: 8.00 },
     'o3-pro':          { input: 20.00, output: 80.00 },
     'o4-mini':         { input: 1.10, output: 4.40 },
 };

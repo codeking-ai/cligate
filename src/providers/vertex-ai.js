@@ -24,12 +24,12 @@ const PRICING = {
     'gemini-3-flash-preview':        { input: 0.50, output: 3.00 },
     'gemini-3.1-flash-lite-preview': { input: 0.25, output: 1.50 },
     'gemini-2.5-pro':                { input: 1.25, output: 10.00 },
-    'gemini-2.5-flash':              { input: 0.15, output: 0.60 },
+    'gemini-2.5-flash':              { input: 0.30, output: 2.50 },
     'gemini-2.0-flash':              { input: 0.10, output: 0.40 },
-    'claude-opus-4-6':               { input: 15.00, output: 75.00 },
+    'claude-opus-4-6':               { input: 5.00, output: 25.00 },
     'claude-sonnet-4-6':             { input: 3.00, output: 15.00 },
     'claude-sonnet-4-5':             { input: 3.00, output: 15.00 },
-    'claude-haiku-4-5':              { input: 0.80, output: 4.00 },
+    'claude-haiku-4-5':              { input: 1.00, output: 5.00 },
 };
 
 const DEFAULT_MODEL = 'gemini-3-flash-preview';
