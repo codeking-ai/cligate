@@ -42,6 +42,20 @@ import {
   handleGetAllQuotas
 } from './accounts-route.js';
 
+import {
+  handleListClaudeAccounts,
+  handleClaudeAccountStatus,
+  handleClaudeOAuthCleanup,
+  handleAddClaudeAccount,
+  handleAddClaudeAccountManual,
+  handleSwitchClaudeAccount,
+  handleRefreshClaudeAccount,
+  handleRefreshAllClaudeAccounts,
+  handleRefreshActiveClaudeAccount,
+  handleRemoveClaudeAccount,
+  handleImportClaudeAccount
+} from './claude-accounts-route.js';
+
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 export function registerApiRoutes(app, { port }) {
@@ -91,6 +105,21 @@ export function registerApiRoutes(app, { port }) {
   app.post('/accounts/:email/refresh', handleRefreshAccount);
 
   app.delete('/accounts/:email', handleRemoveAccount);
+
+  // ─── Claude Account Management ────────────────────────────────────────────
+  app.get('/claude-accounts', handleListClaudeAccounts);
+  app.get('/claude-accounts/status', handleClaudeAccountStatus);
+
+  app.post('/claude-accounts/add', handleAddClaudeAccount);
+  app.post('/claude-accounts/add/manual', handleAddClaudeAccountManual);
+  app.post('/claude-accounts/switch', handleSwitchClaudeAccount);
+  app.post('/claude-accounts/import', handleImportClaudeAccount);
+  app.post('/claude-accounts/refresh', handleRefreshActiveClaudeAccount);
+  app.post('/claude-accounts/refresh/all', handleRefreshAllClaudeAccounts);
+  app.post('/claude-accounts/oauth/cleanup', handleClaudeOAuthCleanup);
+  app.post('/claude-accounts/:email/refresh', handleRefreshClaudeAccount);
+
+  app.delete('/claude-accounts/:email', handleRemoveClaudeAccount);
 
   // ─── Claude CLI Configuration ──────────────────────────────────────────────
   app.get('/claude/config', handleGetClaudeConfig);

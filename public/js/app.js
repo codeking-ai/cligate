@@ -28,8 +28,12 @@ document.addEventListener('alpine:init', () => {
         },
         
         accounts: [],
-        searchQuery: '',
+        accountSubTab: 'chatgpt',
+        accountSearchQuery: '',
         stats: { total: 0, active: 0, expired: 0, planType: '-' },
+
+        // Claude accounts
+        claudeAccounts: [],
 
         haikuKiloModel: 'minimax/minimax-m2.5:free',
         accountStrategy: 'sticky',
@@ -108,9 +112,15 @@ document.addEventListener('alpine:init', () => {
         },
 
         get filteredAccounts() {
-            if (!this.searchQuery) return this.accounts;
-            const q = this.searchQuery.toLowerCase();
+            if (!this.accountSearchQuery) return this.accounts;
+            const q = this.accountSearchQuery.toLowerCase();
             return this.accounts.filter(a => a.email.toLowerCase().includes(q));
+        },
+
+        get filteredClaudeAccounts() {
+            if (!this.accountSearchQuery) return this.claudeAccounts;
+            const q = this.accountSearchQuery.toLowerCase();
+            return this.claudeAccounts.filter(a => a.email.toLowerCase().includes(q) || (a.displayName || '').toLowerCase().includes(q));
         },
 
         init() {
@@ -119,6 +129,7 @@ document.addEventListener('alpine:init', () => {
             this.updateTime();
             setInterval(() => this.updateTime(), 1000);
             this.refreshAccounts();
+            this.refreshClaudeAccounts();
             this.checkHealth();
             setInterval(() => this.checkHealth(), 30000);
             this.startLogStream();
@@ -137,6 +148,10 @@ document.addEventListener('alpine:init', () => {
                     this.showAddModal = false;
                     this.refreshAccounts();
                 }
+                if (event.data && event.data.type === 'claude-oauth-success') {
+                    this.showToast('Claude account added!', 'success');
+                    this.refreshClaudeAccounts();
+                }
             });
         },
 
@@ -149,6 +164,7 @@ document.addEventListener('alpine:init', () => {
             if (window.innerWidth < 1024) {
                 this.sidebarOpen = false;
             }
+            if (tab === 'accounts') { this.refreshAccounts(); this.refreshClaudeAccounts(); }
             if (tab === 'apikeys') this.loadApiKeys();
             if (tab === 'usage') this.loadUsageData();
             if (tab === 'settings' && !this.modelMappingData) this.loadModelMappings();
@@ -435,6 +451,94 @@ document.addEventListener('alpine:init', () => {
             if (ok && data.success) {
                 this.showToast(data.message, 'success');
                 this.refreshAccounts();
+            } else {
+                this.showToast(data?.message || this.t('deleteFailed'), 'error');
+            }
+        },
+
+        // ─── Claude Account Methods ────────────────────────────────────────
+        async refreshClaudeAccounts() {
+            const { ok, data } = await this.api('/claude-accounts');
+            if (ok) {
+                this.claudeAccounts = data.accounts || [];
+            }
+        },
+
+        async addClaudeAccount() {
+            await this.api('/claude-accounts/oauth/cleanup', { method: 'POST' });
+            const { ok, data } = await this.api('/claude-accounts/add', { method: 'POST' });
+            if (ok && data.oauth_url) {
+                window.open(data.oauth_url, '_blank', 'width=600,height=700');
+                this.showToast(this.t('oauthWindowOpened'), 'info');
+
+                const checkAdded = setInterval(async () => {
+                    const { ok: refreshOk, data: refreshData } = await this.api('/claude-accounts');
+                    if (refreshOk && refreshData.accounts) {
+                        const prevCount = this.claudeAccounts.length;
+                        this.claudeAccounts = refreshData.accounts;
+                        if (refreshData.accounts.length > prevCount) {
+                            this.showToast(this.t('claudeAccountAdded'), 'success');
+                            clearInterval(checkAdded);
+                        }
+                    }
+                }, 2000);
+
+                setTimeout(() => clearInterval(checkAdded), 120000);
+            } else {
+                this.showToast(data?.message || this.t('failedToStartOauth'), 'error');
+            }
+        },
+
+        async importClaudeAccount() {
+            const { ok, data } = await this.api('/claude-accounts/import', { method: 'POST' });
+            if (ok && data.success) {
+                this.showToast(data.message, 'success');
+                this.refreshClaudeAccounts();
+            } else {
+                this.showToast(data?.message || this.t('importFailed'), 'error');
+            }
+        },
+
+        async switchClaudeAccount(email) {
+            const { ok, data } = await this.api('/claude-accounts/switch', {
+                method: 'POST',
+                body: JSON.stringify({ email })
+            });
+            if (ok && data.success) {
+                this.showToast(data.message, 'success');
+                this.refreshClaudeAccounts();
+            } else {
+                this.showToast(data?.message || this.t('failedToSwitch'), 'error');
+            }
+        },
+
+        async refreshClaudeAccount(email) {
+            const { ok, data } = await this.api(`/claude-accounts/${encodeURIComponent(email)}/refresh`, { method: 'POST' });
+            if (ok && data.success) {
+                this.showToast(data.message, 'success');
+                this.refreshClaudeAccounts();
+            } else {
+                this.showToast(data?.message || this.t('refreshFailed'), 'error');
+            }
+        },
+
+        async refreshAllClaudeTokens() {
+            this.showToast(this.t('refreshingAllTokens'), 'info');
+            const { ok, data } = await this.api('/claude-accounts/refresh/all', { method: 'POST' });
+            if (ok) {
+                this.showToast(this.t('allTokensRefreshed'), 'success');
+                this.refreshClaudeAccounts();
+            } else {
+                this.showToast(data?.message || this.t('refreshFailed'), 'error');
+            }
+        },
+
+        async removeClaudeAccount(email) {
+            if (!confirm(this.t('confirmDeleteAccount') + ': ' + email)) return;
+            const { ok, data } = await this.api(`/claude-accounts/${encodeURIComponent(email)}`, { method: 'DELETE' });
+            if (ok && data.success) {
+                this.showToast(data.message, 'success');
+                this.refreshClaudeAccounts();
             } else {
                 this.showToast(data?.message || this.t('deleteFailed'), 'error');
             }

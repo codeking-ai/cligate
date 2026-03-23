@@ -283,6 +283,21 @@ const i18n = {
     requestLoggingEnabled: 'Request logging enabled',
     requestLoggingDisabled: 'Request logging disabled',
 
+    // Claude Accounts
+    claudeAccounts: 'Claude Accounts',
+    claudeAccountManagement: 'Claude Account Management',
+    manageClaudeAccounts: 'Manage Claude accounts',
+    noClaudeAccountsYet: 'No Claude Accounts Yet',
+    noClaudeAccountsDesc: 'Add a Claude account via OAuth or import from Claude Code credentials.',
+    addClaudeAccount: 'Add Claude Account',
+    importFromClaudeCode: 'Import from Claude Code',
+    claudeAccountAdded: 'Claude account added successfully!',
+    subscription: 'Subscription',
+    confirmDeleteAccount: 'Are you sure you want to delete this account?',
+    allTokensRefreshed: 'All tokens refreshed',
+    expired: 'Expired',
+    inactive: 'Inactive',
+
     // Language
     langLabel: 'EN',
   },
@@ -571,6 +586,21 @@ const i18n = {
     next: '下一页',
     requestLoggingEnabled: '请求日志已启用',
     requestLoggingDisabled: '请求日志已禁用',
+
+    // Claude Accounts
+    claudeAccounts: 'Claude 账户',
+    claudeAccountManagement: 'Claude 账户管理',
+    manageClaudeAccounts: '管理 Claude 账户',
+    noClaudeAccountsYet: '暂无 Claude 账户',
+    noClaudeAccountsDesc: '通过 OAuth 添加 Claude 账户，或从 Claude Code 凭据导入。',
+    addClaudeAccount: '添加 Claude 账户',
+    importFromClaudeCode: '从 Claude Code 导入',
+    claudeAccountAdded: 'Claude 账户添加成功！',
+    subscription: '订阅',
+    confirmDeleteAccount: '确定要删除此账户吗？',
+    allTokensRefreshed: '所有令牌已刷新',
+    expired: '已过期',
+    inactive: '未激活',
 
     langLabel: '中文',
   }
