@@ -60,7 +60,12 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 
 export function registerApiRoutes(app, { port }) {
   // ─── Static Web UI ─────────────────────────────────────────────────────────
-  app.use(express.static(join(__dirname, '..', '..', 'public')));
+  // In Electron asar builds, static files must be served from the unpacked path
+  const publicDir = join(__dirname, '..', '..', 'public');
+  const staticDir = publicDir.includes('app.asar')
+    ? publicDir.replace('app.asar', 'app.asar.unpacked')
+    : publicDir;
+  app.use(express.static(staticDir));
 
   // ─── Health ────────────────────────────────────────────────────────────────
   app.get('/health', (req, res) => {

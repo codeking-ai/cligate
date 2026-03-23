@@ -66,6 +66,14 @@ export function createServer({ port }) {
 
   registerApiRoutes(app, { port });
 
+  // Global error handler — catches unhandled errors in route handlers
+  app.use((err, req, res, _next) => {
+    console.error(`[Server] Unhandled error on ${req.method} ${req.originalUrl}:`, err);
+    if (!res.headersSent) {
+      res.status(500).json({ type: 'error', error: { type: 'server_error', message: err.message } });
+    }
+  });
+
   return app;
 }
 

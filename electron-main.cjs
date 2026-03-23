@@ -7,6 +7,14 @@
  * imports the ESM server module via import().
  */
 
+// Save Node.js native fetch BEFORE Electron overrides it with net.fetch.
+// Electron's main process replaces globalThis.fetch with Chromium-based net.fetch,
+// which can break streaming (response.body.getReader()) used by our proxy code.
+const _nativeFetch = globalThis.fetch;
+const _nativeHeaders = globalThis.Headers;
+const _nativeRequest = globalThis.Request;
+const _nativeResponse = globalThis.Response;
+
 const { app, BrowserWindow, Tray, Menu, shell, dialog } = require('electron');
 const path = require('path');
 const net = require('net');
@@ -124,12 +132,22 @@ app.whenReady().then(async () => {
         const preferred = Number(process.env.PORT) || DEFAULT_PORT;
         actualPort = await findAvailablePort(preferred);
 
+        // Restore Node.js native fetch — Electron's net.fetch can break
+        // ReadableStream/getReader() used by our streaming proxy code.
+        if (_nativeFetch) {
+            globalThis.fetch = _nativeFetch;
+            globalThis.Headers = _nativeHeaders;
+            globalThis.Request = _nativeRequest;
+            globalThis.Response = _nativeResponse;
+        }
+
         // Dynamically import the ESM server module
         const { createServer } = await import('./src/server.js');
         const expressApp = createServer({ port: actualPort });
 
         serverInstance = expressApp.listen(actualPort, '127.0.0.1', () => {
             console.log(`ProxyPool Hub running on http://127.0.0.1:${actualPort}`);
+            console.log(`fetch implementation: ${globalThis.fetch?.name || 'unknown'}`);
         });
 
         createWindow();

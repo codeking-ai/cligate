@@ -51,12 +51,13 @@
     "test:ui": "node --test tests/ui.test.js"
   },
   "dependencies": {
+    "cors": "^2.8.5",
     "express": "^4.18.2",
-    "cors": "^2.8.5"
+    "fzstd": "^0.1.1"
   },
   "devDependencies": {
-    "electron": "^33.0.0",
-    "electron-builder": "^25.1.0"
+    "electron": "^41.0.3",
+    "electron-builder": "^26.8.1"
   },
   "build": {
     "appId": "com.proxypool-hub.app",
@@ -72,11 +73,16 @@
       "package.json",
       "node_modules/**/*"
     ],
+    "asarUnpack": [
+      "public/**/*"
+    ],
     "win": {
       "target": [
         {
           "target": "nsis",
-          "arch": ["x64"]
+          "arch": [
+            "x64"
+          ]
         }
       ]
     },
@@ -88,14 +94,25 @@
       "shortcutName": "ProxyPool Hub"
     },
     "mac": {
-      "target": ["dmg"],
+      "target": [
+        "dmg"
+      ],
       "category": "public.app-category.developer-tools"
     },
     "linux": {
-      "target": ["AppImage"],
+      "target": [
+        "AppImage"
+      ],
       "category": "Development"
     }
   },
-  "keywords": ["codex", "openai", "proxy", "claude", "chatgpt", "oauth"],
+  "keywords": [
+    "codex",
+    "openai",
+    "proxy",
+    "claude",
+    "chatgpt",
+    "oauth"
+  ],
   "license": "AGPL-3.0"
 }

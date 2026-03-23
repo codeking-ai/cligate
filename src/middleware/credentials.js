@@ -71,16 +71,20 @@ export async function getCredentialsForAccount(email) {
   const account = data.accounts.find(a => a.email === email);
 
   if (!account) {
+    logger.info(`[Credentials] Account not found: ${email} (total: ${data.accounts.length})`);
     return null;
   }
 
   if (!account.accessToken || !account.accountId) {
+    logger.info(`[Credentials] Account ${email} missing ${!account.accessToken ? 'accessToken' : ''} ${!account.accountId ? 'accountId' : ''}`);
     return null;
   }
 
   if (isTokenExpiredOrExpiringSoon(account)) {
+    logger.info(`[Credentials] Token expired for ${email}, refreshing...`);
     const result = await refreshAccountToken(account.email);
     if (!result.success) {
+      logger.error(`[Credentials] Refresh failed for ${email}: ${result.message}`);
       return null;
     }
     const refreshedData = loadAccounts();

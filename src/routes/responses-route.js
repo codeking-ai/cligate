@@ -15,6 +15,7 @@ import { getServerSettings } from '../server-settings.js';
 import { selectKey, recordUsage, recordError, recordRateLimit, hasKeysForTypes, getKeyRateLimitInfo } from '../api-key-manager.js';
 import { recordRequest } from '../usage-tracker.js';
 import zlib from 'zlib';
+import { decompress as fzstdDecompress } from 'fzstd';
 import { sendResponsesSSE } from '../utils/responses-sse.js';
 import { resolveModel } from '../model-mapping.js';
 import { logRequest } from '../request-logger.js';
@@ -32,6 +33,8 @@ function getAccountRotator() {
     const strategy = settings.accountStrategy || 'sticky';
 
     if (!accountRotator || currentStrategy !== strategy) {
+        const accts = listAccounts();
+        console.log(`[Codex Proxy] Initializing rotator: strategy=${strategy}, accounts=${accts.total}, active=${accts.active || 'none'}`);
         accountRotator = new AccountRotator({
             listAccounts,
             save,
@@ -86,18 +89,23 @@ function collectRawBody(req) {
  * Best-effort: decompress and parse JSON body to extract model name.
  * Returns model string or default.
  */
+/**
+ * Decompress zstd data using Node.js native zlib (22+) or fzstd fallback.
+ */
+function decompressZstd(buf) {
+    if (typeof zlib.zstdDecompressSync === 'function') {
+        return zlib.zstdDecompressSync(buf);
+    }
+    // fzstd returns Uint8Array, convert to Buffer
+    return Buffer.from(fzstdDecompress(buf));
+}
+
 function tryExtractModel(rawBody, contentEncoding) {
     try {
         let jsonBuf = rawBody;
 
         if (contentEncoding === 'zstd') {
-            // Node 22+ has zstd support in zlib
-            if (typeof zlib.zstdDecompressSync === 'function') {
-                jsonBuf = zlib.zstdDecompressSync(rawBody);
-            } else {
-                // Can't decompress, use default
-                return 'unknown';
-            }
+            jsonBuf = decompressZstd(rawBody);
         } else if (contentEncoding === 'gzip') {
             jsonBuf = zlib.gunzipSync(rawBody);
         } else if (contentEncoding === 'deflate') {
@@ -120,8 +128,8 @@ function tryExtractSummary(rawBody, contentEncoding) {
     try {
         let jsonBuf = rawBody;
 
-        if (contentEncoding === 'zstd' && typeof zlib.zstdDecompressSync === 'function') {
-            jsonBuf = zlib.zstdDecompressSync(rawBody);
+        if (contentEncoding === 'zstd') {
+            jsonBuf = decompressZstd(rawBody);
         } else if (contentEncoding === 'gzip') {
             jsonBuf = zlib.gunzipSync(rawBody);
         } else if (contentEncoding === 'br') {
@@ -448,6 +456,7 @@ async function _handleResponsesViaAccountPool(req, res, rawBody, contentEncoding
 
         const creds = await getCredentialsForAccount(account.email);
         if (!creds) {
+            console.log(`[Codex Proxy] Credentials failed for ${account.email}, marking invalid`);
             rotator.markInvalid(account.email, 'Failed to get credentials');
             continue;
         }

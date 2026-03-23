@@ -45,20 +45,26 @@ export async function* sendMessageStream(anthropicRequest, accessToken, accountI
     const modelId = anthropicRequest.model;
     const request = convertAnthropicToResponsesAPI(anthropicRequest);
     
-    const response = await fetch(API_URL, {
-        method: 'POST',
-        headers: {
-            'Authorization': `Bearer ${accessToken}`,
-            'ChatGPT-Account-ID': accountId,
-            'Content-Type': 'application/json',
-            'Accept': 'text/event-stream'
-        },
-        body: JSON.stringify(request)
-    });
+    let response;
+    try {
+        response = await fetch(API_URL, {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${accessToken}`,
+                'ChatGPT-Account-ID': accountId,
+                'Content-Type': 'application/json',
+                'Accept': 'text/event-stream'
+            },
+            body: JSON.stringify(request)
+        });
+    } catch (fetchError) {
+        console.error('[DirectAPI] fetch() failed:', fetchError.message);
+        throw new Error(`FETCH_ERROR: ${fetchError.message}`);
+    }
 
     if (!response.ok) {
         const errorText = await response.text();
-        
+
         if (response.status === 401) {
             if (accountRotator && currentEmail) {
                 accountRotator.markInvalid(currentEmail, 'Token expired or revoked');
