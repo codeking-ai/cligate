@@ -786,6 +786,18 @@ document.addEventListener('alpine:init', () => {
             }
         },
 
+        async setOpenClawProxyConfig() {
+            const { ok, data, error } = await this.api('/openclaw/config/proxy', {
+                method: 'POST',
+            });
+
+            if (ok && data?.success) {
+                this.showToast(this.t('openclawSettingsUpdated'), 'success');
+            } else {
+                this.showToast(data?.error || error || this.t('openclawSettingsFailed'), 'error');
+            }
+        },
+
         showToast(message, type = 'success') {
             this.toast = { message, type };
             setTimeout(() => { this.toast = null; }, 3000);

@@ -49,6 +49,13 @@ const i18n = {
     updateGeminiSettings: 'One-click configure Gemini CLI',
     geminiSettingsUpdated: 'Gemini CLI configured successfully',
     geminiSettingsFailed: 'Failed to configure Gemini CLI',
+    usageWithOpenClaw: 'Usage with OpenClaw',
+    openclawSetConfig: '# Configure custom provider in openclaw.json',
+    runOpenClaw: '# Run OpenClaw',
+    updateOpenClawSettings: 'One-click configure OpenClaw',
+    openclawSettingsUpdated: 'OpenClaw configured successfully',
+    openclawSettingsFailed: 'Failed to configure OpenClaw',
+    openclawRestored: 'OpenClaw restored to direct connection',
 
     // Accounts
     accountManagement: 'Account Management',
@@ -353,6 +360,13 @@ const i18n = {
     updateGeminiSettings: '一键配置 Gemini CLI',
     geminiSettingsUpdated: 'Gemini CLI 配置成功',
     geminiSettingsFailed: '配置 Gemini CLI 失败',
+    usageWithOpenClaw: 'OpenClaw 使用方法',
+    openclawSetConfig: '# 在 openclaw.json 中配置自定义 provider',
+    runOpenClaw: '# 运行 OpenClaw',
+    updateOpenClawSettings: '一键配置 OpenClaw',
+    openclawSettingsUpdated: 'OpenClaw 配置成功',
+    openclawSettingsFailed: '配置 OpenClaw 失败',
+    openclawRestored: 'OpenClaw 已恢复直连',
 
     // Accounts
     accountManagement: '账户管理',

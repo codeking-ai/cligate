@@ -25,6 +25,7 @@ import { handleCodexResponses, handleCodexModels, handleCodexCatchAll } from './
 import { handleSetCodexProxy, handleGetCodexConfig, handleSetCodexDirect } from './codex-config-route.js';
 import { handleGeminiApiProxy } from './gemini-api-route.js';
 import { handleGetGeminiCliConfig, handleSetGeminiCliProxy, handleSetGeminiCliDirect } from './gemini-config-route.js';
+import { handleGetOpenClawConfig, handleSetOpenClawProxy, handleSetOpenClawDirect } from './openclaw-config-route.js';
 import { handleGetRequestLogs, handleGetLogDates, handleGetLogSettings, handleUpdateLogSettings } from './request-logs-route.js';
 import {
   handleListAccounts,
@@ -149,6 +150,11 @@ export function registerApiRoutes(app, { port }) {
   app.get('/gemini-cli/config', handleGetGeminiCliConfig);
   app.post('/gemini-cli/config/proxy', (req, res) => handleSetGeminiCliProxy(req, res, { port }));
   app.post('/gemini-cli/config/direct', handleSetGeminiCliDirect);
+
+  // ─── OpenClaw Configuration ────────────────────────────────────────────
+  app.get('/openclaw/config', handleGetOpenClawConfig);
+  app.post('/openclaw/config/proxy', (req, res) => handleSetOpenClawProxy(req, res, { port }));
+  app.post('/openclaw/config/direct', handleSetOpenClawDirect);
 
   // ─── Gemini Native API Proxy (for Gemini CLI) ───────────────────────────
   app.post('/v1beta/models/*', handleGeminiApiProxy);
