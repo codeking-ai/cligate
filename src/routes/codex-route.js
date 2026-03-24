@@ -9,6 +9,8 @@
 
 import { AccountRotator } from '../account-rotation/index.js';
 import { listAccounts, getActiveAccount, save } from '../account-manager.js';
+import { loadAccounts as loadClaudeAccounts, refreshAccountToken, getAccount as getClaudeAccount } from '../claude-account-manager.js';
+import { sendClaudeMessage, mapToClaudeModel } from '../claude-api.js';
 import { getCredentialsForAccount } from '../middleware/credentials.js';
 import { logger } from '../utils/logger.js';
 import { getServerSettings } from '../server-settings.js';
@@ -128,6 +130,7 @@ export async function handleCodexResponses(req, res) {
     const hasAccounts = listAccounts().total > 0;
     const apiKeyTypes = ['openai', 'azure-openai', 'gemini', 'vertex-ai'];
     const hasApiKeys = hasKeysForTypes(apiKeyTypes);
+    const hasClaudeAccounts = _getUsableClaudeAccounts().length > 0;
 
     if (priority === 'apikey-first' && hasApiKeys) {
         const result = await _handleCodexViaApiKey(res, body, modelId, isStreaming, apiKeyTypes, startTime);
@@ -135,6 +138,10 @@ export async function handleCodexResponses(req, res) {
         if (hasAccounts) {
             const poolResult = await _handleCodexViaAccountPool(res, body, modelId, isStreaming, startTime);
             if (poolResult !== false) return;
+        }
+        if (hasClaudeAccounts) {
+            const claudeResult = await _handleCodexViaClaudeAccount(res, body, modelId, isStreaming, startTime);
+            if (claudeResult !== false) return;
         }
         return sendCodexError(res, 503, 'All API keys and accounts exhausted.');
     }
@@ -148,8 +155,13 @@ export async function handleCodexResponses(req, res) {
         const result = await _handleCodexViaApiKey(res, body, modelId, isStreaming, apiKeyTypes, startTime);
         if (result !== false) return;
     }
+    // Fallback to Claude accounts
+    if (hasClaudeAccounts) {
+        const claudeResult = await _handleCodexViaClaudeAccount(res, body, modelId, isStreaming, startTime);
+        if (claudeResult !== false) return;
+    }
 
-    if (!hasAccounts && !hasApiKeys) {
+    if (!hasAccounts && !hasApiKeys && !hasClaudeAccounts) {
         return sendCodexError(res, 401, 'No accounts or API keys configured. Add them in the dashboard.');
     }
     const rlInfo = getKeyRateLimitInfo(apiKeyTypes);
@@ -602,6 +614,206 @@ function sendCodexError(res, status, message) {
     return res.status(status).json({
         error: { message, type: 'proxy_error', code: status }
     });
+}
+
+// ─── Claude Account Pool ──────────────────────────────────────────────────────
+
+function _getUsableClaudeAccounts() {
+    const data = loadClaudeAccounts();
+    return data.accounts.filter(a =>
+        a.enabled !== false &&
+        a.accessToken &&
+        !(a.expiresAt && a.expiresAt < Date.now())
+    );
+}
+
+function _codexToAnthropicBody(body) {
+    const messages = [];
+    const pendingToolResults = [];
+
+    if (Array.isArray(body.input)) {
+        for (const item of body.input) {
+            if (item.type === 'message') {
+                const role = item.role === 'developer' ? 'user' : item.role;
+                let content;
+                if (typeof item.content === 'string') {
+                    content = item.content;
+                } else if (Array.isArray(item.content)) {
+                    content = item.content.map(c => ({ type: 'text', text: c.text || '' }));
+                } else {
+                    content = '';
+                }
+
+                if (role === 'user' && pendingToolResults.length > 0) {
+                    const textContent = typeof content === 'string'
+                        ? [{ type: 'text', text: content }]
+                        : content;
+                    messages.push({ role: 'user', content: [...pendingToolResults.splice(0), ...textContent] });
+                } else {
+                    if (pendingToolResults.length > 0) {
+                        messages.push({ role: 'user', content: pendingToolResults.splice(0) });
+                    }
+                    messages.push({ role, content });
+                }
+            } else if (item.type === 'function_call') {
+                if (pendingToolResults.length > 0) {
+                    messages.push({ role: 'user', content: pendingToolResults.splice(0) });
+                }
+                let input = {};
+                try {
+                    input = typeof item.arguments === 'string' ? JSON.parse(item.arguments) : item.arguments || {};
+                } catch { input = {}; }
+
+                messages.push({
+                    role: 'assistant',
+                    content: [{
+                        type: 'tool_use',
+                        id: item.call_id || item.id || `toolu_${Date.now()}`,
+                        name: item.name,
+                        input
+                    }]
+                });
+            } else if (item.type === 'function_call_output') {
+                pendingToolResults.push({
+                    type: 'tool_result',
+                    tool_use_id: item.call_id || item.id || '',
+                    content: item.output || ''
+                });
+            }
+        }
+        if (pendingToolResults.length > 0) {
+            messages.push({ role: 'user', content: pendingToolResults.splice(0) });
+        }
+    } else if (typeof body.input === 'string') {
+        messages.push({ role: 'user', content: body.input });
+    }
+
+    const result = {
+        model: mapToClaudeModel(body.model),
+        messages,
+        max_tokens: body.max_output_tokens || 8192
+    };
+    if (body.instructions) result.system = body.instructions;
+    if (body.temperature !== undefined) result.temperature = body.temperature;
+
+    if (Array.isArray(body.tools) && body.tools.length > 0) {
+        result.tools = body.tools
+            .filter(t => t.type === 'function')
+            .map(t => ({
+                name: t.name,
+                description: t.description || '',
+                input_schema: t.parameters || { type: 'object', properties: {} }
+            }));
+    }
+
+    return result;
+}
+
+function _anthropicToCodexFormat(claudeResponse, originalModel) {
+    const output = [];
+
+    if (claudeResponse.content) {
+        for (const block of claudeResponse.content) {
+            if (block.type === 'text') {
+                output.push({
+                    type: 'message',
+                    id: `msg_${Date.now()}`,
+                    role: 'assistant',
+                    status: 'completed',
+                    content: [{ type: 'output_text', text: block.text }]
+                });
+            } else if (block.type === 'tool_use') {
+                output.push({
+                    type: 'function_call',
+                    id: block.id,
+                    call_id: block.id,
+                    name: block.name,
+                    arguments: JSON.stringify(block.input || {})
+                });
+            }
+        }
+    }
+
+    return {
+        id: claudeResponse.id || `resp_${Date.now()}`,
+        object: 'response',
+        created_at: Math.floor(Date.now() / 1000),
+        model: originalModel,
+        status: 'completed',
+        output,
+        usage: {
+            input_tokens: claudeResponse.usage?.input_tokens || 0,
+            output_tokens: claudeResponse.usage?.output_tokens || 0,
+            total_tokens: (claudeResponse.usage?.input_tokens || 0) + (claudeResponse.usage?.output_tokens || 0)
+        }
+    };
+}
+
+async function _handleCodexViaClaudeAccount(res, body, modelId, isStreaming, startTime) {
+    const accounts = _getUsableClaudeAccounts();
+    const anthropicBody = _codexToAnthropicBody(body);
+
+    for (const account of accounts) {
+        try {
+            const mappedModel = anthropicBody.model;
+            logger.info(`[Codex] >>> Claude account | ${account.email} | ${modelId}→${mappedModel}`);
+
+            const claudeResponse = await sendClaudeMessage(anthropicBody, account.accessToken);
+            const durationMs = Date.now() - startTime;
+
+            const codexFormat = _anthropicToCodexFormat(claudeResponse, modelId);
+
+            const inputTokens = claudeResponse.usage?.input_tokens || 0;
+            const outputTokens = claudeResponse.usage?.output_tokens || 0;
+            recordRequest({ provider: 'claude-pool', keyId: account.email, model: mappedModel, inputTokens, outputTokens, durationMs, success: true });
+            logRequest({ route: '/backend-api/codex/responses', provider: 'claude-pool', keyId: account.email, model: modelId, mappedModel, requestBody: body, inputTokens, outputTokens, durationMs, status: 200, success: true });
+
+            logger.success(`[Codex] <<< Claude account OK | ${account.email} | model=${modelId} | ${inputTokens}+${outputTokens} tokens | ${durationMs}ms`);
+
+            if (isStreaming) {
+                sendResponsesSSE(res, codexFormat);
+            } else {
+                res.json(codexFormat);
+            }
+            return true;
+        } catch (error) {
+            const durationMs = Date.now() - startTime;
+            if (error.message.includes('AUTH_EXPIRED')) {
+                logger.warn(`[Codex] Claude account auth expired: ${account.email}, attempting token refresh...`);
+                try {
+                    const refreshResult = await refreshAccountToken(account.email);
+                    if (refreshResult.success) {
+                        const refreshed = getClaudeAccount(account.email);
+                        if (refreshed && refreshed.accessToken) {
+                            logger.info(`[Codex] Token refreshed for ${account.email}, retrying...`);
+                            const retryResponse = await sendClaudeMessage(anthropicBody, refreshed.accessToken);
+                            const retryDurationMs = Date.now() - startTime;
+                            const codexFormat = _anthropicToCodexFormat(retryResponse, modelId);
+                            const inputTokens = retryResponse.usage?.input_tokens || 0;
+                            const outputTokens = retryResponse.usage?.output_tokens || 0;
+                            recordRequest({ provider: 'claude-pool', keyId: account.email, model: anthropicBody.model, inputTokens, outputTokens, durationMs: retryDurationMs, success: true });
+                            logger.success(`[Codex] <<< Claude account OK (after refresh) | ${account.email} | model=${modelId} | ${inputTokens}+${outputTokens} tokens | ${retryDurationMs}ms`);
+                            if (isStreaming) { sendResponsesSSE(res, codexFormat); } else { res.json(codexFormat); }
+                            return true;
+                        }
+                    }
+                    logger.warn(`[Codex] Token refresh failed for ${account.email}: ${refreshResult.message}`);
+                } catch (refreshErr) {
+                    logger.warn(`[Codex] Token refresh error for ${account.email}: ${refreshErr.message}`);
+                }
+                continue;
+            }
+            if (error.message.startsWith('RATE_LIMITED:')) {
+                logger.warn(`[Codex] Claude account rate limited: ${account.email}`);
+                continue;
+            }
+            recordRequest({ provider: 'claude-pool', keyId: account.email, model: modelId, durationMs, success: false, error: error.message });
+            logger.error(`[Codex] Claude account error: ${account.email} - ${error.message}`);
+            continue;
+        }
+    }
+
+    return false;
 }
 
 export default { handleCodexResponses, handleCodexModels, handleCodexCatchAll };

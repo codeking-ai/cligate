@@ -6,6 +6,8 @@ import { initSSEResponse, pipeSSEStream, handleStreamError } from '../middleware
 import { logger } from '../utils/logger.js';
 import { AccountRotator } from '../account-rotation/index.js';
 import { listAccounts, getActiveAccount, save } from '../account-manager.js';
+import { loadAccounts as loadClaudeAccounts, refreshAccountToken, getAccount as getClaudeAccount } from '../claude-account-manager.js';
+import { sendClaudeMessage, sendClaudeStream } from '../claude-api.js';
 import { getServerSettings } from '../server-settings.js';
 import { selectKey, recordUsage, recordError, recordRateLimit } from '../api-key-manager.js';
 import { recordRequest } from '../usage-tracker.js';
@@ -52,12 +54,19 @@ export async function handleMessages(req, res) {
     const priority = settings.routingPriority || 'account-first';
     const hasAccounts = listAccounts().total > 0;
     const hasApiKeys = !!selectKey('anthropic');
+    const hasClaudeAccounts = _getUsableClaudeAccounts().length > 0;
 
     if (priority === 'apikey-first' && hasApiKeys) {
         const result = await _handleViaApiKey(req, res, body, requestedModel, startTime);
         if (result !== false) return;
-        // API key failed, try account pool
-        if (hasAccounts) return _handleViaAccountPool(req, res, body, requestedModel, upstreamModel, isStreaming, startTime);
+        if (hasAccounts) {
+            const poolResult = await _handleViaAccountPool(req, res, body, requestedModel, upstreamModel, isStreaming, startTime);
+            if (poolResult !== false) return;
+        }
+        if (hasClaudeAccounts) {
+            const claudeResult = await _handleViaClaudeAccount(res, body, requestedModel, isStreaming, startTime);
+            if (claudeResult !== false) return;
+        }
         return handleStreamError(res, new Error('No available API keys or accounts'), requestedModel, startTime);
     }
 
@@ -66,13 +75,17 @@ export async function handleMessages(req, res) {
         const result = await _handleViaAccountPool(req, res, body, requestedModel, upstreamModel, isStreaming, startTime);
         if (result !== false) return;
     }
-    // Fallback to API keys
     if (hasApiKeys) {
         const result = await _handleViaApiKey(req, res, body, requestedModel, startTime);
         if (result !== false) return;
     }
+    // Fallback to Claude accounts
+    if (hasClaudeAccounts) {
+        const result = await _handleViaClaudeAccount(res, body, requestedModel, isStreaming, startTime);
+        if (result !== false) return;
+    }
 
-    if (!hasAccounts && !hasApiKeys) {
+    if (!hasAccounts && !hasApiKeys && !hasClaudeAccounts) {
         return sendAuthError(res, 'No accounts or API keys configured. Add them in the dashboard.');
     }
     return handleStreamError(res, new Error('All accounts and API keys exhausted'), requestedModel, startTime);
@@ -256,6 +269,107 @@ async function _sendKilo(res, anthropicRequest, kiloTarget, responseModel, start
         stop_sequence: null,
         usage: response.usage
     });
+}
+
+// ─── Claude Account Pool ──────────────────────────────────────────────────────
+
+function _getUsableClaudeAccounts() {
+    const data = loadClaudeAccounts();
+    return data.accounts.filter(a =>
+        a.enabled !== false &&
+        a.accessToken &&
+        !(a.expiresAt && a.expiresAt < Date.now())
+    );
+}
+
+/**
+ * Handle request via Claude account pool.
+ * Body is already in Anthropic Messages format — direct passthrough.
+ */
+async function _handleViaClaudeAccount(res, body, requestedModel, isStreaming, startTime) {
+    const accounts = _getUsableClaudeAccounts();
+
+    for (const account of accounts) {
+        try {
+            const claudeBody = { ...body, max_tokens: body.max_tokens || 8192 };
+            logger.info(`[Messages] >>> Claude account | ${account.email} | model=${claudeBody.model}`);
+
+            if (isStreaming) {
+                const upstream = await sendClaudeStream(claudeBody, account.accessToken);
+
+                // Pipe Anthropic SSE directly — no format conversion needed
+                res.setHeader('Content-Type', 'text/event-stream');
+                res.setHeader('Cache-Control', 'no-cache');
+                res.setHeader('Connection', 'keep-alive');
+                res.setHeader('X-Accel-Buffering', 'no');
+                res.flushHeaders();
+
+                const reader = upstream.body.getReader();
+                try {
+                    while (true) {
+                        const { done, value } = await reader.read();
+                        if (done) break;
+                        res.write(value);
+                    }
+                } finally {
+                    res.end();
+                }
+            } else {
+                const result = await sendClaudeMessage(claudeBody, account.accessToken);
+                res.json(result);
+            }
+
+            const durationMs = Date.now() - startTime;
+            recordRequest({ provider: 'claude-pool', keyId: account.email, model: body.model, durationMs, success: true });
+            logger.success(`[Messages] <<< OK via Claude account | ${account.email} | model=${body.model} | ${durationMs}ms`);
+            return true;
+        } catch (error) {
+            const durationMs = Date.now() - startTime;
+            if (error.message.includes('AUTH_EXPIRED')) {
+                logger.warn(`[Messages] Claude account auth expired: ${account.email}, attempting token refresh...`);
+                try {
+                    const refreshResult = await refreshAccountToken(account.email);
+                    if (refreshResult.success) {
+                        const refreshed = getClaudeAccount(account.email);
+                        if (refreshed && refreshed.accessToken) {
+                            logger.info(`[Messages] Token refreshed for ${account.email}, retrying...`);
+                            const claudeBody = { ...body, max_tokens: body.max_tokens || 8192 };
+                            if (isStreaming) {
+                                const upstream = await sendClaudeStream(claudeBody, refreshed.accessToken);
+                                res.setHeader('Content-Type', 'text/event-stream');
+                                res.setHeader('Cache-Control', 'no-cache');
+                                res.setHeader('Connection', 'keep-alive');
+                                res.setHeader('X-Accel-Buffering', 'no');
+                                res.flushHeaders();
+                                const reader = upstream.body.getReader();
+                                try { while (true) { const { done, value } = await reader.read(); if (done) break; res.write(value); } } finally { res.end(); }
+                            } else {
+                                const result = await sendClaudeMessage(claudeBody, refreshed.accessToken);
+                                res.json(result);
+                            }
+                            const retryDurationMs = Date.now() - startTime;
+                            recordRequest({ provider: 'claude-pool', keyId: account.email, model: body.model, durationMs: retryDurationMs, success: true });
+                            logger.success(`[Messages] <<< OK via Claude account (after refresh) | ${account.email} | model=${body.model} | ${retryDurationMs}ms`);
+                            return true;
+                        }
+                    }
+                    logger.warn(`[Messages] Token refresh failed for ${account.email}: ${refreshResult.message}`);
+                } catch (refreshErr) {
+                    logger.warn(`[Messages] Token refresh error for ${account.email}: ${refreshErr.message}`);
+                }
+                continue;
+            }
+            if (error.message.startsWith('RATE_LIMITED:')) {
+                logger.warn(`[Messages] Claude account rate limited: ${account.email}`);
+                continue;
+            }
+            recordRequest({ provider: 'claude-pool', keyId: account.email, model: body.model, durationMs, success: false, error: error.message });
+            logger.error(`[Messages] Claude account error: ${account.email} - ${error.message}`);
+            continue;
+        }
+    }
+
+    return false;
 }
 
 function sleep(ms) {

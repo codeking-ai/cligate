@@ -1242,7 +1242,7 @@
                         <template x-for="entry in accountStatsEntries" :key="entry.name">
                             <div>
                                 <div class="flex items-center justify-between mb-1">
-                                    <span class="font-mono text-xs text-gray-300 truncate mr-2" x-text="entry.name"></span>
+                                    <span class="font-mono text-xs text-gray-300 truncate mr-2" x-text="entry.displayName"></span>
                                     <span class="font-mono text-[10px] text-gray-500 whitespace-nowrap" x-text="entry.requests + ' reqs · $' + entry.cost.toFixed(4)"></span>
                                 </div>
                                 <div class="w-full h-2 bg-space-800 rounded-full overflow-hidden">

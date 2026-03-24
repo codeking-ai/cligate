@@ -147,6 +147,7 @@ function listAccounts() {
         addedAt: account.addedAt,
         lastUsed: account.lastUsed,
         isActive: account.email === data.activeAccount,
+        enabled: account.enabled !== false,
         tokenExpired: account.expiresAt ? account.expiresAt < Date.now() : false
     }));
 

@@ -987,23 +987,34 @@ document.addEventListener('alpine:init', () => {
             return entries.map(e => ({ ...e, pct: (e.requests / max) * 100 }));
         },
 
+        accountKeyNameMap: {},
+
         get accountStatsEntries() {
             const entries = Object.entries(this.accountStats)
-                .map(([name, s]) => ({ name, ...s }))
+                .map(([name, s]) => ({ name, displayName: this.accountKeyNameMap[name] || name, ...s }))
                 .sort((a, b) => b.requests - a.requests);
             const max = Math.max(1, ...entries.map(e => e.requests));
             return entries.map(e => ({ ...e, pct: (e.requests / max) * 100 }));
         },
 
         async loadUsageData() {
-            const [overviewRes, dailyRes, historyRes, providerRes, modelRes, accountRes] = await Promise.all([
+            const [overviewRes, dailyRes, historyRes, providerRes, modelRes, accountRes, keysRes] = await Promise.all([
                 this.api('/api/usage/overview'),
                 this.api(`/api/usage/daily?days=${this.dailyDays}`),
                 this.api('/api/usage/history?limit=50'),
                 this.api('/api/usage/providers'),
                 this.api('/api/usage/models'),
-                this.api('/api/usage/accounts')
+                this.api('/api/usage/accounts'),
+                this.api('/api/keys')
             ]);
+            // Build key ID → display name map
+            if (keysRes.ok && keysRes.data?.keys) {
+                const map = {};
+                for (const key of keysRes.data.keys) {
+                    map[key.id] = `${key.id}（${key.name || key.type}）`;
+                }
+                this.accountKeyNameMap = map;
+            }
             if (overviewRes.ok && overviewRes.data) {
                 this.usageOverview = overviewRes.data;
             }
