@@ -483,6 +483,8 @@ async function _handleResponsesViaAccountPool(req, res, rawBody, contentEncoding
                 }
 
                 logger.error(`[Codex Proxy] Upstream error ${upstreamResponse.status}: ${errorText.slice(0, 200)}`);
+                recordRequest({ provider: 'chatgpt-pool', keyId: creds.email, model: modelId, durationMs: Date.now() - startTime, success: false, error: errorText.slice(0, 200) });
+                logRequest({ route: '/responses', method: 'POST', provider: 'chatgpt-pool', keyId: creds.email, model: modelId, durationMs: Date.now() - startTime, status: upstreamResponse.status, success: false, error: errorText.slice(0, 200) });
                 return res.status(upstreamResponse.status)
                     .set('Content-Type', 'application/json')
                     .send(errorText);
@@ -517,9 +519,22 @@ async function _handleResponsesViaAccountPool(req, res, rawBody, contentEncoding
             }
 
             const duration = Date.now() - startTime;
+            recordRequest({ provider: 'chatgpt-pool', keyId: creds.email, model: modelId, durationMs: duration, success: true });
+            logRequest({ route: '/responses', method: 'POST', provider: 'chatgpt-pool', keyId: creds.email, model: modelId, mappedModel: modelId, durationMs: duration, status: 200, success: true });
             logger.success(`[Codex] <<< OK | account=${creds.email} | model=${modelId} | ${duration}ms`);
-            return;
+            return true;
         } catch (error) {
+            // If response was already sent (streaming succeeded but post-stream code failed), don't retry
+            if (res.headersSent) {
+                const duration = Date.now() - startTime;
+                recordRequest({ provider: 'chatgpt-pool', keyId: creds.email, model: modelId, durationMs: duration, success: true });
+                logRequest({ route: '/responses', method: 'POST', provider: 'chatgpt-pool', keyId: creds.email, model: modelId, durationMs: duration, status: 200, success: true });
+                logger.warn(`[Codex Proxy] Post-stream error (response already sent): ${error.message}`);
+                return true;
+            }
+            const duration = Date.now() - startTime;
+            recordRequest({ provider: 'chatgpt-pool', keyId: creds.email, model: modelId, durationMs: duration, success: false, error: error.message });
+            logRequest({ route: '/responses', method: 'POST', provider: 'chatgpt-pool', keyId: creds.email, model: modelId, durationMs: duration, success: false, error: error.message });
             logger.error(`[Codex Proxy] Network error on ${creds.email}: ${error.message}`);
             rotator.notifyFailure(account, modelId);
             continue;

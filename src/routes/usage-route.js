@@ -10,7 +10,8 @@ import {
     getAllTimeStats,
     getTodayStats,
     getStatsByProvider,
-    getStatsByModel
+    getStatsByModel,
+    getStatsByAccount
 } from '../usage-tracker.js';
 import { getStats as getKeyStats } from '../api-key-manager.js';
 
@@ -51,5 +52,10 @@ export function handleGetProviderStats(req, res) {
 
 export function handleGetModelStats(req, res) {
     const stats = getStatsByModel();
+    res.json({ stats });
+}
+
+export function handleGetAccountStats(req, res) {
+    const stats = getStatsByAccount();
     res.json({ stats });
 }

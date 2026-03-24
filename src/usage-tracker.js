@@ -38,7 +38,8 @@ function loadStats() {
             monthly: {},
             allTime: createEmptyStats(),
             byProvider: {},
-            byModel: {}
+            byModel: {},
+            byAccount: {}
         };
         return aggregatedStats;
     }
@@ -50,13 +51,15 @@ function loadStats() {
         if (!aggregatedStats.allTime) aggregatedStats.allTime = createEmptyStats();
         if (!aggregatedStats.byProvider) aggregatedStats.byProvider = {};
         if (!aggregatedStats.byModel) aggregatedStats.byModel = {};
+        if (!aggregatedStats.byAccount) aggregatedStats.byAccount = {};
     } catch {
         aggregatedStats = {
             daily: {},
             monthly: {},
             allTime: createEmptyStats(),
             byProvider: {},
-            byModel: {}
+            byModel: {},
+            byAccount: {}
         };
     }
     return aggregatedStats;
@@ -159,17 +162,20 @@ export function recordRequest({
     const monthKey = getMonthKey();
     const providerKey = provider || 'unknown';
     const modelKey = model || 'unknown';
+    const accountKey = keyId || 'unknown';
 
     if (!stats.daily[dayKey]) stats.daily[dayKey] = createEmptyStats();
     if (!stats.monthly[monthKey]) stats.monthly[monthKey] = createEmptyStats();
     if (!stats.byProvider[providerKey]) stats.byProvider[providerKey] = createEmptyStats();
     if (!stats.byModel[modelKey]) stats.byModel[modelKey] = createEmptyStats();
+    if (!stats.byAccount[accountKey]) stats.byAccount[accountKey] = createEmptyStats();
 
     addToTarget(stats.daily[dayKey], entry);
     addToTarget(stats.monthly[monthKey], entry);
     addToTarget(stats.allTime, entry);
     addToTarget(stats.byProvider[providerKey], entry);
     addToTarget(stats.byModel[modelKey], entry);
+    addToTarget(stats.byAccount[accountKey], entry);
 
     // Clean up old daily stats (keep 30 days)
     const cutoff = new Date();
@@ -246,4 +252,8 @@ export function getStatsByProvider() {
 
 export function getStatsByModel() {
     return loadStats().byModel;
+}
+
+export function getStatsByAccount() {
+    return loadStats().byAccount;
 }

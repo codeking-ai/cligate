@@ -18,7 +18,7 @@ import { handleGetHaikuModel, handleSetHaikuModel, handleGetKiloModels, handleGe
 import { handleGetLogs, handleStreamLogs } from './logs-route.js';
 import { handleGetClaudeConfig, handleSetProxyMode, handleSetDirectMode, handleSetClaudeApiEndpoint } from './claude-config-route.js';
 import { handleListApiKeys, handleAddApiKey, handleRemoveApiKey, handleUpdateApiKey, handleValidateApiKey, handleGetApiKeyStats } from './api-keys-route.js';
-import { handleGetUsageOverview, handleGetUsageHistory, handleGetDailyStats, handleGetMonthlyStats, handleGetProviderStats, handleGetModelStats } from './usage-route.js';
+import { handleGetUsageOverview, handleGetUsageHistory, handleGetDailyStats, handleGetMonthlyStats, handleGetProviderStats, handleGetModelStats, handleGetAccountStats } from './usage-route.js';
 import { handleGatewayChat, handleGatewayMessages, handleListProviders } from './gateway-route.js';
 import { handleGetModelMappings, handleSetProviderMapping, handleResetModelMappings, handleResolveModel } from './model-mapping-route.js';
 import { handleCodexResponses, handleCodexModels, handleCodexCatchAll } from './codex-route.js';
@@ -176,6 +176,7 @@ export function registerApiRoutes(app, { port }) {
   app.get('/api/usage/monthly', handleGetMonthlyStats);
   app.get('/api/usage/providers', handleGetProviderStats);
   app.get('/api/usage/models', handleGetModelStats);
+  app.get('/api/usage/accounts', handleGetAccountStats);
 
   // ─── Model Mapping ──────────────────────────────────────────────────────
   app.get('/api/model-mappings', handleGetModelMappings);

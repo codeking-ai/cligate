@@ -1231,6 +1231,26 @@
                     <div x-show="dailyStats.length === 0" class="py-8 text-center text-gray-600 text-sm" x-text="t('noUsageData')"></div>
                 </div>
 
+                <!-- Account / Key distribution -->
+                <div class="view-card mb-6">
+                    <h3 class="text-xs font-mono text-gray-400 uppercase tracking-widest mb-4" x-text="t('byAccount')"></h3>
+                    <div class="space-y-3" x-show="accountStatsEntries.length > 0">
+                        <template x-for="entry in accountStatsEntries" :key="entry.name">
+                            <div>
+                                <div class="flex items-center justify-between mb-1">
+                                    <span class="font-mono text-xs text-gray-300 truncate mr-2" x-text="entry.name"></span>
+                                    <span class="font-mono text-[10px] text-gray-500 whitespace-nowrap" x-text="entry.requests + ' reqs · $' + entry.cost.toFixed(4)"></span>
+                                </div>
+                                <div class="w-full h-2 bg-space-800 rounded-full overflow-hidden">
+                                    <div class="h-full rounded-full bg-gradient-to-r from-neon-yellow/70 to-neon-green/70 transition-all duration-500"
+                                        :style="'width: ' + entry.pct + '%'"></div>
+                                </div>
+                            </div>
+                        </template>
+                    </div>
+                    <div x-show="accountStatsEntries.length === 0" class="py-6 text-center text-gray-600 text-sm" x-text="t('noUsageData')"></div>
+                </div>
+
                 <!-- Provider & Model distribution -->
                 <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 lg:gap-6 mb-6">
                     <!-- By Provider -->

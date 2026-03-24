@@ -74,7 +74,7 @@ export async function handleSetCodexProxy(req, res, { port }) {
         }
 
         writeFileSync(CODEX_CONFIG_FILE, configContent);
-        logger.info(`[CodexConfig] Updated config.toml: chatgpt_base_url = "${proxyBaseUrl}"`);
+        logger.info(`[CodexConfig] Updated config.toml: chatgpt_base_url = "${chatgptBaseUrl}"`);
 
         // --- Write auth.json from pool account ---
         const account = getActiveAccount();
@@ -104,7 +104,7 @@ export async function handleSetCodexProxy(req, res, { port }) {
 
         res.json({
             success: true,
-            message: `Codex CLI configured to use proxy at ${proxyBaseUrl}`,
+            message: `Codex CLI configured to use proxy at ${openaiBaseUrl}`,
             config_updated: true,
             auth_updated: true,
             account: account.email,

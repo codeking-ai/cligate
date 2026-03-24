@@ -429,6 +429,8 @@ async function _handleCodexViaAccountPool(res, body, modelId, isStreaming, start
                 }
 
                 logger.error(`[Codex] Upstream error ${upstreamResponse.status}: ${errorText.slice(0, 200)}`);
+                recordRequest({ provider: 'chatgpt-pool', keyId: creds.email, model: modelId, durationMs: Date.now() - startTime, success: false, error: errorText.slice(0, 200) });
+                logRequest({ route: '/backend-api/codex/responses', method: 'POST', provider: 'chatgpt-pool', keyId: creds.email, model: modelId, durationMs: Date.now() - startTime, status: upstreamResponse.status, success: false, error: errorText.slice(0, 200) });
                 return res.status(upstreamResponse.status)
                     .set('Content-Type', 'application/json')
                     .send(errorText);
@@ -463,9 +465,21 @@ async function _handleCodexViaAccountPool(res, body, modelId, isStreaming, start
             }
 
             const duration = Date.now() - startTime;
-            console.log(`[Codex Proxy] <<< RESPONSE OK | account=${creds.email} | model=${modelId} | ${duration}ms`);
-            return;
+            recordRequest({ provider: 'chatgpt-pool', keyId: creds.email, model: modelId, durationMs: duration, success: true });
+            logRequest({ route: '/backend-api/codex/responses', method: 'POST', provider: 'chatgpt-pool', keyId: creds.email, model: modelId, durationMs: duration, status: 200, success: true });
+            logger.success(`[Codex] <<< OK | account=${creds.email} | model=${modelId} | ${duration}ms`);
+            return true;
         } catch (error) {
+            if (res.headersSent) {
+                const duration = Date.now() - startTime;
+                recordRequest({ provider: 'chatgpt-pool', keyId: creds.email, model: modelId, durationMs: duration, success: true });
+                logRequest({ route: '/backend-api/codex/responses', method: 'POST', provider: 'chatgpt-pool', keyId: creds.email, model: modelId, durationMs: duration, status: 200, success: true });
+                logger.warn(`[Codex] Post-stream error (response already sent): ${error.message}`);
+                return true;
+            }
+            const duration = Date.now() - startTime;
+            recordRequest({ provider: 'chatgpt-pool', keyId: creds.email, model: modelId, durationMs: duration, success: false, error: error.message });
+            logRequest({ route: '/backend-api/codex/responses', method: 'POST', provider: 'chatgpt-pool', keyId: creds.email, model: modelId, durationMs: duration, success: false, error: error.message });
             logger.error(`[Codex] Network error on ${creds.email}: ${error.message}`);
             rotator.notifyFailure(account, modelId);
             continue;

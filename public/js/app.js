@@ -951,6 +951,7 @@ document.addEventListener('alpine:init', () => {
         usageHistory: [],
         providerStats: {},
         modelStats: {},
+        accountStats: {},
 
         get dailyChartMax() {
             if (!this.dailyStats.length) return 1;
@@ -973,13 +974,22 @@ document.addEventListener('alpine:init', () => {
             return entries.map(e => ({ ...e, pct: (e.requests / max) * 100 }));
         },
 
+        get accountStatsEntries() {
+            const entries = Object.entries(this.accountStats)
+                .map(([name, s]) => ({ name, ...s }))
+                .sort((a, b) => b.requests - a.requests);
+            const max = Math.max(1, ...entries.map(e => e.requests));
+            return entries.map(e => ({ ...e, pct: (e.requests / max) * 100 }));
+        },
+
         async loadUsageData() {
-            const [overviewRes, dailyRes, historyRes, providerRes, modelRes] = await Promise.all([
+            const [overviewRes, dailyRes, historyRes, providerRes, modelRes, accountRes] = await Promise.all([
                 this.api('/api/usage/overview'),
                 this.api(`/api/usage/daily?days=${this.dailyDays}`),
                 this.api('/api/usage/history?limit=50'),
                 this.api('/api/usage/providers'),
-                this.api('/api/usage/models')
+                this.api('/api/usage/models'),
+                this.api('/api/usage/accounts')
             ]);
             if (overviewRes.ok && overviewRes.data) {
                 this.usageOverview = overviewRes.data;
@@ -995,6 +1005,9 @@ document.addEventListener('alpine:init', () => {
             }
             if (modelRes.ok && modelRes.data?.stats) {
                 this.modelStats = modelRes.data.stats;
+            }
+            if (accountRes.ok && accountRes.data?.stats) {
+                this.accountStats = accountRes.data.stats;
             }
         },
 
