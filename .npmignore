@@ -1,0 +1,21 @@
+# Electron build
+dist-electron/
+electron-main.cjs
+
+# Dev & test
+tests/
+.git/
+.github/
+.claude/
+
+# Config & credentials
+accounts.json
+auth.json
+.env
+.internal/
+
+# Other
+node_modules/
+*.log
+CLAUDE_README.md
+apps/

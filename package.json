@@ -107,12 +107,23 @@
     }
   },
   "keywords": [
-    "codex",
+    "claude-code",
+    "codex-cli",
+    "gemini-cli",
+    "openclaw",
+    "ai-proxy",
     "openai",
-    "proxy",
-    "claude",
+    "anthropic",
     "chatgpt",
-    "oauth"
+    "claude",
+    "proxy-server",
+    "api-gateway",
+    "multi-account",
+    "oauth",
+    "free-ai",
+    "model-routing",
+    "developer-tools",
+    "coding-assistant"
   ],
   "license": "AGPL-3.0"
 }
