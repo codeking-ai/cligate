@@ -2,178 +2,215 @@
 
 ![Architecture banner](./images/f757093f-507b-4453-994e-f8275f8b07a9.png)
 
-[![MIT License](https://img.shields.io/badge/License-MIT-green.svg)](https://choosealicense.com/licenses/mit/)
+[![AGPL-3.0 License](https://img.shields.io/badge/License-AGPL--3.0-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
 [![Node.js Version](https://img.shields.io/badge/Node.js-18%2B-blue.svg)](https://nodejs.org/)
 [![GitHub stars](https://img.shields.io/github/stars/yiyao-ai/proxypool-hub?style=social)](https://github.com/yiyao-ai/proxypool-hub)
 
-> **Use Claude Code CLI with the power of ChatGPT Codex models.**
-> A local proxy that translates Anthropic API requests into ChatGPT Codex calls, enabling you to use the `claude` CLI tool with your ChatGPT Free/Plus/Pro subscription.
+**[English](#features) | [中文](./README_CN.md)**
+
+> A multi-protocol AI API proxy server with account pooling, API key management, and a visual dashboard.
+> Use **Claude Code**, **Codex CLI**, **Gemini CLI**, and **OpenClaw** through a unified local proxy — with multi-account rotation, free model routing, usage analytics, and one-click configuration.
 
 ---
 
-## 🚀 Features
+## Features
 
-- **Seamless Translation**: Translates Anthropic Messages API calls to ChatGPT Codex format.
-- **Model Mapping**: automatically maps `claude-sonnet` and `claude-opus` to their Codex equivalents.
-- **Multi-Account Support**: Manage multiple ChatGPT accounts with easy switching and auto-refresh.
-- **Web Dashboard**: Built-in UI (`http://localhost:8081`) for managing accounts, viewing logs, and testing prompts.
-- **Streaming Support**: Full Server-Sent Events (SSE) support for real-time responses.
-- **Native Tool Calling**: Supports Claude's tool use capabilities by translating them to Codex function calls.
+### Multi-CLI Proxy Support
+- **Claude Code** — Proxies Anthropic Messages API (`/v1/messages`) with streaming
+- **Codex CLI** — Proxies OpenAI Responses API (`/v1/responses`) and Chat Completions (`/v1/chat/completions`)
+- **Gemini CLI** — Proxies Gemini API (`/v1beta/models/*`) with one-click patch
+- **OpenClaw** — Custom provider injection via `anthropic-messages` or `openai-completions`
+
+### Account & Key Management
+- **ChatGPT Account Pool** — OAuth login, multi-account rotation (sticky / round-robin / random), auto token refresh
+- **Claude Account Pool** — OAuth PKCE login, token refresh with source writeback to Claude Code credentials
+- **API Key Pool** — Support for OpenAI, Azure OpenAI, Anthropic, Google Gemini, Vertex AI keys with automatic failover
+- **Smart Token Refresh** — Only refreshes when tokens are about to expire (< 5 min), syncs back to source CLI tools
+
+### Free Model Routing
+- **Kilo AI Gateway** — Routes `claude-haiku` requests to free models (DeepSeek, Qwen, MiniMax, etc.) via Kilo AI — no API key needed
+- **Configurable Haiku Model** — Choose which free model to use from the dashboard
+
+### Analytics & Monitoring
+- **Usage Dashboard** — Per-account, per-model, per-provider usage statistics
+- **Request Logs** — Full request/response logging with date filtering
+- **Real-time Log Stream** — Live SSE log stream for debugging
+
+### Web Dashboard
+- **One-click CLI Configuration** — Configure Claude Code, Codex CLI, Gemini CLI, OpenClaw with a single button
+- **Account Management UI** — Add, remove, enable/disable, switch accounts visually
+- **Model Mapping** — Customize which upstream model each provider resolves to
+- **API Gateway** — Expose your proxy to external apps via API keys with usage tracking
+- **i18n** — English and Chinese interface
 
 ---
 
-## � Security & Privacy
-
-**Is this a malicious proxy? No.**
-
-- **Local Execution**: This server runs entirely on your local machine (`localhost`).
-- **Direct Communication**: It connects *directly* to OpenAI/ChatGPT endpoints. No data is sent to any third-party server.
-- **Open Source**: The full source code is available here for you to audit.
-- **No Data Collection**: We do not track your prompts, keys, or personal data.
-
----
-
-## ⚙️ How it works
-
-This tool acts as a "translation layer" between the Claude CLI and ChatGPT's Codex backend.
-
-1.  **Intercept**: Claude Code CLI sends a request to `localhost:8081` (thinking it's Anthropic's API).
-2.  **Translate**: The proxy converts the Anthropic-format JSON into the specific payload format required by ChatGPT's internal Codex API.
-3.  **Forward**: The request is sent securely to ChatGPT using your own authenticated session.
-4.  **Stream**: The response from ChatGPT is converted back into Anthropic's Server-Sent Events (SSE) format and streamed to your terminal.
+## Architecture
 
 ```
-┌──────────────────┐     ┌─────────────────────┐     ┌────────────────────────────┐
-│   Claude Code    │────▶│  This Proxy Server  │────▶│  ChatGPT Codex Backend API  │
-│ (Anthropic API)  │     │ (Anthropic ⇄ OpenAI)│     │ (codex/responses)           │
-└──────────────────┘     └─────────────────────┘     └────────────────────────────┘
+┌─────────────┐  ┌───────────┐  ┌────────────┐  ┌──────────┐
+│ Claude Code │  │ Codex CLI │  │ Gemini CLI │  │ OpenClaw │
+└──────┬──────┘  └─────┬─────┘  └──────┬─────┘  └────┬─────┘
+       │               │               │              │
+       └───────────────┼───────────────┼──────────────┘
+                       ▼
+            ┌─────────────────────┐
+            │   ProxyPool Hub     │
+            │   localhost:8081    │
+            │                     │
+            │  ┌───────────────┐  │
+            │  │ Protocol      │  │
+            │  │ Translation   │  │
+            │  └───────┬───────┘  │
+            │          │          │
+            │  ┌───────▼───────┐  │
+            │  │ Account Pool  │  │
+            │  │ & Key Router  │  │
+            │  └───────┬───────┘  │
+            └──────────┼──────────┘
+                       │
+       ┌───────────────┼───────────────┐
+       ▼               ▼               ▼
+┌──────────┐    ┌──────────┐    ┌──────────┐
+│ Anthropic│    │  OpenAI  │    │ Kilo AI  │
+│   API    │    │   API    │    │  (Free)  │
+└──────────┘    └──────────┘    └──────────┘
 ```
 
 ---
 
-## �📦 Installation
+## Quick Start
 
-You don't need to install anything if you just want to run it:
+### Option 1: npx (No install)
 
 ```bash
-# Run directly with npx
 npx proxypool-hub@latest start
 ```
 
-Or install globally to use the CLI commands anywhere:
+### Option 2: Global install
 
 ```bash
 npm install -g proxypool-hub
 proxypool-hub start
 ```
 
+### Option 3: Desktop App (Electron)
+
+Download the latest release from [Releases](https://github.com/yiyao-ai/proxypool-hub/releases).
+
 ---
 
-## 🚦 Quick Start
+## Setup
 
-### 1. Start the Proxy
+### 1. Start the server
 
 ```bash
-npx proxypool-hub@latest start
+proxypool-hub start
 ```
-The server will start at `http://localhost:8081`.
 
-### 2. Add Your Account
+Dashboard opens at **http://localhost:8081**
 
-#### **Option A: Web Dashboard (Local Desktop)**
+### 2. Add accounts
 
-1. Open the dashboard at **[http://localhost:8081](http://localhost:8081)**
-2. Go to the **Accounts** tab
-3. Click **Add Account** and login with your ChatGPT account
+**Web Dashboard** (recommended):
+1. Open http://localhost:8081 → **Accounts** tab
+2. Click **Add Account** → Login with ChatGPT/Claude
+3. Accounts are automatically saved and tokens are auto-refreshed
 
-#### **Option B: CLI (Desktop or Headless/VM)**
-
+**CLI**:
 ```bash
-# Desktop (opens browser)
-proxypool-hub accounts add
-
-# Headless/VM server (manual code input)
-proxypool-hub accounts add --no-browser
+proxypool-hub accounts add            # Opens browser
+proxypool-hub accounts add --no-browser  # Headless/VM
 ```
 
-For **headless/VM servers** without a browser:
-1. Run the command with `--no-browser`
-2. It will print a URL - copy and open it on a device with a browser
-3. Complete login on that device
-4. After redirect, copy the callback URL (or just the code)
-5. Paste it back in the terminal
+### 3. Configure your CLI tool
 
-### 3. Configure Claude Code
-   Run this command to automatically configure your `claude` CLI to use the proxy:
-   ```bash
-   curl -X POST http://localhost:8081/claude/config/proxy
-   ```
+Click the **one-click configure** button in the Settings tab, or manually:
 
-   *Alternatively, set the environment variables manually:*
-   ```bash
-   export ANTHROPIC_BASE_URL=http://localhost:8081
-   export ANTHROPIC_API_KEY=dummy-key # The key is ignored but required by the CLI
-   ```
+**Claude Code:**
+```bash
+export ANTHROPIC_BASE_URL=http://localhost:8081
+export ANTHROPIC_API_KEY=any-key
+claude
+```
 
-4. **Run Claude**:
-   ```bash
-   claude
-   ```
+**Codex CLI:**
+```toml
+# ~/.codex/config.toml
+chatgpt_base_url = "http://localhost:8081/backend-api/"
+openai_base_url = "http://localhost:8081"
+```
 
----
+**Gemini CLI:** Use the one-click patch button in the dashboard.
 
-## 🧠 Model Mapping
-
-The proxy automatically maps Claude model names to the appropriate Codex backend:
-(You can Change Models from )
-
-| Claude Model ID | Mapped Codex Model | Auth Required | Description |
-| :--- | :--- | :---: | :--- |
-| `claude-sonnet-4-5` | **GPT-5.2 Codex** | ✅ | Default high-intelligence model |
-| `claude-opus-4-5` | **GPT-5.3 Codex** | ✅ | Maximum reasoning capability |
-| `claude-haiku-4` | Kilo Code (Free) | ❌ | MiniMax M2.5, Qwen3, DeepSeek R1, etc. (No auth needed) |
+**OpenClaw:** Use the one-click configure button, or add manually to `~/.openclaw/openclaw.json`:
+```json
+{
+  "models": {
+    "providers": {
+      "proxypool": {
+        "baseUrl": "http://localhost:8081",
+        "apiKey": "sk-ant-proxy",
+        "api": "anthropic-messages"
+      }
+    }
+  }
+}
+```
 
 ---
 
-## 🛠️ Configuration & API
+## Model Mapping
 
-### Web Dashboard
-Visit `http://localhost:8081` to:
-- **Manage Accounts**: Add, remove, or switch active ChatGPT accounts.
-- **View Logs**: See real-time request/response logs for debugging.
-- **Test Models**: Run quick tests against the configured models.
+| Requested Model | Routed To | Auth Required |
+|:---|:---|:---:|
+| `claude-sonnet-4-6` | GPT-5.2 Codex / Anthropic API | Yes |
+| `claude-opus-4-6` | GPT-5.3 Codex / Anthropic API | Yes |
+| `claude-haiku-4-5` | Free model via Kilo AI | No |
 
-### API Endpoints
-- `GET /health`: Check server status.
-- `GET /accounts`: List configured accounts.
-- `POST /v1/messages`: Anthropic-compatible chat completion endpoint.
-
-See [API Documentation](./docs/API.md) for full details.
+The haiku model can be changed to any free model (DeepSeek R1, Qwen3, MiniMax, etc.) from the Settings tab.
 
 ---
 
-## 🤝 Contributing
+## API Endpoints
 
-Contributions are welcome! Please feel free to submit a Pull Request.
+| Endpoint | Protocol | Used By |
+|:---|:---|:---|
+| `POST /v1/messages` | Anthropic Messages | Claude Code, OpenClaw |
+| `POST /v1/chat/completions` | OpenAI Chat Completions | Codex CLI, OpenClaw |
+| `POST /v1/responses` | OpenAI Responses | Codex CLI |
+| `POST /backend-api/codex/responses` | Codex Internal | Codex CLI |
+| `POST /v1beta/models/*` | Gemini API | Gemini CLI |
+| `GET /v1/models` | OpenAI Models | All |
+| `GET /health` | Health Check | Monitoring |
 
-1. Fork the repository
-2. Create your feature branch (`git checkout -b feature/AmazingFeature`)
-3. Commit your changes (`git commit -m 'Add some AmazingFeature'`)
-4. Push to the branch (`git push origin feature/AmazingFeature`)
-5. Open a Pull Request
+See [API Documentation](./docs/API.md) for the full reference.
 
 ---
 
-## 📄 License
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+## Security & Privacy
 
-## ⚠️ Disclaimer
-This project is an independent open-source tool and is not affiliated with, endorsed by, or sponsored by Anthropic or OpenAI. "Claude" is a trademark of Anthropic PBC. "ChatGPT" and "Codex" are trademarks of OpenAI. Use responsibly and in accordance with applicable Terms of Service.
+- **100% Local** — Runs entirely on `localhost`, no external server involved
+- **Direct Connection** — Connects directly to official APIs (OpenAI, Anthropic, Google), no third-party relay
+- **No Telemetry** — Zero data collection, zero tracking
+- **Token Safety** — Credentials stored locally with `0600` permissions, smart refresh avoids unnecessary token rotation
+- **Source Writeback** — When tokens are refreshed for imported accounts, they are synced back to the source CLI tool so it keeps working
+
+---
+
+## License
+
+This project is licensed under [AGPL-3.0](https://www.gnu.org/licenses/agpl-3.0).
+
+## Disclaimer
+
+This project is an independent open-source tool. It is not affiliated with, endorsed by, or sponsored by Anthropic, OpenAI, or Google. All trademarks belong to their respective owners. Use responsibly and in accordance with applicable Terms of Service.
 
 ---
 
 <div align="center">
-  <p>If you find this project useful, please give it a star! ⭐️</p>
+  <sub>Built for developers who use multiple AI coding assistants.</sub>
+  <br>
   <a href="https://github.com/yiyao-ai/proxypool-hub">
     <img src="https://img.shields.io/github/stars/yiyao-ai/proxypool-hub?style=social" alt="Star on GitHub">
   </a>
