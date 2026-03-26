@@ -1219,6 +1219,74 @@ document.addEventListener('alpine:init', () => {
             } catch {
                 return body;
             }
+        },
+
+        // ─── Tool Installer ──────────────────────────────────────────────────
+        toolsList: {},
+        toolsOS: '',
+        toolsInstalling: { node: false, claude: false, codex: false, gemini: false, openclaw: false },
+        toolsErrors: {},
+        toolsInstallingAll: false,
+        nodeInstallInfo: null,
+
+        async loadToolsStatus() {
+            const res = await this.api('/api/tools/status');
+            if (res.ok && res.data) {
+                this.toolsList = res.data.tools || {};
+                this.toolsOS = res.data.os || '';
+            }
+            // Load node install info if node is not installed
+            if (this.toolsList.node && !this.toolsList.node.installed) {
+                const infoRes = await this.api('/api/tools/node-info');
+                if (infoRes.ok && infoRes.data) {
+                    this.nodeInstallInfo = infoRes.data;
+                }
+            }
+        },
+
+        async installNodeJs() {
+            this.toolsInstalling.node = true;
+            this.toolsErrors.node = null;
+            const res = await this.api('/api/tools/install-node', { method: 'POST' });
+            this.toolsInstalling.node = false;
+            if (res.ok && res.data?.success) {
+                this.showToast('Node.js ' + this.t('installSuccess'), 'success');
+                await this.loadToolsStatus();
+            } else {
+                const errMsg = res.data?.error || this.t('installFailed');
+                this.toolsErrors.node = errMsg;
+                // If auto-install fails, show instructions
+                if (res.data?.command) {
+                    this.toolsErrors.node = errMsg + '\n' + this.t('tryManually') + ': ' + res.data.command;
+                }
+                this.showToast(this.t('installFailed'), 'error');
+            }
+        },
+
+        async installCliTool(toolId) {
+            this.toolsInstalling[toolId] = true;
+            this.toolsErrors[toolId] = null;
+            const res = await this.api(`/api/tools/install/${toolId}`, { method: 'POST' });
+            this.toolsInstalling[toolId] = false;
+            if (res.ok && res.data?.success) {
+                this.showToast((this.toolsList[toolId]?.name || toolId) + ' ' + this.t('installSuccess'), 'success');
+                await this.loadToolsStatus();
+            } else {
+                this.toolsErrors[toolId] = res.data?.error || this.t('installFailed');
+                this.showToast(this.t('installFailed'), 'error');
+            }
+        },
+
+        async installAllTools() {
+            this.toolsInstallingAll = true;
+            const tools = ['claude', 'codex', 'gemini', 'openclaw'];
+            for (const toolId of tools) {
+                if (!this.toolsList[toolId]?.installed) {
+                    await this.installCliTool(toolId);
+                }
+            }
+            this.toolsInstallingAll = false;
+            this.showToast(this.t('allToolsInstalled'), 'success');
         }
     }));
 });
