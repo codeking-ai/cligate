@@ -13,7 +13,7 @@ startServer({ port: PORT });
 
 console.log(`
 ╔══════════════════════════════════════════════════════════════╗
-║                  ProxyPool Hub v1.0.5                         ║
+║                  ProxyPool Hub v1.0.6                         ║
 ║                   (Direct API Mode)                          ║
 ╠══════════════════════════════════════════════════════════════╣
 ║  Server:   http://localhost:${PORT}                          ║

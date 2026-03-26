@@ -1,6 +1,6 @@
 {
   "name": "proxypool-hub",
-  "version": "1.0.5",
+  "version": "1.0.6",
   "description": "Multi-protocol AI API proxy server with account pooling, API key management, and visual dashboard. Supports Claude Code, Codex CLI, Gemini CLI, and OpenClaw.",
   "type": "module",
   "main": "electron-main.cjs",
