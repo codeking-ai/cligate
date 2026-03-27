@@ -103,14 +103,20 @@ export function resolveKiloModel() {
 
 /**
  * Resolves all model routing info from a requested model name.
+ * When enableFreeModels is false in settings, Kilo (free model) routing is suppressed
+ * and the request falls through to the account/API-key path instead.
  * @param {string} requestedModel
  * @returns {{ mappedModel: string, isKilo: boolean, kiloTarget: string|null, upstreamModel: string }}
  */
 export function resolveModelRouting(requestedModel) {
   const mappedModel = mapClaudeModel(requestedModel || 'gpt-5.2');
-  const isKilo = isKiloModel(mappedModel);
+  const settings = getServerSettings();
+  const freeEnabled = settings.enableFreeModels !== false;
+  const isKilo = freeEnabled && isKiloModel(mappedModel);
   const kiloTarget = isKilo ? resolveKiloModel() : null;
-  const upstreamModel = isKilo ? kiloTarget : mappedModel;
+  // When free models are disabled and the mapped model would have been 'kilo',
+  // fall back to 'gpt-5.2' so the request routes through accounts/API keys properly.
+  const upstreamModel = isKilo ? kiloTarget : (mappedModel === 'kilo' ? 'gpt-5.2' : mappedModel);
   return { mappedModel, isKilo, kiloTarget, upstreamModel };
 }
 

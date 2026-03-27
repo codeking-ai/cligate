@@ -8,6 +8,7 @@ const DEFAULT_SETTINGS = {
     haikuKiloModel: 'minimax/minimax-m2.5:free',
     accountStrategy: 'sticky',
     routingPriority: 'account-first',   // 'account-first' | 'apikey-first'
+    enableFreeModels: true,              // Allow routing to system free models (Kilo)
     enableRequestLogging: true,          // Log full request/response content
     requestLogRetentionDays: 7           // Days to keep request logs
 };

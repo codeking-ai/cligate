@@ -41,6 +41,8 @@ document.addEventListener('alpine:init', () => {
         strategySaving: false,
         routingPriority: 'account-first',
         routingSaving: false,
+        enableFreeModels: true,
+        freeModelsSaving: false,
 
         // Proxy status
         proxyStatus: {
@@ -144,6 +146,7 @@ document.addEventListener('alpine:init', () => {
             this.loadHaikuModelSetting();
             this.loadAccountStrategySetting();
             this.loadRoutingPrioritySetting();
+            this.loadFreeModelsSetting();
             this.loadKiloModels();
             this.refreshProxyStatus();
 
@@ -671,6 +674,30 @@ document.addEventListener('alpine:init', () => {
             const { ok, data } = await this.api('/settings/routing-priority');
             if (ok && data?.routingPriority) {
                 this.routingPriority = data.routingPriority;
+            }
+        },
+
+        async loadFreeModelsSetting() {
+            const { ok, data } = await this.api('/settings/enable-free-models');
+            if (ok && typeof data?.enableFreeModels === 'boolean') {
+                this.enableFreeModels = data.enableFreeModels;
+            }
+        },
+
+        async toggleFreeModels() {
+            if (this.freeModelsSaving) return;
+            this.freeModelsSaving = true;
+            const newValue = !this.enableFreeModels;
+            const { ok, data } = await this.api('/settings/enable-free-models', {
+                method: 'POST',
+                body: JSON.stringify({ enableFreeModels: newValue })
+            });
+            this.freeModelsSaving = false;
+            if (ok && typeof data?.enableFreeModels === 'boolean') {
+                this.enableFreeModels = data.enableFreeModels;
+                this.showToast(this.t('freeModelsUpdated'), 'success');
+            } else {
+                this.showToast(data?.error || this.t('freeModelsUpdateFailed'), 'error');
             }
         },
 

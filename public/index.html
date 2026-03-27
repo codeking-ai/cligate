@@ -910,6 +910,31 @@
 
                 <div class="view-card mt-6">
                     <div class="flex items-center gap-2.5 mb-4">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" class="w-4 h-4 text-neon-yellow">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path>
+                        </svg>
+                        <h3 class="text-xs font-mono text-gray-400 uppercase tracking-widest" x-text="t('freeModelsSwitch')"></h3>
+                    </div>
+                    <div class="flex flex-wrap items-center justify-between gap-4">
+                        <div>
+                            <div class="text-sm text-gray-300" x-text="t('freeModelsLabel')"></div>
+                            <div class="text-xs text-gray-500 font-mono" x-text="t('freeModelsDesc')"></div>
+                        </div>
+                        <div class="inline-flex items-center gap-3">
+                            <span class="text-xs font-mono" :class="enableFreeModels ? 'text-neon-green' : 'text-red-400'" x-text="enableFreeModels ? t('enabled') : t('disabled')"></span>
+                            <button class="relative inline-flex h-6 w-11 items-center rounded-full transition-colors duration-200 focus:outline-none"
+                                :class="enableFreeModels ? 'bg-neon-green' : 'bg-space-700'"
+                                :disabled="freeModelsSaving"
+                                @click="toggleFreeModels()">
+                                <span class="inline-block h-4 w-4 transform rounded-full bg-white transition-transform duration-200"
+                                    :class="enableFreeModels ? 'translate-x-6' : 'translate-x-1'"></span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="view-card mt-6" :class="{ 'opacity-50 pointer-events-none': !enableFreeModels }">
+                    <div class="flex items-center gap-2.5 mb-4">
                         <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" class="w-4 h-4 text-neon-purple">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path>
                         </svg>

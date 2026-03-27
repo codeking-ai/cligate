@@ -130,6 +130,34 @@ export function handleSetRoutingPriority(req, res) {
   res.json({ success: true, routingPriority: settings.routingPriority });
 }
 
+/**
+ * GET /settings/enable-free-models
+ * Returns whether free model routing (Kilo) is enabled.
+ */
+export function handleGetEnableFreeModels(req, res) {
+  const settings = getServerSettings();
+  res.json({ success: true, enableFreeModels: settings.enableFreeModels !== false });
+}
+
+/**
+ * POST /settings/enable-free-models
+ * Enables or disables free model routing (Kilo).
+ * Body: { enableFreeModels: true|false }
+ */
+export function handleSetEnableFreeModels(req, res) {
+  const { enableFreeModels } = req.body || {};
+
+  if (typeof enableFreeModels !== 'boolean') {
+    return res.status(400).json({
+      success: false,
+      error: 'enableFreeModels is required and must be a boolean'
+    });
+  }
+
+  const settings = setServerSettings({ enableFreeModels });
+  res.json({ success: true, enableFreeModels: settings.enableFreeModels });
+}
+
 export default {
   handleGetHaikuModel,
   handleSetHaikuModel,
@@ -137,5 +165,7 @@ export default {
   handleGetAccountStrategy,
   handleSetAccountStrategy,
   handleGetRoutingPriority,
-  handleSetRoutingPriority
+  handleSetRoutingPriority,
+  handleGetEnableFreeModels,
+  handleSetEnableFreeModels
 };

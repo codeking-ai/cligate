@@ -179,6 +179,12 @@ const i18n = {
     routingUpdated: 'Routing priority updated',
     routingUpdateFailed: 'Failed to update routing priority',
 
+    freeModelsSwitch: 'Free Models',
+    freeModelsLabel: 'Enable System Free Models',
+    freeModelsDesc: 'When disabled, all requests route through your accounts/API keys only',
+    freeModelsUpdated: 'Free models setting updated',
+    freeModelsUpdateFailed: 'Failed to update free models setting',
+
     claudeSettingsUpdated: 'Updated Claude Code settings.json (API URL + API key).',
     claudeSettingsFailed: 'Failed to update Claude Code settings.json',
 
@@ -534,6 +540,12 @@ const i18n = {
     apikeyFirst: 'API 密钥优先',
     routingUpdated: '路由优先级已更新',
     routingUpdateFailed: '更新路由优先级失败',
+
+    freeModelsSwitch: '免费模型',
+    freeModelsLabel: '启用系统免费模型',
+    freeModelsDesc: '关闭后，所有请求仅通过你的账户/API 密钥路由',
+    freeModelsUpdated: '免费模型设置已更新',
+    freeModelsUpdateFailed: '更新免费模型设置失败',
 
     claudeSettingsUpdated: '已更新 Claude Code settings.json（API 地址 + API 密钥）。',
     claudeSettingsFailed: '更新 Claude Code settings.json 失败',

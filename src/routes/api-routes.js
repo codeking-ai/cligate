@@ -14,7 +14,7 @@ import { getStatus, ACCOUNTS_FILE } from '../account-manager.js';
 import { handleMessages } from './messages-route.js';
 import { handleChatCompletion, handleCountTokens } from './chat-route.js';
 import { handleListModels, handleAccountModels, handleAccountUsage } from './models-route.js';
-import { handleGetHaikuModel, handleSetHaikuModel, handleGetKiloModels, handleGetAccountStrategy, handleSetAccountStrategy, handleGetRoutingPriority, handleSetRoutingPriority } from './settings-route.js';
+import { handleGetHaikuModel, handleSetHaikuModel, handleGetKiloModels, handleGetAccountStrategy, handleSetAccountStrategy, handleGetRoutingPriority, handleSetRoutingPriority, handleGetEnableFreeModels, handleSetEnableFreeModels } from './settings-route.js';
 import { handleGetLogs, handleStreamLogs } from './logs-route.js';
 import { handleGetClaudeConfig, handleSetProxyMode, handleSetDirectMode, handleSetClaudeApiEndpoint } from './claude-config-route.js';
 import { handleListApiKeys, handleAddApiKey, handleRemoveApiKey, handleUpdateApiKey, handleValidateApiKey, handleGetApiKeyStats } from './api-keys-route.js';
@@ -97,6 +97,8 @@ export function registerApiRoutes(app, { port }) {
   app.post('/settings/account-strategy', handleSetAccountStrategy);
   app.get('/settings/routing-priority', handleGetRoutingPriority);
   app.post('/settings/routing-priority', handleSetRoutingPriority);
+  app.get('/settings/enable-free-models', handleGetEnableFreeModels);
+  app.post('/settings/enable-free-models', handleSetEnableFreeModels);
 
   // ─── Account Management ───────────────────────────────────────────────────
   app.get('/accounts', handleListAccounts);
