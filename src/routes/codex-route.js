@@ -190,35 +190,56 @@ function _codexToChatBody(body) {
             }
         }
 
+        // Group consecutive function_calls into a single assistant message
+        // so that Azure/OpenAI doesn't reject due to missing tool responses.
+        let pendingToolCalls = null;
+
         for (const item of body.input) {
-            if (item.type === 'message') {
-                const role = item.role === 'developer' ? 'system' : item.role;
-                let content = '';
-                if (typeof item.content === 'string') {
-                    content = item.content;
-                } else if (Array.isArray(item.content)) {
-                    content = item.content.map(c => c.text || '').join('\n');
+            if (item.type === 'function_call') {
+                // Accumulate into a single assistant message
+                if (!pendingToolCalls) {
+                    pendingToolCalls = {
+                        role: 'assistant',
+                        content: '',
+                        tool_calls: []
+                    };
                 }
-                messages.push({ role, content });
-            } else if (item.type === 'function_call') {
-                messages.push({
-                    role: 'assistant',
-                    content: '',
-                    tool_calls: [{
-                        id: item.call_id || item.id || `call_${Date.now()}`,
-                        type: 'function',
-                        function: { name: item.name, arguments: item.arguments || '{}' }
-                    }]
+                pendingToolCalls.tool_calls.push({
+                    id: item.call_id || item.id || `call_${Date.now()}`,
+                    type: 'function',
+                    function: { name: item.name, arguments: item.arguments || '{}' }
                 });
-            } else if (item.type === 'function_call_output') {
-                const callId = item.call_id || item.id || '';
-                messages.push({
-                    role: 'tool',
-                    tool_call_id: callId,
-                    name: callIdToName[callId] || 'unknown',
-                    content: item.output || ''
-                });
+            } else {
+                // Flush any pending tool calls before adding a non-function_call item
+                if (pendingToolCalls) {
+                    messages.push(pendingToolCalls);
+                    pendingToolCalls = null;
+                }
+
+                if (item.type === 'message') {
+                    const role = item.role === 'developer' ? 'system' : item.role;
+                    let content = '';
+                    if (typeof item.content === 'string') {
+                        content = item.content;
+                    } else if (Array.isArray(item.content)) {
+                        content = item.content.map(c => c.text || '').join('\n');
+                    }
+                    messages.push({ role, content });
+                } else if (item.type === 'function_call_output') {
+                    const callId = item.call_id || item.id || '';
+                    messages.push({
+                        role: 'tool',
+                        tool_call_id: callId,
+                        name: callIdToName[callId] || 'unknown',
+                        content: item.output || ''
+                    });
+                }
             }
+        }
+        // Flush any remaining pending tool calls
+        if (pendingToolCalls) {
+            messages.push(pendingToolCalls);
+            pendingToolCalls = null;
         }
     } else if (typeof body.input === 'string') {
         messages.push({ role: 'user', content: body.input });
@@ -230,7 +251,7 @@ function _codexToChatBody(body) {
         stream: false
     };
 
-    if (body.max_output_tokens) chatBody.max_tokens = body.max_output_tokens;
+    if (body.max_output_tokens) chatBody.max_completion_tokens = body.max_output_tokens;
     if (body.temperature !== undefined) chatBody.temperature = body.temperature;
 
     if (Array.isArray(body.tools) && body.tools.length > 0) {
