@@ -1,6 +1,7 @@
 /**
  * Azure OpenAI Provider
  * Forwards requests to Azure OpenAI Service endpoints.
+ * Also supports Anthropic Messages API passthrough via format conversion.
  *
  * Required config:
  *   - apiKey:          Azure API key
@@ -10,6 +11,7 @@
  */
 
 import { BaseProvider } from './base.js';
+import { anthropicToOpenAI, openAIToAnthropic } from './format-bridge.js';
 
 const DEFAULT_API_VERSION = '2024-10-21';
 
@@ -97,6 +99,38 @@ export class AzureOpenAIProvider extends BaseProvider {
             deploymentName: this.deploymentName,
             apiVersion: this.apiVersion
         };
+    }
+
+    // ─── Anthropic Messages API passthrough (for /v1/messages endpoint) ──────
+
+    /**
+     * Accept an Anthropic Messages API body, convert to OpenAI Chat Completions,
+     * send to Azure OpenAI, and return response in Anthropic Messages format.
+     */
+    async sendAnthropicRequest(body) {
+        const openaiBody = anthropicToOpenAI(body);
+        // Azure doesn't use the model field in body — it's in the URL via deployment
+        delete openaiBody.model;
+
+        const url = this._buildChatUrl();
+        const response = await fetch(url, {
+            method: 'POST',
+            headers: {
+                'api-key': this.apiKey,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(openaiBody)
+        });
+
+        if (!response.ok) return response;
+
+        const data = await response.json();
+        const anthropicResponse = openAIToAnthropic(data, body.model);
+
+        return new Response(JSON.stringify(anthropicResponse), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' }
+        });
     }
 
     static get pricing() {
