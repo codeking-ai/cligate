@@ -8,6 +8,28 @@ import { logger } from './utils/logger.js';
 
 const CLAUDE_API_URL = 'https://api.anthropic.com/v1/messages';
 const ANTHROPIC_VERSION = '2023-06-01';
+const OAUTH_BETA_HEADER = 'oauth-2025-04-20';
+
+// Fields accepted by the Anthropic Messages API
+const ALLOWED_BODY_FIELDS = new Set([
+    'model', 'messages', 'max_tokens', 'metadata', 'stop_sequences',
+    'stream', 'system', 'temperature', 'thinking', 'tool_choice', 'tools',
+    'top_k', 'top_p', 'service_tier'
+]);
+
+/**
+ * Strip non-standard fields from request body to avoid 400 errors.
+ * Claude Code sends internal fields like context_management that the API rejects.
+ */
+function _sanitizeBody(body) {
+    const cleaned = {};
+    for (const key of Object.keys(body)) {
+        if (ALLOWED_BODY_FIELDS.has(key)) {
+            cleaned[key] = body[key];
+        }
+    }
+    return cleaned;
+}
 
 /**
  * Send a non-streaming request to Claude API.
@@ -19,11 +41,12 @@ export async function sendClaudeMessage(body, accessToken) {
     const response = await fetch(CLAUDE_API_URL, {
         method: 'POST',
         headers: {
-            'x-api-key': accessToken,
+            'Authorization': `Bearer ${accessToken}`,
             'anthropic-version': ANTHROPIC_VERSION,
+            'anthropic-beta': OAUTH_BETA_HEADER,
             'Content-Type': 'application/json'
         },
-        body: JSON.stringify({ ...body, stream: false })
+        body: JSON.stringify({ ..._sanitizeBody(body), stream: false })
     });
 
     if (!response.ok) {
@@ -44,11 +67,12 @@ export async function sendClaudeStream(body, accessToken) {
     const response = await fetch(CLAUDE_API_URL, {
         method: 'POST',
         headers: {
-            'x-api-key': accessToken,
+            'Authorization': `Bearer ${accessToken}`,
             'anthropic-version': ANTHROPIC_VERSION,
+            'anthropic-beta': OAUTH_BETA_HEADER,
             'Content-Type': 'application/json'
         },
-        body: JSON.stringify({ ...body, stream: true })
+        body: JSON.stringify({ ..._sanitizeBody(body), stream: true })
     });
 
     if (!response.ok) {
