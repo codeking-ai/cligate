@@ -723,20 +723,29 @@ document.addEventListener('alpine:init', () => {
             const { ok, data } = await this.api('/api/model-mappings');
             if (ok && data) {
                 this.modelMappingData = data;
-                // Only show providers that have API keys configured
                 const allProviders = Object.keys(data.providers || {});
+                const configuredTypes = new Set();
+
                 try {
+                    // Check API keys
                     const keysResp = await this.api('/api/keys');
                     const keys = keysResp.ok ? (Array.isArray(keysResp.data) ? keysResp.data : keysResp.data?.keys || []) : [];
-                    if (keys.length > 0) {
-                        const configuredTypes = new Set(keys.map(k => k.type));
-                        this.modelMappingProviders = allProviders.filter(p => configuredTypes.has(p));
-                    } else {
-                        this.modelMappingProviders = [];
-                    }
+                    for (const k of keys) configuredTypes.add(k.type);
+
+                    // Check ChatGPT accounts → openai provider
+                    if (this.accounts.length > 0) configuredTypes.add('openai');
+
+                    // Check Claude accounts → anthropic provider
+                    if (this.claudeAccounts.length > 0) configuredTypes.add('anthropic');
                 } catch {
-                    this.modelMappingProviders = [];
+                    // fallback: still include account-based providers
+                    if (this.accounts.length > 0) configuredTypes.add('openai');
+                    if (this.claudeAccounts.length > 0) configuredTypes.add('anthropic');
                 }
+
+                this.modelMappingProviders = configuredTypes.size > 0
+                    ? allProviders.filter(p => configuredTypes.has(p))
+                    : [];
             }
         },
 
