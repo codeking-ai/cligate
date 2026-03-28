@@ -380,6 +380,17 @@ const i18n = {
     nodeRequiredFirst: 'Node.js must be installed first before installing CLI tools',
     tryManually: 'Try manually',
     refresh: 'Refresh',
+    // Tool Updates
+    checkUpdates: 'Check Updates',
+    checkingUpdates: 'Checking...',
+    updateAvailable: 'Update Available',
+    update: 'Update',
+    updating: 'Updating...',
+    updateSuccess: 'updated successfully',
+    updateAll: 'Update All Tools',
+    updateAllDesc: 'Update all tools with available updates',
+    updateAllBtn: 'Update All',
+    allToolsUpdated: 'All tools update complete',
 
     // Language
     langLabel: 'EN',
@@ -767,6 +778,17 @@ const i18n = {
     nodeRequiredFirst: '需要先安装 Node.js 才能安装 CLI 工具',
     tryManually: '请手动尝试',
     refresh: '刷新',
+    // Tool Updates
+    checkUpdates: '检查更新',
+    checkingUpdates: '检查中...',
+    updateAvailable: '有新版本',
+    update: '更新',
+    updating: '更新中...',
+    updateSuccess: '更新成功',
+    updateAll: '更新全部工具',
+    updateAllDesc: '更新所有有新版本的 CLI 工具',
+    updateAllBtn: '全部更新',
+    allToolsUpdated: '所有工具更新完成',
 
     langLabel: '中文',
   }

@@ -17,7 +17,11 @@
       "Bash(git push:*)",
       "Bash(gh release create:*)",
       "Bash(gh repo view:*)",
-      "Bash(git checkout:*)"
+      "Bash(git checkout:*)",
+      "WebSearch",
+      "WebFetch(domain:www.npmjs.com)",
+      "WebFetch(domain:docs.openclaw.ai)",
+      "Bash(ls:*)"
     ],
     "deny": [
       "Skill(superpowers:*)"

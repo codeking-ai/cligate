@@ -7,7 +7,7 @@
  *   POST /api/tools/install-node    — attempt automatic Node.js installation
  */
 
-import { detectAllTools, getNodeInstallInfo, installTool, installNode } from '../tool-installer.js';
+import { detectAllTools, getNodeInstallInfo, installTool, installNode, checkAllLatestVersions, updateTool } from '../tool-installer.js';
 import { launchTool } from '../tool-launcher.js';
 
 export function handleGetToolsStatus(req, res) {
@@ -42,6 +42,21 @@ export async function handleInstallNode(req, res) {
 export function handleLaunchTool(req, res) {
     const { toolId } = req.params;
     const result = launchTool(toolId);
+    if (result.success) {
+        res.json(result);
+    } else {
+        res.status(400).json(result);
+    }
+}
+
+export function handleCheckUpdates(req, res) {
+    const latestVersions = checkAllLatestVersions();
+    res.json({ success: true, latestVersions });
+}
+
+export async function handleUpdateTool(req, res) {
+    const { toolId } = req.params;
+    const result = await updateTool(toolId);
     if (result.success) {
         res.json(result);
     } else {

@@ -1729,12 +1729,21 @@
                             <span class="text-[10px] font-mono text-gray-400 uppercase tracking-wider" x-text="t('toolInstallerDesc')"></span>
                         </div>
                     </div>
-                    <button class="btn btn-xs btn-outline border-space-border text-gray-400 hover:text-white h-8 gap-1" @click="loadToolsStatus()">
-                        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                        </svg>
-                        <span x-text="t('refresh')"></span>
-                    </button>
+                    <div class="flex items-center gap-2">
+                        <button class="btn btn-xs btn-outline border-amber-500/50 text-amber-400 hover:text-amber-300 hover:border-amber-400 h-8 gap-1"
+                            @click="checkToolUpdates()" :disabled="toolsCheckingUpdates">
+                            <svg class="w-3.5 h-3.5" :class="{'animate-spin': toolsCheckingUpdates}" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                            </svg>
+                            <span x-text="toolsCheckingUpdates ? t('checkingUpdates') : t('checkUpdates')"></span>
+                        </button>
+                        <button class="btn btn-xs btn-outline border-space-border text-gray-400 hover:text-white h-8 gap-1" @click="loadToolsStatus()">
+                            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                            </svg>
+                            <span x-text="t('refresh')"></span>
+                        </button>
+                    </div>
                 </div>
 
                 <!-- OS Info -->
@@ -1822,7 +1831,27 @@
                                     </div>
                                 </div>
                                 <div class="flex items-center gap-3">
-                                    <template x-if="toolsList[toolId]?.installed">
+                                    <!-- Installed: update available -->
+                                    <template x-if="toolsList[toolId]?.installed && isUpdateAvailable(toolId)">
+                                        <div class="flex items-center gap-2">
+                                            <span class="text-xs font-mono" :class="{
+                                                'text-purple-400': toolId === 'claude',
+                                                'text-green-400': toolId === 'codex',
+                                                'text-blue-400': toolId === 'gemini',
+                                                'text-orange-400': toolId === 'openclaw'
+                                            }" x-text="'v' + toolsList[toolId].version"></span>
+                                            <span class="text-xs text-gray-500">→</span>
+                                            <span class="text-xs font-mono text-amber-400" x-text="'v' + toolsLatestVersions[toolId]"></span>
+                                            <span class="inline-flex items-center h-5 px-2 rounded-full text-[10px] font-bold bg-amber-500/10 text-amber-400 border border-amber-500/30" x-text="t('updateAvailable')"></span>
+                                            <button class="btn btn-xs bg-amber-500 hover:bg-amber-600 border-none text-white"
+                                                @click="updateCliTool(toolId)"
+                                                :disabled="toolsUpdating[toolId]">
+                                                <span x-text="toolsUpdating[toolId] ? t('updating') : t('update')"></span>
+                                            </button>
+                                        </div>
+                                    </template>
+                                    <!-- Installed: up to date -->
+                                    <template x-if="toolsList[toolId]?.installed && !isUpdateAvailable(toolId)">
                                         <div class="flex items-center gap-2">
                                             <span class="text-xs font-mono" :class="{
                                                 'text-purple-400': toolId === 'claude',
@@ -1879,6 +1908,26 @@
                         <div class="mt-3 p-2 bg-yellow-500/5 border border-yellow-500/20 rounded text-xs text-yellow-400" x-text="t('nodeRequiredFirst')"></div>
                     </template>
                 </div>
+
+                <!-- Batch update (only visible when updates are available) -->
+                <template x-if="toolsWithUpdates() > 0">
+                    <div class="view-card mt-3">
+                        <div class="flex items-center justify-between">
+                            <div>
+                                <div class="text-sm font-bold text-white" x-text="t('updateAll')"></div>
+                                <div class="text-xs text-gray-500" x-text="t('updateAllDesc')"></div>
+                            </div>
+                            <button class="btn btn-sm bg-amber-500 hover:bg-amber-600 border-none text-white"
+                                @click="updateAllTools()"
+                                :disabled="toolsUpdatingAll">
+                                <svg class="w-4 h-4 mr-1" :class="{'animate-spin': toolsUpdatingAll}" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                                </svg>
+                                <span x-text="toolsUpdatingAll ? t('updating') : t('updateAllBtn')"></span>
+                            </button>
+                        </div>
+                    </div>
+                </template>
             </div>
         </div>
     </div>

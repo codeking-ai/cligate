@@ -1677,6 +1677,10 @@ document.addEventListener('alpine:init', () => {
         toolsErrors: {},
         toolsInstallingAll: false,
         nodeInstallInfo: null,
+        toolsLatestVersions: {},
+        toolsCheckingUpdates: false,
+        toolsUpdating: { claude: false, codex: false, gemini: false, openclaw: false },
+        toolsUpdatingAll: false,
 
         async loadToolsStatus() {
             const res = await this.api('/api/tools/status');
@@ -1691,6 +1695,8 @@ document.addEventListener('alpine:init', () => {
                     this.nodeInstallInfo = infoRes.data;
                 }
             }
+            // Async check for updates (fire-and-forget)
+            this.checkToolUpdates();
         },
 
         async installNodeJs() {
@@ -1736,6 +1742,52 @@ document.addEventListener('alpine:init', () => {
             }
             this.toolsInstallingAll = false;
             this.showToast(this.t('allToolsInstalled'), 'success');
+        },
+
+        async checkToolUpdates() {
+            this.toolsCheckingUpdates = true;
+            const res = await this.api('/api/tools/check-updates', { method: 'POST' });
+            this.toolsCheckingUpdates = false;
+            if (res.ok && res.data?.latestVersions) {
+                this.toolsLatestVersions = res.data.latestVersions;
+            }
+        },
+
+        isUpdateAvailable(toolId) {
+            const tool = this.toolsList[toolId];
+            const latest = this.toolsLatestVersions[toolId];
+            if (!tool?.installed || !tool.version || !latest) return false;
+            return tool.version !== latest;
+        },
+
+        toolsWithUpdates() {
+            return ['claude', 'codex', 'gemini', 'openclaw'].filter(id => this.isUpdateAvailable(id)).length;
+        },
+
+        async updateCliTool(toolId) {
+            this.toolsUpdating[toolId] = true;
+            this.toolsErrors[toolId] = null;
+            const res = await this.api(`/api/tools/update/${toolId}`, { method: 'POST' });
+            this.toolsUpdating[toolId] = false;
+            if (res.ok && res.data?.success) {
+                this.showToast((this.toolsList[toolId]?.name || toolId) + ' ' + this.t('updateSuccess'), 'success');
+                await this.loadToolsStatus();
+            } else {
+                this.toolsErrors[toolId] = res.data?.error || this.t('updateFailed');
+                this.showToast(this.t('updateFailed'), 'error');
+            }
+        },
+
+        async updateAllTools() {
+            this.toolsUpdatingAll = true;
+            const tools = ['claude', 'codex', 'gemini', 'openclaw'];
+            for (const toolId of tools) {
+                if (this.isUpdateAvailable(toolId)) {
+                    await this.updateCliTool(toolId);
+                }
+            }
+            this.toolsUpdatingAll = false;
+            this.showToast(this.t('allToolsUpdated'), 'success');
         }
     }));
 });
