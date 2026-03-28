@@ -23,6 +23,7 @@ import { resolveModel } from '../model-mapping.js';
 import { logRequest } from '../request-logger.js';
 
 const UPSTREAM_URL = 'https://chatgpt.com/backend-api/codex/responses';
+const UPSTREAM_COMPACT_URL = 'https://chatgpt.com/backend-api/codex/responses/compact';
 const MAX_RETRIES = 5;
 const MAX_WAIT_BEFORE_ERROR_MS = 120000;
 const SHORT_RATE_LIMIT_THRESHOLD_MS = 5000;
@@ -153,6 +154,7 @@ function tryExtractSummary(rawBody, contentEncoding) {
 export async function handleResponses(req, res) {
     const startTime = Date.now();
     const contentEncoding = req.headers['content-encoding'] || '';
+    const isCompact = req.path.endsWith('/compact');
 
     // Collect raw body (bypasses express.json)
     const rawBody = await collectRawBody(req);
@@ -161,9 +163,15 @@ export async function handleResponses(req, res) {
     const modelId = tryExtractModel(rawBody, contentEncoding);
     const parsed = tryExtractSummary(rawBody, contentEncoding);
 
+    // For compact requests via API key/Claude, ensure store=false
+    if (isCompact && parsed && parsed.store !== false) {
+        parsed.store = false;
+    }
+
     // --- Request logging ---
+    const routeLabel = isCompact ? '/responses/compact' : '/responses';
     const toolNames = parsed && Array.isArray(parsed.tools) ? parsed.tools.map(t => t.name || t.function?.name).filter(Boolean) : [];
-    logger.info(`[Codex] >>> /responses | model=${modelId} | ${rawBody.length}B | encoding=${contentEncoding || 'none'} | tools=${toolNames.length}`);
+    logger.info(`[Codex] >>> ${routeLabel} | model=${modelId} | ${rawBody.length}B | encoding=${contentEncoding || 'none'} | tools=${toolNames.length}`);
 
     const isStreaming = parsed ? parsed.stream !== false : true;
 
@@ -181,7 +189,7 @@ export async function handleResponses(req, res) {
             if (result !== false) return;
         }
         if (hasAccounts) {
-            const poolResult = await _handleResponsesViaAccountPool(req, res, rawBody, contentEncoding, modelId, isStreaming, startTime);
+            const poolResult = await _handleResponsesViaAccountPool(req, res, rawBody, contentEncoding, modelId, isStreaming, startTime, isCompact);
             if (poolResult !== false) return;
         }
         if (hasClaudeAccounts && parsed) {
@@ -191,7 +199,7 @@ export async function handleResponses(req, res) {
     } else {
         // account-first (default): ChatGPT accounts → Claude accounts → API Key
         if (hasAccounts) {
-            const poolResult = await _handleResponsesViaAccountPool(req, res, rawBody, contentEncoding, modelId, isStreaming, startTime);
+            const poolResult = await _handleResponsesViaAccountPool(req, res, rawBody, contentEncoding, modelId, isStreaming, startTime, isCompact);
             if (poolResult !== false) return;
         }
         if (hasClaudeAccounts && parsed) {
@@ -431,7 +439,7 @@ async function _handleResponsesViaApiKey(res, parsed, modelId, isStreaming, keyT
  * Handle /responses via ChatGPT account pool (original logic).
  * Returns false if all accounts exhausted.
  */
-async function _handleResponsesViaAccountPool(req, res, rawBody, contentEncoding, modelId, isStreaming, startTime) {
+async function _handleResponsesViaAccountPool(req, res, rawBody, contentEncoding, modelId, isStreaming, startTime, isCompact = false) {
     const rotator = getAccountRotator();
     rotator.clearExpiredLimits();
 
@@ -476,7 +484,8 @@ async function _handleResponsesViaAccountPool(req, res, rawBody, contentEncoding
                 upstreamHeaders['Content-Encoding'] = contentEncoding;
             }
 
-            const upstreamResponse = await fetch(UPSTREAM_URL, {
+            const targetUrl = isCompact ? UPSTREAM_COMPACT_URL : UPSTREAM_URL;
+            const upstreamResponse = await fetch(targetUrl, {
                 method: 'POST',
                 headers: upstreamHeaders,
                 body: rawBody

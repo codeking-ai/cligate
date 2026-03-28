@@ -504,8 +504,8 @@
                         </div>
 
                         <div class="rounded-2xl border border-space-border/30 bg-space-900/40 p-3 mb-4">
-                            <div class="grid grid-cols-[180px_minmax(0,1fr)_auto] items-end gap-3">
-                                <div class="min-w-0">
+                            <div class="flex items-end gap-3 flex-nowrap">
+                                <div class="min-w-0" style="flex:0 0 168px;">
                                     <label class="text-[11px] font-mono text-gray-400 uppercase tracking-wider" x-text="t('chatSource')"></label>
                                     <select x-model="chatSourceId" @change="syncActiveChatSession()"
                                         class="input mt-1.5 h-10 bg-space-800 border-space-border text-white font-mono text-xs">
@@ -514,7 +514,7 @@
                                         </template>
                                     </select>
                                 </div>
-                                <div class="min-w-0">
+                                <div class="min-w-0" style="flex:1 1 auto;">
                                     <label class="text-[11px] font-mono text-gray-400 uppercase tracking-wider" x-text="t('chatModel')"></label>
                                     <input type="text" list="chat-model-options" x-model="chatModel" @change="syncActiveChatSession()"
                                         class="input mt-1.5 h-10 bg-space-800 border-space-border text-white font-mono text-xs"
@@ -526,6 +526,7 @@
                                     </datalist>
                                 </div>
                                 <button class="btn btn-sm bg-space-800 hover:bg-space-700 border border-space-border text-gray-200 mb-[1px] whitespace-nowrap"
+                                    style="flex:0 0 auto;"
                                     @click="toggleSystemPrompt()">
                                     <span x-text="chatSystemPromptOpen ? t('hidePrompt') : t('showPrompt')"></span>
                                 </button>

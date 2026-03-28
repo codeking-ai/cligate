@@ -64,7 +64,9 @@ export function createServer({ port }) {
   // Codex CLI sends zstd-compressed bodies that express.json() cannot parse.
   // This route reads the raw body and forwards it as-is.
   app.post('/responses', handleResponses);
+  app.post('/responses/compact', handleResponses);
   app.post('/v1/responses', handleResponses);
+  app.post('/v1/responses/compact', handleResponses);
 
   app.use(express.json({ limit: '10mb' }));
 

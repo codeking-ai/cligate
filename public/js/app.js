@@ -90,6 +90,7 @@ document.addEventListener('alpine:init', () => {
         chatSystemPromptOpen: false,
         chatLoading: false,
         chatSourceLoading: false,
+        chatStreamController: null,
 
         haikuTestPrompt: 'Say hello',
         haikuTestResponse: '',
@@ -764,14 +765,116 @@ document.addEventListener('alpine:init', () => {
             this.syncActiveChatSession();
             this.chatLoading = true;
 
+            const assistantMessage = {
+                role: 'assistant',
+                content: '',
+                usage: null,
+                model: this.chatModel.trim() || 'gpt-5.2',
+                mappedModel: null,
+                sourceLabel: this.chatSourceLabel(this.chatSourceId)
+            };
+            this.chatMessages.push(assistantMessage);
+            this.syncActiveChatSession();
+
             const requestMessages = [];
             if (this.chatSystemPrompt.trim()) {
                 requestMessages.push({ role: 'system', content: this.chatSystemPrompt.trim() });
             }
             for (const message of this.chatMessages) {
+                if (message === assistantMessage) continue;
                 requestMessages.push({ role: message.role, content: message.content });
             }
 
+            this.chatStreamController = new AbortController();
+
+            try {
+                const response = await fetch('/api/chat/stream', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        sourceId: this.chatSourceId,
+                        model: this.chatModel.trim() || 'gpt-5.2',
+                        messages: requestMessages
+                    }),
+                    signal: this.chatStreamController.signal
+                });
+
+                if (!response.ok || !response.body) {
+                    const errorText = await response.text();
+                    throw new Error(errorText || this.t('requestFailed'));
+                }
+
+                const streamResult = await this.consumeChatStream(response.body, assistantMessage);
+                if (!assistantMessage.content && !assistantMessage.isError) {
+                    await this.fetchChatCompletionFallback(requestMessages, assistantMessage);
+                } else if (!streamResult.seenDelta && !streamResult.seenDone && !assistantMessage.isError) {
+                    await this.fetchChatCompletionFallback(requestMessages, assistantMessage);
+                }
+            } catch (error) {
+                assistantMessage.content = error.message || this.t('requestFailed');
+                assistantMessage.isError = true;
+                this.showToast(assistantMessage.content, 'error');
+            } finally {
+                this.chatLoading = false;
+                this.chatStreamController = null;
+                this.chatMessages = [...this.chatMessages];
+                this.syncActiveChatSession();
+            }
+        },
+
+        async consumeChatStream(stream, assistantMessage) {
+            const reader = stream.getReader();
+            const decoder = new TextDecoder();
+            let buffer = '';
+            let seenDelta = false;
+            let seenDone = false;
+            const msgIndex = this.chatMessages.indexOf(assistantMessage);
+
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+
+                buffer += decoder.decode(value, { stream: true });
+                const chunks = buffer.split('\n\n');
+                buffer = chunks.pop() || '';
+
+                let needsUpdate = false;
+                for (const chunk of chunks) {
+                    const payload = this.parseChatSseChunk(chunk);
+                    if (!payload) continue;
+
+                    if (payload.type === 'start') {
+                        assistantMessage.mappedModel = payload.mappedModel || null;
+                        assistantMessage.sourceLabel = payload.source?.label || assistantMessage.sourceLabel;
+                        needsUpdate = true;
+                    } else if (payload.type === 'delta') {
+                        seenDelta = true;
+                        assistantMessage.content += payload.text || '';
+                        needsUpdate = true;
+                    } else if (payload.type === 'done') {
+                        seenDone = true;
+                        assistantMessage.usage = payload.usage || null;
+                        assistantMessage.model = payload.model || assistantMessage.model;
+                        assistantMessage.mappedModel = payload.mappedModel || assistantMessage.mappedModel;
+                        needsUpdate = true;
+                    } else if (payload.type === 'error') {
+                        assistantMessage.content = payload.error || this.t('requestFailed');
+                        assistantMessage.isError = true;
+                        throw new Error(assistantMessage.content);
+                    }
+                }
+
+                if (needsUpdate && msgIndex >= 0) {
+                    // Replace the message object to trigger Alpine.js reactivity
+                    this.chatMessages[msgIndex] = { ...assistantMessage };
+                    this.chatMessages = [...this.chatMessages];
+                }
+            }
+
+            return { seenDelta, seenDone };
+        },
+
+        async fetchChatCompletionFallback(requestMessages, assistantMessage) {
             const { ok, data, error } = await this.api('/api/chat/complete', {
                 method: 'POST',
                 body: JSON.stringify({
@@ -781,27 +884,37 @@ document.addEventListener('alpine:init', () => {
                 })
             });
 
-            this.chatLoading = false;
-
             if (ok && data?.reply) {
-                this.chatMessages.push({
-                    role: 'assistant',
-                    content: data.reply.content || '',
-                    usage: data.reply.usage || null,
-                    model: data.model || this.chatModel,
-                    mappedModel: data.mappedModel || null,
-                    sourceLabel: data.source?.label || ''
-                });
-                this.syncActiveChatSession();
+                assistantMessage.content = data.reply.content || '';
+                assistantMessage.usage = data.reply.usage || null;
+                assistantMessage.model = data.model || assistantMessage.model;
+                assistantMessage.mappedModel = data.mappedModel || null;
+                assistantMessage.sourceLabel = data.source?.label || assistantMessage.sourceLabel;
+                assistantMessage.isError = false;
+                this.chatMessages = [...this.chatMessages];
                 return;
             }
 
-            this.chatMessages.push({
-                role: 'assistant',
-                content: data?.error || error || this.t('requestFailed'),
-                isError: true
-            });
-            this.syncActiveChatSession();
+            throw new Error(data?.error || error || this.t('requestFailed'));
+        },
+
+        parseChatSseChunk(chunk) {
+            const lines = chunk.split('\n');
+            let dataLine = '';
+
+            for (const line of lines) {
+                if (line.startsWith('data:')) {
+                    dataLine += line.slice(5).trim();
+                }
+            }
+
+            if (!dataLine) return null;
+
+            try {
+                return JSON.parse(dataLine);
+            } catch {
+                return null;
+            }
         },
 
         chatSourceLabel(sourceId) {

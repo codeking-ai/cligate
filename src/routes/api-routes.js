@@ -28,7 +28,7 @@ import { handleGetGeminiCliConfig, handleSetGeminiCliProxy, handleSetGeminiCliDi
 import { handleGetOpenClawConfig, handleSetOpenClawProxy, handleSetOpenClawDirect } from './openclaw-config-route.js';
 import { handleGetRequestLogs, handleGetLogDates, handleGetLogSettings, handleUpdateLogSettings } from './request-logs-route.js';
 import { handleGetToolsStatus, handleGetNodeInfo, handleInstallTool, handleInstallNode, handleLaunchTool } from './tools-route.js';
-import { handleListChatSources, handleChatWithSource } from './chat-ui-route.js';
+import { handleListChatSources, handleChatWithSource, handleStreamChatWithSource } from './chat-ui-route.js';
 import {
   handleListAccounts,
   handleAccountStatus,
@@ -221,6 +221,7 @@ export function registerApiRoutes(app, { port }) {
   // Chat UI
   app.get('/api/chat/sources', handleListChatSources);
   app.post('/api/chat/complete', handleChatWithSource);
+  app.post('/api/chat/stream', handleStreamChatWithSource);
 }
 
 export default { registerApiRoutes };
