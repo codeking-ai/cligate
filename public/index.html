@@ -276,9 +276,9 @@
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
                             </svg>
                         </div>
-                        <div class="stat-value text-white font-mono text-2xl lg:text-3xl font-bold mb-1 truncate" x-text="stats.active"></div>
-                        <div class="stat-title text-gray-500 font-mono text-[10px] uppercase tracking-wider truncate" x-text="t('active')"></div>
-                        <div class="stat-desc text-green-400/60 text-[10px] truncate" x-text="t('operational')"></div>
+                        <div class="stat-value text-white font-mono text-2xl lg:text-3xl font-bold mb-1 truncate" x-text="stats.available"></div>
+                        <div class="stat-title text-gray-500 font-mono text-[10px] uppercase tracking-wider truncate" x-text="t('availableAccounts')"></div>
+                        <div class="stat-desc text-green-400/60 text-[10px] truncate" x-text="t('enabledForRouting')"></div>
                     </div>
 
                     <div class="stat bg-space-900/40 border border-space-border/30 rounded-xl p-3 lg:p-4 hover:border-yellow-500/30 hover:bg-yellow-500/5 transition-all duration-300 group relative cursor-pointer min-w-0">
@@ -299,8 +299,8 @@
                             </svg>
                         </div>
                         <div class="stat-value text-white font-mono text-2xl lg:text-3xl font-bold mb-1 truncate" x-text="stats.planType"></div>
-                        <div class="stat-title text-gray-500 font-mono text-[10px] uppercase tracking-wider truncate" x-text="t('activePlan')"></div>
-                        <div class="stat-desc text-purple-400/60 text-[10px] truncate" x-text="t('currentTier')"></div>
+                        <div class="stat-title text-gray-500 font-mono text-[10px] uppercase tracking-wider truncate" x-text="t('defaultPlan')"></div>
+                        <div class="stat-desc text-purple-400/60 text-[10px] truncate" x-text="t('firstAvailableAccount')"></div>
                     </div>
                 </div>
 
@@ -752,10 +752,10 @@
                                     <td class="py-4 pl-6">
                                         <div class="flex items-center gap-2">
                                             <div class="w-2 h-2 rounded-full flex-shrink-0"
-                                                :class="!acc.enabled ? 'bg-red-500' : acc.isActive ? 'bg-neon-green shadow-[0_0_8px_rgba(34,197,94,0.6)]' : 'bg-gray-500'"></div>
+                                                :class="acc.enabled ? 'bg-neon-green shadow-[0_0_8px_rgba(34,197,94,0.6)]' : 'bg-red-500'"></div>
                                             <span class="text-xs font-mono"
-                                                :class="!acc.enabled ? 'text-red-400' : acc.isActive ? 'text-neon-green' : 'text-gray-500'"
-                                                x-text="!acc.enabled ? t('disabled') : acc.isActive ? t('activeStatus') : t('idleStatus')"></span>
+                                                :class="acc.enabled ? 'text-neon-green' : 'text-red-400'"
+                                                x-text="acc.enabled ? t('enabled') : t('disabled')"></span>
                                         </div>
                                     </td>
                                     <td class="py-4">
@@ -804,9 +804,6 @@
                                                 :class="acc.enabled ? 'bg-yellow-500/10 text-yellow-400 border border-yellow-500/30 hover:bg-yellow-500/20' : 'bg-green-500/10 text-green-400 border border-green-500/30 hover:bg-green-500/20'"
                                                 @click="toggleAccountEnabled(acc.email, !acc.enabled)"
                                                 x-text="acc.enabled ? t('actionDisable') : t('actionEnable')"></button>
-                                            <button x-show="!acc.isActive"
-                                                class="px-3 py-1 text-[10px] font-bold font-mono uppercase tracking-wider rounded bg-neon-purple/10 text-neon-purple hover:bg-neon-purple/20 border border-neon-purple/30 hover:border-neon-purple/50 transition-all"
-                                                @click="switchAccount(acc.email)" x-text="t('switchBtn')"></button>
                                             <button class="btn btn-xs btn-ghost p-2 rounded hover:bg-white/10 text-gray-500 hover:text-white transition-colors"
                                                 @click="refreshToken(acc.email)" :title="t('needsRefresh')">
                                                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>

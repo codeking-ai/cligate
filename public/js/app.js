@@ -30,7 +30,7 @@ document.addEventListener('alpine:init', () => {
         accounts: [],
         accountSubTab: 'chatgpt',
         accountSearchQuery: '',
-        stats: { total: 0, active: 0, expired: 0, planType: '-' },
+        stats: { total: 0, available: 0, expired: 0, planType: '-' },
 
         // Claude accounts
         claudeAccounts: [],
@@ -242,11 +242,12 @@ document.addEventListener('alpine:init', () => {
             
             if (ok && data.accounts) {
                 this.accounts = data.accounts;
+                const enabledAccounts = data.accounts.filter(a => a.enabled !== false);
                 this.stats = {
                     total: data.total || data.accounts.length,
-                    active: data.accounts.filter(a => a.isActive).length,
+                    available: enabledAccounts.length,
                     expired: data.accounts.filter(a => a.tokenExpired).length,
-                    planType: data.accounts.find(a => a.isActive)?.planType || '-'
+                    planType: enabledAccounts[0]?.planType || data.accounts[0]?.planType || '-'
                 };
 
                 await this.refreshAllQuotaData();
