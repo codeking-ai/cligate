@@ -34,7 +34,7 @@ let currentStrategy = null;
 
 function getAccountRotator() {
     const settings = getServerSettings();
-    const strategy = settings.accountStrategy || 'sticky';
+    const strategy = settings.accountStrategy || 'sequential';
 
     if (!accountRotator || currentStrategy !== strategy) {
         const accts = listAccounts();
@@ -343,7 +343,16 @@ async function _handleResponsesViaAssignedAccount(req, res, rawBody, contentEnco
         } else {
             const responseBody = await upstreamResponse.text();
             res.setHeader('Content-Type', 'application/json');
-            res.send(responseBody);
+            if (isCompact) {
+                const normalized = normalizeCompactResponse(responseBody, modelId);
+                if (!normalized) {
+                    logger.error(`[Codex Proxy] Invalid compact response body from upstream for model=${modelId}`);
+                    return res.status(502).json({ error: { message: 'Invalid compact response from upstream.' } });
+                }
+                res.json(normalized);
+            } else {
+                res.send(responseBody);
+            }
         }
 
         const duration = Date.now() - startTime;
@@ -536,6 +545,29 @@ function _chatToResponsesFormat(chatResponse, model) {
     };
 }
 
+function normalizeCompactResponse(responseBody, modelId) {
+    let parsed;
+    try {
+        parsed = JSON.parse(responseBody);
+    } catch {
+        return null;
+    }
+
+    if (parsed && parsed.object === 'response') {
+        return parsed;
+    }
+
+    if (parsed && Array.isArray(parsed.choices)) {
+        return _chatToResponsesFormat(parsed, modelId);
+    }
+
+    if (parsed && Array.isArray(parsed.content) && parsed.usage) {
+        return _anthropicToResponsesFormat(parsed, modelId);
+    }
+
+    return parsed;
+}
+
 /**
  * Handle /responses via API key pool (with format conversion).
  */
@@ -725,7 +757,16 @@ async function _handleResponsesViaAccountPool(req, res, rawBody, contentEncoding
             } else {
                 const responseBody = await upstreamResponse.text();
                 res.setHeader('Content-Type', 'application/json');
-                res.send(responseBody);
+                if (isCompact) {
+                    const normalized = normalizeCompactResponse(responseBody, modelId);
+                    if (!normalized) {
+                        logger.error(`[Codex Proxy] Invalid compact response body from upstream for model=${modelId}`);
+                        return res.status(502).json({ error: { message: 'Invalid compact response from upstream.' } });
+                    }
+                    res.json(normalized);
+                } else {
+                    res.send(responseBody);
+                }
             }
 
             const duration = Date.now() - startTime;
@@ -1037,5 +1078,9 @@ async function _handleResponsesViaClaudeAccount(res, parsed, modelId, isStreamin
 
     return false;
 }
+
+export const _testExports = {
+    normalizeCompactResponse
+};
 
 export default { handleResponses };

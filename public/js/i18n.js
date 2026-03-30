@@ -137,9 +137,9 @@ const i18n = {
     loadingModels: 'Loading models...',
     accountStrategy: 'Account Selection Strategy',
     strategy: 'Strategy',
-    strategyDesc: 'How accounts are selected when rate-limited',
-    sticky: 'Sticky',
-    roundRobin: 'Round-Robin',
+    strategyDesc: 'Choose how each request selects the next available account',
+    randomStrategy: 'Random',
+    sequentialStrategy: 'Sequential',
 
     // Add Account Modal
     addNewAccount: 'Add New Account',
@@ -191,7 +191,7 @@ const i18n = {
     deleteFailed: 'Delete failed',
     haikuRoutedTo: (model) => `Haiku routed to ${model}`,
     failedUpdateHaiku: 'Failed to update Haiku model',
-    strategySetTo: (s) => `Account strategy set to ${s === 'sticky' ? 'Sticky' : 'Round-Robin'}`,
+    strategySetTo: (s) => `Account strategy set to ${s === 'random' ? 'Random' : 'Sequential'}`,
     failedUpdateStrategy: 'Failed to update strategy',
 
     // Routing priority
@@ -556,9 +556,9 @@ const i18n = {
     loadingModels: '加载模型中...',
     accountStrategy: '账户选择策略',
     strategy: '策略',
-    strategyDesc: '速率限制时如何选择账户',
-    sticky: '粘性',
-    roundRobin: '轮询',
+    strategyDesc: '选择每次请求如何挑选下一个可用账户',
+    randomStrategy: '随机',
+    sequentialStrategy: '顺序',
     addNewAccount: '添加新账户',
     addAccountDesc: '连接 ChatGPT 账户以使用代理。该账户将用于 API 调用。',
     connectViaOauth: '通过 OAuth 连接',
@@ -598,7 +598,7 @@ const i18n = {
     deleteFailed: '删除失败',
     haikuRoutedTo: (model) => `Haiku 已路由到 ${model}`,
     failedUpdateHaiku: '更新 Haiku 模型失败',
-    strategySetTo: (s) => `账户策略已设置为${s === 'sticky' ? '粘性' : '轮询'}`,
+    strategySetTo: (s) => `账户策略已设置为${s === 'random' ? '随机' : '顺序'}`,
     failedUpdateStrategy: '更新策略失败',
     routingPriority: '请求路由',
     routingPriorityLabel: '优先模式',

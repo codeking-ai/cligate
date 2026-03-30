@@ -2,12 +2,13 @@ import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs';
 import { join } from 'path';
 import { CONFIG_DIR } from './account-manager.js';
 import { createDefaultAppRouting, normalizeAppRoutingConfig } from './app-routing.js';
+import { normalizeStrategyName } from './account-rotation/strategies/index.js';
 
 const SETTINGS_FILE = join(CONFIG_DIR, 'settings.json');
 
 const DEFAULT_SETTINGS = {
     haikuKiloModel: 'minimax/minimax-m2.5:free',
-    accountStrategy: 'sticky',
+    accountStrategy: 'sequential',
     routingPriority: 'account-first',   // 'account-first' | 'apikey-first'
     routingMode: 'automatic',           // 'automatic' | 'app-assigned'
     appRouting: createDefaultAppRouting(),
@@ -34,6 +35,7 @@ export function getServerSettings() {
         return {
             ...DEFAULT_SETTINGS,
             ...data,
+            accountStrategy: normalizeStrategyName(data.accountStrategy),
             appRouting: normalizeAppRoutingConfig(data.appRouting)
         };
     } catch (error) {
@@ -47,6 +49,7 @@ export function setServerSettings(patch = {}) {
     const next = {
         ...current,
         ...patch,
+        accountStrategy: normalizeStrategyName(patch.accountStrategy ?? current.accountStrategy),
         appRouting: normalizeAppRoutingConfig(patch.appRouting || current.appRouting)
     };
 

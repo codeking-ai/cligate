@@ -13,8 +13,9 @@ import { fetchFreeModels } from '../kilo-models.js';
 import { getDiscoveredModels, discoverModels } from '../model-discovery.js';
 import { getMappingsMeta } from '../model-mapping.js';
 import { ROUTING_MODES, validateAppRoutingConfig, buildAssignableTargets } from '../app-routing.js';
+import { isSupportedStrategyName, normalizeStrategyName, STRATEGIES } from '../account-rotation/strategies/index.js';
 
-const VALID_STRATEGIES = ['sticky', 'round-robin'];
+const VALID_STRATEGIES = [STRATEGIES.RANDOM, STRATEGIES.SEQUENTIAL];
 const VALID_ROUTING = ['account-first', 'apikey-first'];
 
 /**
@@ -87,7 +88,7 @@ export async function handleGetKiloModels(req, res) {
  */
 export function handleGetAccountStrategy(req, res) {
   const settings = getServerSettings();
-  res.json({ success: true, accountStrategy: settings.accountStrategy });
+  res.json({ success: true, accountStrategy: normalizeStrategyName(settings.accountStrategy) });
 }
 
 /**
@@ -97,15 +98,16 @@ export function handleGetAccountStrategy(req, res) {
 export function handleSetAccountStrategy(req, res) {
   const { accountStrategy } = req.body || {};
 
-  if (!VALID_STRATEGIES.includes(accountStrategy)) {
+  if (!isSupportedStrategyName(accountStrategy)) {
     return res.status(400).json({
       success: false,
       error: `Invalid accountStrategy. Use one of: ${VALID_STRATEGIES.join(', ')}`
     });
   }
 
-  const settings = setServerSettings({ accountStrategy });
-  res.json({ success: true, accountStrategy: settings.accountStrategy });
+  const normalized = normalizeStrategyName(accountStrategy);
+  const settings = setServerSettings({ accountStrategy: normalized });
+  res.json({ success: true, accountStrategy: normalizeStrategyName(settings.accountStrategy) });
 }
 
 /**

@@ -23,7 +23,7 @@ let currentStrategy = null;
 
 function getAccountRotator() {
     const settings = getServerSettings();
-    const strategy = settings.accountStrategy || 'sticky';
+    const strategy = settings.accountStrategy || 'sequential';
     
     if (!accountRotator || currentStrategy !== strategy) {
         accountRotator = new AccountRotator({

@@ -7,10 +7,10 @@ import {
     clearExpiredLimits
 } from './rate-limits.js';
 
-import { createStrategy, STRATEGIES } from './strategies/index.js';
+import { createStrategy, getStrategyLabel, STRATEGIES } from './strategies/index.js';
 
 export class AccountRotator {
-    constructor(accountManager, strategyName = 'sticky') {
+    constructor(accountManager, strategyName = 'sequential') {
         this.accountManager = accountManager;
         this.strategy = createStrategy(strategyName);
     }
@@ -77,7 +77,7 @@ export class AccountRotator {
     }
 
     getStrategyLabel() {
-        return this.strategy.label;
+        return getStrategyLabel(this.strategy.name);
     }
 }
 

@@ -1133,10 +1133,10 @@
                             <div class="text-xs text-gray-500 font-mono" x-text="t('strategyDesc')"></div>
                         </div>
                         <div class="inline-flex items-center gap-2">
-                            <button class="btn btn-xs" :class="accountStrategy === 'sticky' ? 'bg-neon-purple text-white' : 'btn-outline text-gray-400'"
-                                @click="setAccountStrategy('sticky')" :disabled="strategySaving" x-text="t('sticky')"></button>
-                            <button class="btn btn-xs" :class="accountStrategy === 'round-robin' ? 'bg-neon-purple text-white' : 'btn-outline text-gray-400'"
-                                @click="setAccountStrategy('round-robin')" :disabled="strategySaving" x-text="t('roundRobin')"></button>
+                            <button class="btn btn-xs" :class="accountStrategy === 'random' ? 'bg-neon-purple text-white' : 'btn-outline text-gray-400'"
+                                @click="setAccountStrategy('random')" :disabled="strategySaving" x-text="t('randomStrategy')"></button>
+                            <button class="btn btn-xs" :class="accountStrategy === 'sequential' ? 'bg-neon-purple text-white' : 'btn-outline text-gray-400'"
+                                @click="setAccountStrategy('sequential')" :disabled="strategySaving" x-text="t('sequentialStrategy')"></button>
                         </div>
                     </div>
                 </div>

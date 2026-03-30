@@ -174,7 +174,7 @@ GET /health
 | `/settings/haiku-model` | POST | Set haiku/free model target |
 | `/settings/kilo-models` | GET | List available free models |
 | `/settings/account-strategy` | GET | Get account rotation strategy |
-| `/settings/account-strategy` | POST | Set strategy (sticky/round-robin) |
+| `/settings/account-strategy` | POST | Set strategy (random/sequential) |
 | `/settings/routing-priority` | GET | Get routing priority |
 | `/settings/routing-priority` | POST | Set priority (account-first/apikey-first) |
 

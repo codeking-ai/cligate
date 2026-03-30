@@ -36,7 +36,7 @@ document.addEventListener('alpine:init', () => {
         claudeAccounts: [],
 
         haikuKiloModel: 'minimax/minimax-m2.5:free',
-        accountStrategy: 'sticky',
+        accountStrategy: 'sequential',
         haikuModelSaving: false,
         strategySaving: false,
         routingPriority: 'account-first',

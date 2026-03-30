@@ -129,7 +129,7 @@ proxypool-hub/
 | `account-manager.js` | ChatGPT account CRUD, token refresh, Codex credential writeback |
 | `claude-account-manager.js` | Claude account CRUD, token refresh, Claude Code credential writeback |
 | `api-key-manager.js` | API key pool with rate limit tracking and auto-failover |
-| `account-rotation/` | Sticky, round-robin strategies for multi-account routing |
+| `account-rotation/` | Random, sequential strategies for multi-account routing |
 | `model-mapper.js` | Routes models to Kilo (free) or account pool |
 | `model-mapping.js` | Maps model names to provider-native equivalents |
 | `format-converter.js` | Bidirectional Anthropic ↔ OpenAI Responses API conversion |
@@ -142,7 +142,7 @@ proxypool-hub/
 
 1. Claude Code sends Anthropic-format request to `POST /v1/messages`
 2. `messages-route.js` resolves model routing (Kilo free / ChatGPT account / Claude account / API key)
-3. Account rotator selects an account based on strategy (sticky/round-robin)
+3. Account rotator selects an account based on strategy (random/sequential)
 4. `format-converter.js` converts Anthropic format to OpenAI Responses API format
 5. `direct-api.js` sends request to ChatGPT backend with account credentials
 6. `response-streamer.js` converts OpenAI SSE events back to Anthropic SSE format
