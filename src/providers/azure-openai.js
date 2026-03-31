@@ -11,7 +11,7 @@
  */
 
 import { BaseProvider } from './base.js';
-import { anthropicToOpenAI, openAIToAnthropic } from './format-bridge.js';
+import { convertAnthropicToResponsesAPI, convertOutputToAnthropic, generateMessageId } from '../format-converter.js';
 import { logger } from '../utils/logger.js';
 
 const DEFAULT_API_VERSION = '2024-10-21';
@@ -32,6 +32,47 @@ const PRICING = {
     'o3-mini':         { input: 1.10, output: 4.40 },
     'o4-mini':         { input: 1.10, output: 4.40 },
 };
+
+function sanitizeAnthropicToolSchemaForAzureResponses(schema) {
+    if (Array.isArray(schema)) {
+        return schema.map(item => sanitizeAnthropicToolSchemaForAzureResponses(item));
+    }
+
+    if (!schema || typeof schema !== 'object') {
+        return schema;
+    }
+
+    const result = {};
+    for (const [key, value] of Object.entries(schema)) {
+        if (['$schema', '$id', '$ref', '$defs', '$comment', 'definitions', 'examples'].includes(key)) {
+            continue;
+        }
+
+        if (key === 'const') {
+            result.enum = [value];
+            continue;
+        }
+
+        result[key] = sanitizeAnthropicToolSchemaForAzureResponses(value);
+    }
+
+    return result;
+}
+
+function convertAnthropicToolsForAzureResponses(tools) {
+    if (!Array.isArray(tools) || tools.length === 0) {
+        return [];
+    }
+
+    return tools.map(tool => ({
+        type: 'function',
+        name: tool.name,
+        description: tool.description || '',
+        parameters: sanitizeAnthropicToolSchemaForAzureResponses(
+            tool.input_schema || { type: 'object', properties: {} }
+        )
+    }));
+}
 
 function sanitizeResponsesPayloadForAzure(value, parentKey = '', stats = { encryptedFieldsRemoved: 0, compactionItemsRemoved: 0, includeEntriesRemoved: 0, signatureFieldsRemoved: 0 }) {
     if (Array.isArray(value)) {
@@ -226,28 +267,47 @@ export class AzureOpenAIProvider extends BaseProvider {
     // ─── Anthropic Messages API passthrough (for /v1/messages endpoint) ──────
 
     /**
-     * Accept an Anthropic Messages API body, convert to OpenAI Chat Completions,
+     * Accept an Anthropic Messages API body, convert to OpenAI Responses API,
      * send to Azure OpenAI, and return response in Anthropic Messages format.
+     *
+     * Keep this path non-streaming and let /v1/messages wrap the JSON response
+     * into Anthropic SSE when needed. This isolates the fix to Azure's
+     * Anthropic-compatible path without affecting Codex native responses flow.
      */
     async sendAnthropicRequest(body) {
-        const openaiBody = anthropicToOpenAI(body);
-        // Azure doesn't use the model field in body — it's in the URL via deployment
-        delete openaiBody.model;
-
-        const url = this._buildChatUrl();
-        const response = await fetch(url, {
-            method: 'POST',
-            headers: {
-                'api-key': this.apiKey,
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify(openaiBody)
+        const responsesBody = convertAnthropicToResponsesAPI({
+            ...body,
+            stream: false
+        });
+        if (Array.isArray(body.tools) && body.tools.length > 0) {
+            responsesBody.tools = convertAnthropicToolsForAzureResponses(body.tools);
+        }
+        const response = await this.sendResponsesRequest({
+            ...responsesBody,
+            stream: false
         });
 
         if (!response.ok) return response;
 
         const data = await response.json();
-        const anthropicResponse = openAIToAnthropic(data, body.model);
+        const content = convertOutputToAnthropic(data.output);
+        const stopReason = data.status === 'incomplete'
+            ? 'max_tokens'
+            : content.some(block => block.type === 'tool_use') ? 'tool_use' : 'end_turn';
+        const anthropicResponse = {
+            id: generateMessageId(),
+            type: 'message',
+            role: 'assistant',
+            content,
+            model: body.model || data.model,
+            stop_reason: stopReason,
+            stop_sequence: null,
+            usage: {
+                input_tokens: data.usage?.input_tokens || 0,
+                output_tokens: data.usage?.output_tokens || 0,
+                cache_read_input_tokens: data.usage?.cache_read_input_tokens || 0
+            }
+        };
 
         return new Response(JSON.stringify(anthropicResponse), {
             status: 200,

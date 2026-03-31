@@ -145,3 +145,166 @@ test('AzureOpenAIProvider.sendResponsesRequest strips encrypted content fields f
     global.fetch = originalFetch;
   }
 });
+
+test('AzureOpenAIProvider.sendAnthropicRequest uses Azure responses path and returns Anthropic tool_use blocks', async () => {
+  const provider = new AzureOpenAIProvider({
+    id: 'azure_4',
+    name: 'azure-test',
+    apiKey: 'test-key',
+    baseUrl: 'https://example-resource.openai.azure.com/',
+    deploymentName: 'deployment-gpt54'
+  });
+
+  const originalFetch = global.fetch;
+  let capturedOptions = null;
+  let capturedUrl = null;
+
+  global.fetch = async (url, options) => {
+    capturedUrl = url;
+    capturedOptions = options;
+    return new Response(JSON.stringify({
+      id: 'resp_123',
+      object: 'response',
+      model: 'deployment-gpt54',
+      status: 'completed',
+      output: [
+        {
+          type: 'message',
+          id: 'msg_1',
+          content: [{ type: 'output_text', text: 'I will inspect files first.' }]
+        },
+        {
+          type: 'function_call',
+          id: 'fc_call_1',
+          call_id: 'fc_call_1',
+          name: 'shell_command',
+          arguments: '{"command":"Get-ChildItem"}'
+        }
+      ],
+      usage: {
+        input_tokens: 11,
+        output_tokens: 7,
+        cache_read_input_tokens: 0,
+        total_tokens: 18
+      }
+    }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' }
+    });
+  };
+
+  try {
+    const response = await provider.sendAnthropicRequest({
+      model: 'claude-opus-4-6',
+      max_tokens: 1024,
+      system: 'You are helpful.',
+      messages: [
+        { role: 'user', content: 'inspect repo' },
+        {
+          role: 'assistant',
+          content: [
+            { type: 'text', text: 'I will inspect files first.' },
+            { type: 'tool_use', id: 'toolu_call_1', name: 'shell_command', input: { command: 'Get-ChildItem' } }
+          ]
+        },
+        {
+          role: 'user',
+          content: [
+            { type: 'tool_result', tool_use_id: 'toolu_call_1', content: 'file list' }
+          ]
+        }
+      ]
+    });
+
+    assert.equal(response.status, 200);
+    assert.equal(capturedUrl, 'https://example-resource.openai.azure.com/openai/v1/responses');
+
+    const payload = JSON.parse(capturedOptions.body);
+    assert.equal(payload.model, 'deployment-gpt54');
+    assert.equal(payload.stream, false);
+    assert.ok(Array.isArray(payload.input));
+    assert.equal(payload.input.some(item => item.type === 'function_call_output'), true);
+
+    const anthropic = await response.json();
+    assert.equal(anthropic.role, 'assistant');
+    assert.equal(anthropic.model, 'claude-opus-4-6');
+    assert.equal(anthropic.stop_reason, 'tool_use');
+    assert.equal(anthropic.content[0].type, 'text');
+    assert.equal(anthropic.content[1].type, 'tool_use');
+    assert.equal(anthropic.content[1].name, 'shell_command');
+    assert.deepEqual(anthropic.content[1].input, { command: 'Get-ChildItem' });
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
+test('AzureOpenAIProvider.sendAnthropicRequest preserves tool schema constraints needed by Claude Code', async () => {
+  const provider = new AzureOpenAIProvider({
+    id: 'azure_5',
+    name: 'azure-test',
+    apiKey: 'test-key',
+    baseUrl: 'https://example-resource.openai.azure.com/',
+    deploymentName: 'deployment-gpt54'
+  });
+
+  const originalFetch = global.fetch;
+  let capturedOptions = null;
+
+  global.fetch = async (_url, options) => {
+    capturedOptions = options;
+    return new Response(JSON.stringify({
+      id: 'resp_124',
+      object: 'response',
+      model: 'deployment-gpt54',
+      status: 'completed',
+      output: [
+        {
+          type: 'function_call',
+          id: 'fc_shell_1',
+          call_id: 'fc_shell_1',
+          name: 'shell_command',
+          arguments: '{"command":"Get-ChildItem","timeout_ms":1000}'
+        }
+      ],
+      usage: {
+        input_tokens: 5,
+        output_tokens: 3,
+        total_tokens: 8
+      }
+    }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' }
+    });
+  };
+
+  try {
+    await provider.sendAnthropicRequest({
+      model: 'claude-opus-4-6',
+      messages: [{ role: 'user', content: 'run a command' }],
+      tools: [{
+        name: 'shell_command',
+        description: 'Run a shell command',
+        input_schema: {
+          type: 'object',
+          properties: {
+            command: { type: 'string', minLength: 1 },
+            timeout_ms: { type: 'integer', minimum: 1 }
+          },
+          required: ['command'],
+          additionalProperties: false,
+          $schema: 'http://json-schema.org/draft-07/schema#'
+        }
+      }]
+    });
+
+    const payload = JSON.parse(capturedOptions.body);
+    assert.equal(payload.tools[0].name, 'shell_command');
+    assert.deepEqual(payload.tools[0].parameters.required, ['command']);
+    assert.equal(payload.tools[0].parameters.additionalProperties, false);
+    assert.equal(payload.tools[0].parameters.properties.command.minLength, 1);
+    assert.equal(payload.tools[0].parameters.properties.timeout_ms.minimum, 1);
+    assert.equal('$schema' in payload.tools[0].parameters, false);
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
