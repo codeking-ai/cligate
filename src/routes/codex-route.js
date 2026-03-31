@@ -11,6 +11,8 @@ import { AccountRotator } from '../account-rotation/index.js';
 import { listAccounts, getActiveAccount, save } from '../account-manager.js';
 import { loadAccounts as loadClaudeAccounts, refreshAccountToken, getAccount as getClaudeAccount } from '../claude-account-manager.js';
 import { sendClaudeMessage, mapToClaudeModel } from '../claude-api.js';
+import { listAccounts as listAntigravityAccounts, getAvailableAccountForModel as getAntigravityAccountForModel, getAllModels as getAllAntigravityModels } from '../antigravity-account-manager.js';
+import { sendAntigravityMessage, isAntigravityModel } from '../antigravity-api.js';
 import { getCredentialsForAccount } from '../middleware/credentials.js';
 import { logger } from '../utils/logger.js';
 import { getServerSettings } from '../server-settings.js';
@@ -229,6 +231,7 @@ export async function handleCodexResponses(req, res) {
     const apiKeyTypes = ['openai', 'azure-openai', 'gemini', 'vertex-ai'];
     const hasApiKeys = hasKeysForTypes(apiKeyTypes);
     const hasClaudeAccounts = _getUsableClaudeAccounts().length > 0;
+    const hasAntigravityAccounts = settings.antigravityEnabled !== false && listAntigravityAccounts().total > 0;
 
     if (settings.routingMode === 'app-assigned') {
         const assignment = resolveAssignedCredential(settings, appId);
@@ -241,6 +244,11 @@ export async function handleCodexResponses(req, res) {
         }
     }
 
+    if (hasAntigravityAccounts && isAntigravityModel(modelId)) {
+        const result = await _handleCodexViaAntigravityAccount(res, body, modelId, isStreaming, startTime);
+        if (result !== false) return;
+    }
+
     if (priority === 'apikey-first' && hasApiKeys) {
         const result = await _handleCodexViaApiKey(res, body, modelId, isStreaming, apiKeyTypes, startTime);
         if (result !== false) return;
@@ -251,6 +259,10 @@ export async function handleCodexResponses(req, res) {
         if (hasClaudeAccounts) {
             const claudeResult = await _handleCodexViaClaudeAccount(res, body, modelId, isStreaming, startTime);
             if (claudeResult !== false) return;
+        }
+        if (hasAntigravityAccounts) {
+            const antigravityResult = await _handleCodexViaAntigravityAccount(res, body, modelId, isStreaming, startTime);
+            if (antigravityResult !== false) return;
         }
         return sendCodexError(res, 503, 'All API keys and accounts exhausted.');
     }
@@ -269,8 +281,12 @@ export async function handleCodexResponses(req, res) {
         const claudeResult = await _handleCodexViaClaudeAccount(res, body, modelId, isStreaming, startTime);
         if (claudeResult !== false) return;
     }
+    if (hasAntigravityAccounts) {
+        const antigravityResult = await _handleCodexViaAntigravityAccount(res, body, modelId, isStreaming, startTime);
+        if (antigravityResult !== false) return;
+    }
 
-    if (!hasAccounts && !hasApiKeys && !hasClaudeAccounts) {
+    if (!hasAccounts && !hasApiKeys && !hasClaudeAccounts && !hasAntigravityAccounts) {
         return sendCodexError(res, 401, 'No accounts or API keys configured. Add them in the dashboard.');
     }
     const rlInfo = getKeyRateLimitInfo(apiKeyTypes);
@@ -289,6 +305,9 @@ async function _handleCodexAssignment(req, res, body, modelId, isStreaming, star
     }
     if (assignment.credentialType === 'claude-account') {
         return _handleCodexViaAssignedClaudeAccount(res, body, modelId, isStreaming, startTime, assignment.credential.email);
+    }
+    if (assignment.credentialType === 'antigravity-account') {
+        return _handleCodexViaAssignedAntigravityAccount(res, body, modelId, isStreaming, startTime, assignment.credential.email);
     }
     return _handleCodexViaAssignedApiKey(res, body, modelId, isStreaming, startTime, assignment.credential);
 }
@@ -623,6 +642,10 @@ function _chatToCodexResponse(chatResponse, model) {
     };
 }
 
+async function _handleCodexViaAssignedAntigravityAccount(res, body, modelId, isStreaming, startTime, email) {
+    return _handleCodexViaAntigravityAccount(res, body, modelId, isStreaming, startTime, email);
+}
+
 function normalizeProviderCodexResponse(responseBody, modelId) {
     let parsed;
     try {
@@ -914,17 +937,19 @@ async function _handleCodexViaAccountPool(res, body, modelId, isStreaming, start
  */
 export async function handleCodexModels(req, res) {
     const creds = await _getAnyCreds();
+    const antigravityModels = getAllAntigravityModels();
 
     if (!creds) {
         // No accounts — check for API keys and return a synthetic model list
         const apiKeyTypes = ['openai', 'azure-openai', 'gemini', 'vertex-ai'];
         const hasApiKeys = apiKeyTypes.some(t => !!selectKey(t));
-        if (hasApiKeys) {
+        if (hasApiKeys || antigravityModels.length > 0) {
             return res.json({
                 models: [
                     { slug: 'gpt-4o', name: 'GPT-4o (via API key)', tags: ['gpt4'] },
                     { slug: 'gpt-4o-mini', name: 'GPT-4o Mini (via API key)', tags: ['gpt4'] },
                     { slug: 'gpt-5.2', name: 'GPT-5.2 (via API key)', tags: ['gpt5'] },
+                    ...antigravityModels.map((model) => ({ slug: model.id, name: model.description || model.id, tags: ['antigravity'] }))
                 ]
             });
         }
@@ -953,6 +978,16 @@ export async function handleCodexModels(req, res) {
         }
 
         const responseBody = await upstreamResponse.text();
+        const parsed = JSON.parse(responseBody);
+        if (Array.isArray(parsed?.models) && antigravityModels.length > 0) {
+            const seen = new Set(parsed.models.map((model) => model.slug));
+            for (const model of antigravityModels) {
+                if (seen.has(model.id)) continue;
+                parsed.models.push({ slug: model.id, name: model.description || model.id, tags: ['antigravity'] });
+            }
+            res.setHeader('Content-Type', 'application/json');
+            return res.send(JSON.stringify(parsed));
+        }
         res.setHeader('Content-Type', 'application/json');
         res.send(responseBody);
     } catch (error) {
@@ -1287,6 +1322,46 @@ async function _handleCodexViaClaudeAccount(res, body, modelId, isStreaming, sta
     }
 
     return false;
+}
+
+async function _handleCodexViaAntigravityAccount(res, body, modelId, isStreaming, startTime, preferredEmail = null) {
+    const account = getAntigravityAccountForModel(modelId, preferredEmail);
+    if (!account?.accessToken || !account?.projectId) return false;
+
+    try {
+        const anthropicBody = _codexToAnthropicBody(body);
+        anthropicBody.model = modelId;
+        const antigravityResponse = await sendAntigravityMessage(anthropicBody, account, { modelOverride: modelId });
+        const codexFormat = _anthropicToCodexFormat(antigravityResponse, modelId);
+        const durationMs = Date.now() - startTime;
+        recordRequest({
+            provider: 'antigravity',
+            keyId: account.email,
+            model: modelId,
+            inputTokens: antigravityResponse.usage?.input_tokens || 0,
+            outputTokens: antigravityResponse.usage?.output_tokens || 0,
+            durationMs,
+            success: true
+        });
+        logRequest({
+            route: '/backend-api/codex/responses',
+            provider: 'antigravity',
+            keyId: account.email,
+            model: modelId,
+            mappedModel: modelId,
+            requestBody: body,
+            inputTokens: antigravityResponse.usage?.input_tokens || 0,
+            outputTokens: antigravityResponse.usage?.output_tokens || 0,
+            durationMs,
+            status: 200,
+            success: true
+        });
+        if (isStreaming) sendResponsesSSE(res, codexFormat); else res.json(codexFormat);
+        return true;
+    } catch (error) {
+        logger.error(`[Codex] Antigravity error: ${account.email} - ${error.message}`);
+        return false;
+    }
 }
 
 export const _testExports = {

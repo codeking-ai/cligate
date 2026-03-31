@@ -92,3 +92,18 @@ test('findToolCallSequenceError detects assistant tool_calls not followed by too
   assert.deepEqual(error.missingIds, ['call_missing']);
   assert.equal(error.nextRole, 'assistant');
 });
+
+test('_codexToChatBody keeps antigravity model id untouched for downstream mapping', () => {
+  const body = {
+    model: 'antigravity/gemini-2.5-pro',
+    input: [
+      { type: 'message', role: 'user', content: 'hello' }
+    ]
+  };
+
+  const chatBody = _codexToChatBody(body);
+
+  assert.equal(chatBody.model, 'antigravity/gemini-2.5-pro');
+  assert.equal(chatBody.messages.length, 1);
+  assert.equal(chatBody.messages[0].role, 'user');
+});

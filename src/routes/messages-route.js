@@ -8,6 +8,8 @@ import { AccountRotator } from '../account-rotation/index.js';
 import { listAccounts, getActiveAccount, save } from '../account-manager.js';
 import { loadAccounts as loadClaudeAccounts, refreshAccountToken, getAccount as getClaudeAccount } from '../claude-account-manager.js';
 import { sendClaudeMessage, sendClaudeStream } from '../claude-api.js';
+import { listAccounts as listAntigravityAccounts, getAvailableAccountForModel as getAntigravityAccountForModel } from '../antigravity-account-manager.js';
+import { sendAntigravityMessage, writeAnthropicSSEFromMessage, isAntigravityModel, toPublicAntigravityModel } from '../antigravity-api.js';
 import { getServerSettings } from '../server-settings.js';
 import { selectKey, getAllProviders, recordUsage, recordError, recordRateLimit } from '../api-key-manager.js';
 import { recordRequest } from '../usage-tracker.js';
@@ -58,6 +60,7 @@ export async function handleMessages(req, res) {
     const hasAccounts = listAccounts().total > 0;
     const hasApiKeys = !!selectKey('anthropic');
     const hasClaudeAccounts = _getUsableClaudeAccounts().length > 0;
+    const hasAntigravityAccounts = settings.antigravityEnabled !== false && listAntigravityAccounts().total > 0;
     const hasCompatibleKeys = _getCompatibleProviders().length > 0;
 
     if (settings.routingMode === 'app-assigned') {
@@ -69,6 +72,11 @@ export async function handleMessages(req, res) {
                 return handleStreamError(res, new Error(`Assigned credential unavailable for ${appId}: ${assignment.unavailableReason || 'request_failed'}`), requestedModel, startTime);
             }
         }
+    }
+
+    if (hasAntigravityAccounts && isAntigravityModel(requestedModel)) {
+        const antigravityResult = await _handleViaAntigravityAccount(res, body, requestedModel, isStreaming, startTime);
+        if (antigravityResult !== false) return;
     }
 
     if (priority === 'apikey-first') {
@@ -89,6 +97,10 @@ export async function handleMessages(req, res) {
             const claudeResult = await _handleViaClaudeAccount(req, res, body, requestedModel, isStreaming, startTime, clientBeta);
             if (claudeResult !== false) return;
         }
+        if (hasAntigravityAccounts) {
+            const antigravityResult = await _handleViaAntigravityAccount(res, body, requestedModel, isStreaming, startTime);
+            if (antigravityResult !== false) return;
+        }
     } else {
         // account-first (default): ChatGPT accounts → Claude accounts → Anthropic Key → compatible keys
         if (hasAccounts) {
@@ -107,9 +119,13 @@ export async function handleMessages(req, res) {
             const result = await _handleViaCompatibleKeys(res, body, requestedModel, isStreaming, startTime);
             if (result !== false) return;
         }
+        if (hasAntigravityAccounts) {
+            const antigravityResult = await _handleViaAntigravityAccount(res, body, requestedModel, isStreaming, startTime);
+            if (antigravityResult !== false) return;
+        }
     }
 
-    if (!hasAccounts && !hasApiKeys && !hasClaudeAccounts && !hasCompatibleKeys) {
+    if (!hasAccounts && !hasApiKeys && !hasClaudeAccounts && !hasCompatibleKeys && !hasAntigravityAccounts) {
         return sendAuthError(res, 'No accounts or API keys configured. Add them in the dashboard.');
     }
 
@@ -131,6 +147,9 @@ async function _handleMessagesAssignment(req, res, body, requestedModel, upstrea
     }
     if (assignment.credentialType === 'claude-account') {
         return _handleViaAssignedClaudeAccount(req, res, body, requestedModel, isStreaming, startTime, clientBeta, assignment.credential.email);
+    }
+    if (assignment.credentialType === 'antigravity-account') {
+        return _handleViaAssignedAntigravityAccount(res, body, requestedModel, isStreaming, startTime, assignment.credential.email);
     }
     return _handleViaAssignedApiKey(req, res, body, requestedModel, isStreaming, startTime, assignment.credential);
 }
@@ -224,6 +243,10 @@ async function _handleViaAssignedClaudeAccount(req, res, body, requestedModel, i
     } catch {
         return false;
     }
+}
+
+async function _handleViaAssignedAntigravityAccount(res, body, requestedModel, isStreaming, startTime, email) {
+    return _handleViaAntigravityAccount(res, body, requestedModel, isStreaming, startTime, email);
 }
 
 /**
@@ -778,6 +801,51 @@ async function _handleViaClaudeAccount(req, res, body, requestedModel, isStreami
     }
 
     return false;
+}
+
+async function _handleViaAntigravityAccount(res, body, requestedModel, isStreaming, startTime, preferredEmail = null) {
+    const account = getAntigravityAccountForModel(requestedModel, preferredEmail);
+    if (!account?.accessToken || !account?.projectId) {
+        return false;
+    }
+
+    try {
+        const result = await sendAntigravityMessage(body, account, { modelOverride: requestedModel });
+        const durationMs = Date.now() - startTime;
+        const mappedModel = result.model || toPublicAntigravityModel(body.model || requestedModel);
+        recordRequest({
+            provider: 'antigravity',
+            keyId: account.email,
+            model: mappedModel,
+            inputTokens: result.usage?.input_tokens || 0,
+            outputTokens: result.usage?.output_tokens || 0,
+            durationMs,
+            success: true
+        });
+        logRequest({
+            route: '/v1/messages',
+            method: 'POST',
+            provider: 'antigravity',
+            keyId: account.email,
+            model: requestedModel,
+            mappedModel,
+            requestBody: body,
+            inputTokens: result.usage?.input_tokens || 0,
+            outputTokens: result.usage?.output_tokens || 0,
+            durationMs,
+            status: 200,
+            success: true
+        });
+        if (isStreaming) {
+            writeAnthropicSSEFromMessage(res, result);
+        } else {
+            res.json(result);
+        }
+        return true;
+    } catch (error) {
+        logger.error(`[Messages] Antigravity error: ${account.email} - ${error.message}`);
+        return false;
+    }
 }
 
 function sleep(ms) {

@@ -1,5 +1,6 @@
 import { listAccounts as listChatGPTAccounts, getAccount as getChatGPTAccount } from './account-manager.js';
 import { listAccounts as listClaudeAccounts, getAccount as getClaudeAccount } from './claude-account-manager.js';
+import { listAccounts as listAntigravityAccounts, getAccount as getAntigravityAccount } from './antigravity-account-manager.js';
 import { getProviderById, listApiKeys } from './api-key-manager.js';
 
 export const ROUTING_MODES = ['automatic', 'app-assigned'];
@@ -11,7 +12,7 @@ export const APP_IDS = [
   'unknown-openai-client',
   'unknown-anthropic-client'
 ];
-export const BINDING_TYPES = ['chatgpt-account', 'claude-account', 'api-key'];
+export const BINDING_TYPES = ['chatgpt-account', 'claude-account', 'antigravity-account', 'api-key'];
 
 function createEmptyBinding() {
   return {
@@ -149,6 +150,13 @@ function resolveSingleBinding(binding) {
     return { ok: true, credential: account, binding };
   }
 
+  if (binding.type === 'antigravity-account') {
+    const account = getAntigravityAccount(binding.targetId);
+    if (!account) return { ok: false, reason: 'account_not_found', binding };
+    if (account.enabled === false) return { ok: false, reason: 'account_disabled', binding };
+    return { ok: true, credential: account, binding };
+  }
+
   const provider = getProviderById(binding.targetId);
   if (!provider) return { ok: false, reason: 'api_key_not_found', binding };
   if (!provider.enabled) return { ok: false, reason: 'api_key_disabled', binding };
@@ -177,6 +185,7 @@ export function validateAppRoutingConfig(appRouting) {
   const normalized = normalizeAppRoutingConfig(appRouting);
   const chatgptEmails = new Set((listChatGPTAccounts().accounts || []).map((account) => account.email));
   const claudeEmails = new Set((listClaudeAccounts().accounts || []).map((account) => account.email));
+  const antigravityEmails = new Set((listAntigravityAccounts().accounts || []).map((account) => account.email));
   const apiKeyIds = new Set((listApiKeys() || []).map((key) => key.id));
   const errors = [];
 
@@ -206,6 +215,9 @@ export function validateAppRoutingConfig(appRouting) {
       if (binding.type === 'claude-account' && !claudeEmails.has(binding.targetId)) {
         errors.push(`${prefix}: Claude account not found`);
       }
+      if (binding.type === 'antigravity-account' && !antigravityEmails.has(binding.targetId)) {
+        errors.push(`${prefix}: Antigravity account not found`);
+      }
       if (binding.type === 'api-key' && !apiKeyIds.has(binding.targetId)) {
         errors.push(`${prefix}: API key not found`);
       }
@@ -221,6 +233,7 @@ export function buildAssignableTargets() {
     bindingTypes: BINDING_TYPES,
     chatgptAccounts: listChatGPTAccounts().accounts || [],
     claudeAccounts: listClaudeAccounts().accounts || [],
+    antigravityAccounts: listAntigravityAccounts().accounts || [],
     apiKeys: listApiKeys() || []
   };
 }

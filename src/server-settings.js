@@ -12,6 +12,7 @@ const DEFAULT_SETTINGS = {
     routingPriority: 'account-first',   // 'account-first' | 'apikey-first'
     routingMode: 'automatic',           // 'automatic' | 'app-assigned'
     appRouting: createDefaultAppRouting(),
+    antigravityEnabled: true,
     enableFreeModels: true,              // Allow routing to system free models (Kilo)
     enableRequestLogging: true,          // Log full request/response content
     requestLogRetentionDays: 7           // Days to keep request logs

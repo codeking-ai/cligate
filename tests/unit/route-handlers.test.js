@@ -29,7 +29,7 @@ function mockReq(body = {}, params = {}, query = {}) {
 
 // ─── settings-route ───────────────────────────────────────────────────────────
 
-import { handleGetHaikuModel, handleSetHaikuModel } from '../../src/routes/settings-route.js';
+import { handleGetHaikuModel, handleSetHaikuModel, handleGetAppRouting } from '../../src/routes/settings-route.js';
 
 test('handleGetHaikuModel: returns current haikuKiloModel', () => {
   const req = mockReq();
@@ -39,6 +39,17 @@ test('handleGetHaikuModel: returns current haikuKiloModel', () => {
   assert.ok('haikuKiloModel' in res._body);
   // Default is now the full model ID
   assert.ok(typeof res._body.haikuKiloModel === 'string');
+});
+
+test('handleGetAppRouting: exposes antigravity binding targets', () => {
+  const req = mockReq();
+  const res = mockRes();
+  handleGetAppRouting(req, res);
+  assert.equal(res._status, 200);
+  assert.equal(res._body.success, true);
+  assert.ok(Array.isArray(res._body.targets?.bindingTypes));
+  assert.ok(res._body.targets.bindingTypes.includes('antigravity-account'));
+  assert.ok(Array.isArray(res._body.targets?.antigravityAccounts));
 });
 
 test('handleSetHaikuModel: rejects empty body with 400', async () => {

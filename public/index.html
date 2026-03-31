@@ -662,7 +662,7 @@
                         <h1 class="text-2xl font-bold text-white tracking-tight" x-text="t('accountManagement')"></h1>
                     </div>
                     <div class="flex flex-wrap items-center justify-end gap-2 sm:flex-nowrap">
-                        <div class="relative" x-show="(accountSubTab === 'chatgpt' ? accounts : claudeAccounts).length > 0">
+                        <div class="relative" x-show="(accountSubTab === 'chatgpt' ? accounts : (accountSubTab === 'claude' ? claudeAccounts : antigravityAccounts)).length > 0">
                             <input type="text" x-model="accountSearchQuery" :placeholder="t('searchAccounts')"
                                 class="input-search-sm w-48 pl-9 h-8" @keydown.escape="accountSearchQuery = ''">
                             <svg class="w-4 h-4 absolute left-3 top-2 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -705,6 +705,23 @@
                                 </button>
                             </div>
                         </template>
+                        <template x-if="accountSubTab === 'antigravity'">
+                            <div class="flex items-center gap-2">
+                                <button class="btn btn-xs btn-outline border-space-border text-gray-400 hover:text-white transition-all gap-2 h-8"
+                                    @click="refreshAllAntigravityTokens()" x-show="antigravityAccounts.length > 0">
+                                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
+                                    <span x-text="t('refreshAll')"></span>
+                                </button>
+                                <div class="flex items-center h-6 px-2 rounded bg-space-800/80 border border-space-border/50">
+                                    <span class="text-[11px] font-mono text-gray-400" x-text="antigravityAccounts.length + ' ' + t('nAccounts')"></span>
+                                </div>
+                                <button class="btn bg-cyan-500 hover:bg-cyan-400 border-none text-black btn-xs gap-2 shadow-lg shadow-cyan-500/20 h-8"
+                                    @click="addAntigravityAccount()">
+                                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" /></svg>
+                                    <span x-text="t('googleLogin')"></span>
+                                </button>
+                            </div>
+                        </template>
                     </div>
                 </div>
 
@@ -727,6 +744,15 @@
                         <svg class="w-4 h-4" viewBox="0 0 24 24" fill="currentColor"><path d="M4.709 15.955l4.397-2.783-.461-.632-4.809 2.755c-.292.167-.379.272-.379.555 0 .384.243.655.588.655.141 0 .311-.05.664-.55zM8.976 7.674c-.327.569-.544 1.205-.544 1.926 0 1.549.992 3.362 2.259 4.285l.266-.459c-1.02-.839-1.848-2.379-1.848-3.826 0-.55.109-1.015.328-1.467l-.461-.459zm3.327-3.907c-3.164 0-6.238 2.573-6.238 6.083 0 2.363 1.475 5.145 3.48 6.588l.324-.487C7.906 14.221 6.674 11.858 6.674 9.85c0-2.998 2.674-5.364 5.629-5.364 1.313 0 2.445.436 3.38 1.196l.35-.472C15.045 4.261 13.726 3.767 12.303 3.767zm6.652 8.236c0-3.709-2.893-7.36-6.652-7.36-1.597 0-3.052.633-4.181 1.726l.389.436c.99-.962 2.271-1.504 3.792-1.504 3.288 0 5.943 3.303 5.943 6.702 0 1.746-.667 3.125-1.879 3.895l.234.515c1.454-.893 2.354-2.541 2.354-4.41zm-4.746 6.66l.213.538c3.709-1.442 6.574-5.274 6.574-9.152 0-3.371-2.129-6.298-5.226-7.499l-.192.538c2.772 1.099 4.709 3.758 4.709 6.961 0 3.577-2.558 7.127-6.078 8.614z"/></svg>
                         Claude
                         <span class="text-[10px] font-mono opacity-60" x-text="'(' + claudeAccounts.length + ')'"></span>
+                    </button>
+                    <button class="flex items-center gap-2 px-4 py-2 rounded-md text-xs font-semibold transition-all"
+                        :class="accountSubTab === 'antigravity'
+                            ? 'bg-cyan-500/10 text-cyan-300 border border-cyan-400/30 shadow-sm'
+                            : 'text-gray-400 hover:text-white hover:bg-white/5'"
+                        @click="accountSubTab = 'antigravity'; accountSearchQuery = ''">
+                        <svg class="w-4 h-4" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l2.1 6.5H21l-5.6 4.1 2.1 6.4L12 15l-5.5 4 2.1-6.4L3 8.5h6.9z"/></svg>
+                        <span x-text="t('antigravity')"></span>
+                        <span class="text-[10px] font-mono opacity-60" x-text="'(' + antigravityAccounts.length + ')'"></span>
                     </button>
                 </div>
 
@@ -942,6 +968,97 @@
                                 </tr>
                             </template>
                             <template x-if="claudeAccounts.length > 0 && filteredClaudeAccounts.length === 0">
+                                <tr>
+                                    <td colspan="6" class="py-12 text-center">
+                                        <div class="flex flex-col items-center gap-3">
+                                            <svg class="w-12 h-12 text-gray-700" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
+                                            <p class="text-sm text-gray-600" x-text="t('noAccountsMatch')"></p>
+                                            <button class="text-xs text-neon-cyan hover:underline" @click="accountSearchQuery = ''" x-text="t('clearSearch')"></button>
+                                        </div>
+                                    </td>
+                                </tr>
+                            </template>
+                        </tbody>
+                    </table>
+                </div>
+
+                <div x-show="accountSubTab === 'antigravity'" x-transition class="view-card !p-0 overflow-x-auto">
+                    <table class="w-full min-w-[860px]">
+                        <thead x-show="filteredAntigravityAccounts.length > 0">
+                            <tr class="bg-space-900/50 border-b border-space-border/50">
+                                <th class="py-3 pl-6 text-left text-[10px] font-bold text-gray-500 uppercase tracking-wider w-20" x-text="t('status')"></th>
+                                <th class="py-3 text-left text-[10px] font-bold text-gray-500 uppercase tracking-wider min-w-[220px]" x-text="t('accountLabel')"></th>
+                                <th class="py-3 text-left text-[10px] font-bold text-gray-500 uppercase tracking-wider w-28" x-text="t('projectLabel')"></th>
+                                <th class="py-3 text-left text-[10px] font-bold text-gray-500 uppercase tracking-wider w-20" x-text="t('modelsLabel')"></th>
+                                <th class="py-3 text-left text-[10px] font-bold text-gray-500 uppercase tracking-wider w-24" x-text="t('token')"></th>
+                                <th class="py-3 pr-6 text-right text-[10px] font-bold text-gray-500 uppercase tracking-wider w-40" x-text="t('operations')"></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <template x-if="filteredAntigravityAccounts.length === 0 && antigravityAccounts.length === 0">
+                                <tr>
+                                    <td colspan="6" class="py-16 text-center">
+                                        <div class="flex flex-col items-center gap-4 max-w-lg mx-auto">
+                                            <svg class="w-20 h-20 text-gray-700" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 3l2.7 5.46 6.03.88-4.36 4.25 1.03 6.01L12 16.77 6.6 19.6l1.03-6.01L3.27 9.34l6.03-.88z" /></svg>
+                                            <h3 class="text-xl font-semibold text-gray-400" x-text="t('noAntigravityAccountsYet')"></h3>
+                                            <p class="text-sm text-gray-600 max-w-md leading-relaxed" x-text="t('noAntigravityAccountsDesc')"></p>
+                                            <div class="flex items-center gap-4 mt-2">
+                                                <button class="btn bg-cyan-500 hover:bg-cyan-400 border-none text-black btn-sm gap-2 shadow-lg shadow-cyan-500/20"
+                                                    @click="addAntigravityAccount()">
+                                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" /></svg>
+                                                    <span x-text="t('googleLogin')"></span>
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </td>
+                                </tr>
+                            </template>
+                            <template x-for="acc in filteredAntigravityAccounts" :key="acc.email">
+                                <tr class="border-b border-space-border/30 last:border-0 hover:bg-white/5 transition-colors group">
+                                    <td class="py-4 pl-6">
+                                        <div class="flex items-center gap-2">
+                                            <div class="w-2 h-2 rounded-full flex-shrink-0"
+                                                :class="acc.enabled === false ? 'bg-red-500' : acc.isActive ? 'bg-cyan-300 shadow-[0_0_8px_rgba(103,232,249,0.6)] animate-pulse' : 'bg-gray-500'"></div>
+                                            <span class="text-xs font-mono font-semibold"
+                                                :class="acc.enabled === false ? 'text-red-400' : acc.isActive ? 'text-cyan-300' : 'text-gray-500'"
+                                                x-text="acc.enabled === false ? t('disabled') : acc.isActive ? t('activeStatus') : t('idleStatus')"></span>
+                                        </div>
+                                    </td>
+                                    <td class="py-4">
+                                        <div class="flex flex-col">
+                                            <span class="font-mono text-sm text-gray-300 truncate max-w-[320px] inline-block group-hover:text-white transition-colors" x-text="acc.email"></span>
+                                            <span x-show="acc.displayName" class="text-[10px] text-gray-500 font-mono" x-text="acc.displayName"></span>
+                                        </div>
+                                    </td>
+                                    <td class="py-4"><span class="text-xs text-gray-500 font-mono" x-text="acc.projectId || '-'"></span></td>
+                                    <td class="py-4"><span class="text-xs text-cyan-300 font-mono" x-text="acc.modelCount || 0"></span></td>
+                                    <td class="py-4">
+                                        <span class="text-xs font-mono"
+                                            :class="acc.tokenExpired ? 'text-red-400' : 'text-neon-green'"
+                                            x-text="acc.tokenExpired ? t('expired') : t('valid')"></span>
+                                    </td>
+                                    <td class="py-4 pr-6">
+                                        <div class="flex justify-end gap-2">
+                                            <button class="px-3 py-1 text-[10px] font-bold font-mono uppercase rounded transition-all"
+                                                :class="acc.enabled !== false ? 'bg-yellow-500/10 text-yellow-400 border border-yellow-500/30 hover:bg-yellow-500/20' : 'bg-green-500/10 text-green-400 border border-green-500/30 hover:bg-green-500/20'"
+                                                @click="toggleAntigravityAccountEnabled(acc.email, acc.enabled === false)"
+                                                x-text="acc.enabled !== false ? t('actionDisable') : t('actionEnable')"></button>
+                                            <button x-show="!acc.isActive"
+                                                class="px-3 py-1 text-[10px] font-bold font-mono uppercase tracking-wider rounded bg-cyan-500/10 text-cyan-300 hover:bg-cyan-500/20 border border-cyan-400/30 hover:border-cyan-300/50 transition-all"
+                                                @click="switchAntigravityAccount(acc.email)" x-text="t('switchBtn')"></button>
+                                            <button class="btn btn-xs btn-ghost p-2 rounded hover:bg-white/10 text-gray-500 hover:text-white transition-colors"
+                                                @click="refreshAntigravityAccount(acc.email)" :title="t('needsRefresh')">
+                                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
+                                            </button>
+                                            <button class="btn btn-xs btn-ghost p-2 rounded hover:bg-red-500/10 text-gray-500 hover:text-red-400 transition-colors"
+                                                @click="removeAntigravityAccount(acc.email)" :title="t('delete')">
+                                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                                            </button>
+                                        </div>
+                                    </td>
+                                </tr>
+                            </template>
+                            <template x-if="antigravityAccounts.length > 0 && filteredAntigravityAccounts.length === 0">
                                 <tr>
                                     <td colspan="6" class="py-12 text-center">
                                         <div class="flex flex-col items-center gap-3">

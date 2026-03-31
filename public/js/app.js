@@ -34,6 +34,7 @@ document.addEventListener('alpine:init', () => {
 
         // Claude accounts
         claudeAccounts: [],
+        antigravityAccounts: [],
 
         haikuKiloModel: 'minimax/minimax-m2.5:free',
         accountStrategy: 'sequential',
@@ -45,7 +46,7 @@ document.addEventListener('alpine:init', () => {
         routingModeSaving: false,
         appRouting: {},
         appRoutingDraft: {},
-        appRoutingTargets: { appIds: [], bindingTypes: [], chatgptAccounts: [], claudeAccounts: [], apiKeys: [] },
+        appRoutingTargets: { appIds: [], bindingTypes: [], chatgptAccounts: [], claudeAccounts: [], antigravityAccounts: [], apiKeys: [] },
         appRoutingSaving: {},
         selectedAppRoutingId: '',
         appRoutingForm: { enabled: true, fallbackToDefault: true, bindings: [], currentType: null, currentTargetId: null },
@@ -161,6 +162,12 @@ document.addEventListener('alpine:init', () => {
             return this.claudeAccounts.filter(a => a.email.toLowerCase().includes(q) || (a.displayName || '').toLowerCase().includes(q));
         },
 
+        get filteredAntigravityAccounts() {
+            if (!this.accountSearchQuery) return this.antigravityAccounts;
+            const q = this.accountSearchQuery.toLowerCase();
+            return this.antigravityAccounts.filter(a => a.email.toLowerCase().includes(q) || (a.displayName || '').toLowerCase().includes(q));
+        },
+
         init() {
             document.documentElement.classList.toggle('light', !this.darkMode);
             document.documentElement.classList.toggle('dark', this.darkMode);
@@ -168,6 +175,7 @@ document.addEventListener('alpine:init', () => {
             setInterval(() => this.updateTime(), 1000);
             this.refreshAccounts();
             this.refreshClaudeAccounts();
+            this.refreshAntigravityAccounts();
             this.checkHealth();
             setInterval(() => this.checkHealth(), 30000);
             this.startLogStream();
@@ -198,6 +206,10 @@ document.addEventListener('alpine:init', () => {
                     this.showToast('Claude account added!', 'success');
                     this.refreshClaudeAccounts();
                 }
+                if (event.data && event.data.type === 'antigravity-oauth-success') {
+                    this.showToast(this.t('antigravityAccountAdded'), 'success');
+                    this.refreshAntigravityAccounts();
+                }
             });
         },
 
@@ -210,7 +222,7 @@ document.addEventListener('alpine:init', () => {
             if (window.innerWidth < 1024) {
                 this.sidebarOpen = false;
             }
-            if (tab === 'accounts') { this.refreshAccounts(); this.refreshClaudeAccounts(); }
+            if (tab === 'accounts') { this.refreshAccounts(); this.refreshClaudeAccounts(); this.refreshAntigravityAccounts(); }
             if (tab === 'apikeys') this.loadApiKeys();
             if (tab === 'usage') this.loadUsageData();
             if (tab === 'dashboard') this.refreshProxyStatus();
@@ -532,6 +544,13 @@ document.addEventListener('alpine:init', () => {
             }
         },
 
+        async refreshAntigravityAccounts() {
+            const { ok, data } = await this.api('/antigravity-accounts');
+            if (ok) {
+                this.antigravityAccounts = data.accounts || [];
+            }
+        },
+
         async addClaudeAccount() {
             await this.api('/claude-accounts/oauth/cleanup', { method: 'POST' });
             const { ok, data } = await this.api('/claude-accounts/add', { method: 'POST' });
@@ -622,6 +641,110 @@ document.addEventListener('alpine:init', () => {
                 this.refreshClaudeAccounts();
             } else {
                 this.showToast(data?.message || this.t('deleteFailed'), 'error');
+            }
+        },
+
+        async addAntigravityAccount() {
+            await this.api('/antigravity-accounts/oauth/cleanup', { method: 'POST' });
+            const { ok, data } = await this.api('/antigravity-accounts/add', { method: 'POST' });
+            if (ok && data.oauth_url) {
+                window.open(data.oauth_url, '_blank', 'width=640,height=760');
+                this.showToast(this.t('oauthWindowOpened'), 'info');
+
+                const checkAdded = setInterval(async () => {
+                    const { ok: refreshOk, data: refreshData } = await this.api('/antigravity-accounts');
+                    if (refreshOk && refreshData.accounts) {
+                        const prevCount = this.antigravityAccounts.length;
+                        this.antigravityAccounts = refreshData.accounts;
+                        if (refreshData.accounts.length > prevCount) {
+                            this.showToast(this.t('antigravityAccountAdded'), 'success');
+                            clearInterval(checkAdded);
+                        }
+                    }
+                }, 2000);
+
+                setTimeout(() => clearInterval(checkAdded), 120000);
+            } else {
+                this.showToast(data?.message || data?.error || this.t('failedToStartOauth'), 'error');
+            }
+        },
+
+        async importAntigravityAccount() {
+            const raw = prompt('Paste Antigravity account JSON');
+            if (!raw) return;
+            let parsed;
+            try {
+                parsed = JSON.parse(raw);
+            } catch {
+                this.showToast('Invalid JSON', 'error');
+                return;
+            }
+            const { ok, data } = await this.api('/antigravity-accounts/import', {
+                method: 'POST',
+                body: JSON.stringify(parsed)
+            });
+            if (ok && data.success) {
+                this.showToast(data.message, 'success');
+                this.refreshAntigravityAccounts();
+            } else {
+                this.showToast(data?.message || data?.error || this.t('importFailed'), 'error');
+            }
+        },
+
+        async switchAntigravityAccount(email) {
+            const { ok, data } = await this.api('/antigravity-accounts/switch', {
+                method: 'POST',
+                body: JSON.stringify({ email })
+            });
+            if (ok && data.success) {
+                this.showToast(data.message, 'success');
+                this.refreshAntigravityAccounts();
+            } else {
+                this.showToast(data?.message || this.t('failedToSwitch'), 'error');
+            }
+        },
+
+        async refreshAntigravityAccount(email) {
+            const { ok, data } = await this.api(`/antigravity-accounts/${encodeURIComponent(email)}/refresh`, { method: 'POST' });
+            if (ok && data.success) {
+                this.showToast(data.message, 'success');
+                this.refreshAntigravityAccounts();
+            } else {
+                this.showToast(data?.message || data?.error || this.t('refreshFailed'), 'error');
+            }
+        },
+
+        async refreshAllAntigravityTokens() {
+            const { ok, data } = await this.api('/antigravity-accounts/refresh/all', { method: 'POST' });
+            if (ok) {
+                this.showToast(this.t('antigravityAccountsRefreshed'), 'success');
+                this.refreshAntigravityAccounts();
+            } else {
+                this.showToast(data?.message || data?.error || this.t('refreshFailed'), 'error');
+            }
+        },
+
+        async toggleAntigravityAccountEnabled(email, enabled) {
+            const { ok, data } = await this.api(`/antigravity-accounts/${encodeURIComponent(email)}/toggle`, {
+                method: 'PUT',
+                body: JSON.stringify({ enabled })
+            });
+            if (ok && data.success) {
+                this.showToast(data.message, 'success');
+                this.refreshAntigravityAccounts();
+            } else {
+                this.showToast(data?.message || data?.error || this.t('updateFailed'), 'error');
+            }
+        },
+
+        async removeAntigravityAccount(email) {
+            if (!confirm(this.t('confirmDeleteAccount') + ': ' + email)) return;
+            const { ok, data } = await this.api(`/antigravity-accounts/${encodeURIComponent(email)}`, { method: 'DELETE' });
+            if (ok && data.success) {
+                this.showToast(data.message, 'success');
+                this.refreshAntigravityAccounts();
+            } else {
+                this.showToast(data?.message || data?.error || this.t('deleteFailed'), 'error');
             }
         },
 
@@ -1083,6 +1206,7 @@ document.addEventListener('alpine:init', () => {
         getBindingOptions(bindingType) {
             if (bindingType === 'chatgpt-account') return this.appRoutingTargets.chatgptAccounts || [];
             if (bindingType === 'claude-account') return this.appRoutingTargets.claudeAccounts || [];
+            if (bindingType === 'antigravity-account') return this.appRoutingTargets.antigravityAccounts || [];
             if (bindingType === 'api-key') return this.appRoutingTargets.apiKeys || [];
             return [];
         },
@@ -1252,10 +1376,12 @@ document.addEventListener('alpine:init', () => {
 
                     // Check Claude accounts → anthropic provider
                     if (this.claudeAccounts.length > 0) configuredTypes.add('anthropic');
+                    if (this.antigravityAccounts.length > 0) configuredTypes.add('google');
                 } catch {
                     // fallback: still include account-based providers
                     if (this.accounts.length > 0) configuredTypes.add('openai');
                     if (this.claudeAccounts.length > 0) configuredTypes.add('anthropic');
+                    if (this.antigravityAccounts.length > 0) configuredTypes.add('google');
                 }
 
                 this.modelMappingProviders = configuredTypes.size > 0

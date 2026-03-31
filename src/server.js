@@ -8,6 +8,7 @@ import cors from 'cors';
 
 import { ensureAccountsPersist, startAutoRefresh } from './account-manager.js';
 import { ensureAccountsPersist as ensureClaudeAccountsPersist, startAutoRefresh as startClaudeAutoRefresh } from './claude-account-manager.js';
+import { ensureAccountsPersist as ensureAntigravityAccountsPersist, startAutoRefresh as startAntigravityAutoRefresh } from './antigravity-account-manager.js';
 import { registerApiRoutes } from './routes/api-routes.js';
 import { handleResponses } from './routes/responses-route.js';
 import { setRequestLoggingEnabled } from './request-logger.js';
@@ -21,6 +22,9 @@ export function createServer({ port }) {
   // Claude accounts
   ensureClaudeAccountsPersist();
   startClaudeAutoRefresh();
+
+  ensureAntigravityAccountsPersist();
+  startAntigravityAutoRefresh();
 
   // Sync request logging state from persisted settings
   const settings = getServerSettings();

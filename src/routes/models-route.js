@@ -8,6 +8,7 @@
 
 import { fetchModels, fetchUsage } from '../model-api.js';
 import { getActiveAccount, loadAccounts } from '../account-manager.js';
+import { getAllModels as getAllAntigravityModels } from '../antigravity-account-manager.js';
 import { logger } from '../utils/logger.js';
 import { getCredentialsOrError } from '../middleware/credentials.js';
 import { getDiscoveredModels } from '../model-discovery.js';
@@ -32,7 +33,9 @@ const STATIC_FALLBACK_MODELS = [
  */
 function getFallbackModels() {
   const discovery = getDiscoveredModels();
-  if (!discovery.lastRun) return STATIC_FALLBACK_MODELS;
+  if (!discovery.lastRun) {
+    return mergeModels(STATIC_FALLBACK_MODELS, getAllAntigravityModels());
+  }
 
   // Collect all discovered model IDs
   const seen = new Set();
@@ -58,7 +61,18 @@ function getFallbackModels() {
     }
   }
 
-  return models;
+  return mergeModels(models, getAllAntigravityModels());
+}
+
+function mergeModels(primary, extra) {
+  const seen = new Set();
+  const merged = [];
+  for (const model of [...(primary || []), ...(extra || [])]) {
+    if (!model?.id || seen.has(model.id)) continue;
+    seen.add(model.id);
+    merged.push(model);
+  }
+  return merged;
 }
 
 /**
@@ -74,13 +88,13 @@ export async function handleListModels(req, res) {
 
   try {
     const models = await fetchModels(creds.accessToken, creds.accountId);
-    const modelList = models.map(m => ({
+    const modelList = mergeModels(models.map(m => ({
       id: m.id,
       object: 'model',
       created: Math.floor(Date.now() / 1000),
       owned_by: 'openai',
       description: m.description
-    }));
+    })), getAllAntigravityModels());
     res.json({ object: 'list', data: modelList });
   } catch (error) {
     logger.error(`Failed to fetch models: ${error.message}`);

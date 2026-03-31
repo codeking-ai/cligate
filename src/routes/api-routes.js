@@ -62,6 +62,19 @@ import {
   handleRemoveClaudeAccount,
   handleImportClaudeAccount
 } from './claude-accounts-route.js';
+import {
+  handleListAntigravityAccounts,
+  handleAntigravityAccountStatus,
+  handleAntigravityOAuthCleanup,
+  handleAddAntigravityAccount,
+  handleAddAntigravityAccountManual,
+  handleImportAntigravityAccount,
+  handleSwitchAntigravityAccount,
+  handleRefreshAntigravityAccount,
+  handleRefreshAllAntigravityAccounts,
+  handleToggleAntigravityAccount,
+  handleRemoveAntigravityAccount
+} from './antigravity-accounts-route.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -142,6 +155,19 @@ export function registerApiRoutes(app, { port }) {
 
   app.put('/claude-accounts/:email/toggle', handleToggleClaudeAccount);
   app.delete('/claude-accounts/:email', handleRemoveClaudeAccount);
+
+  // ─── Antigravity Account Management ──────────────────────────────────────
+  app.get('/antigravity-accounts', handleListAntigravityAccounts);
+  app.get('/antigravity-accounts/status', handleAntigravityAccountStatus);
+  app.post('/antigravity-accounts/add', handleAddAntigravityAccount);
+  app.post('/antigravity-accounts/add/manual', handleAddAntigravityAccountManual);
+  app.post('/antigravity-accounts/import', handleImportAntigravityAccount);
+  app.post('/antigravity-accounts/oauth/cleanup', handleAntigravityOAuthCleanup);
+  app.post('/antigravity-accounts/switch', handleSwitchAntigravityAccount);
+  app.post('/antigravity-accounts/refresh/all', handleRefreshAllAntigravityAccounts);
+  app.post('/antigravity-accounts/:email/refresh', handleRefreshAntigravityAccount);
+  app.put('/antigravity-accounts/:email/toggle', handleToggleAntigravityAccount);
+  app.delete('/antigravity-accounts/:email', handleRemoveAntigravityAccount);
 
   // ─── Claude CLI Configuration ──────────────────────────────────────────────
   app.get('/claude/config', handleGetClaudeConfig);
