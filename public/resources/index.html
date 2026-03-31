@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <script>if(localStorage.getItem('proxy-theme')==='light'){document.documentElement.classList.replace('dark','light')}</script>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ProxyPool Hub Resources</title>
+    <link rel="stylesheet" href="/resources/style.css">
+</head>
+<body>
+    <div class="page-shell">
+        <header class="topbar">
+            <div class="brand-block">
+                <div class="brand-mark">CX</div>
+                <div>
+                    <p class="eyebrow" id="brand-eyebrow">ProxyPool Hub</p>
+                    <h1 class="brand-title" id="brand-title">Resources Catalog</h1>
+                </div>
+            </div>
+            <div class="topbar-note" id="topbar-note">Language and theme follow the main dashboard.</div>
+        </header>
+
+        <nav class="section-nav">
+            <a href="/" class="section-link" id="nav-dashboard">Dashboard</a>
+            <a href="/resources/" class="section-link active" id="nav-resources">Resources</a>
+        </nav>
+
+        <header class="page-header">
+            <div>
+                <p class="eyebrow" id="page-eyebrow">Curated Directory</p>
+                <h2 id="page-title">Resources Catalog</h2>
+                <p class="subtle" id="page-subtle">A curated catalog of free and trial LLM API resources. This page is read-only and does not change routing behavior.</p>
+            </div>
+            <div class="header-actions">
+                <a class="ghost-link" href="/" id="back-link">Back to Dashboard</a>
+            </div>
+        </header>
+
+        <section class="summary-grid" id="summary-grid">
+            <article class="summary-card"><span id="summary-label-total">Total</span><strong id="summary-total">-</strong></article>
+            <article class="summary-card"><span id="summary-label-free">Free</span><strong id="summary-free">-</strong></article>
+            <article class="summary-card"><span id="summary-label-trial">Trial</span><strong id="summary-trial">-</strong></article>
+            <article class="summary-card"><span id="summary-label-supported">Supported</span><strong id="summary-supported">-</strong></article>
+        </section>
+
+        <section class="toolbar">
+            <label>
+                <span id="filter-label-category">Category</span>
+                <select id="filter-category">
+                    <option value="all" id="option-category-all">All</option>
+                    <option value="free" id="option-category-free">Free</option>
+                    <option value="trial" id="option-category-trial">Trial</option>
+                </select>
+            </label>
+            <label>
+                <span id="filter-label-status">Status</span>
+                <select id="filter-status">
+                    <option value="all" id="option-status-all">All</option>
+                    <option value="supported" id="option-status-supported">Supported</option>
+                    <option value="presettable" id="option-status-presettable">Presettable</option>
+                    <option value="candidate" id="option-status-candidate">Candidate</option>
+                    <option value="catalog_only" id="option-status-catalog-only">Catalog Only</option>
+                </select>
+            </label>
+            <label class="search-field">
+                <span id="filter-label-search">Search</span>
+                <input id="filter-query" type="search" placeholder="Search providers, models, notes">
+            </label>
+        </section>
+
+        <section class="content-grid">
+            <main>
+                <div class="section-title-row">
+                    <h2 id="providers-title">Providers</h2>
+                    <span id="result-count">0 items</span>
+                </div>
+                <div id="resource-list" class="resource-list"></div>
+            </main>
+
+            <aside class="detail-panel" id="detail-panel">
+                <div class="detail-empty" id="detail-empty">
+                    <h3 id="detail-empty-title">Select a provider</h3>
+                    <p id="detail-empty-text">Pick any resource card to inspect its limits, models, and compatibility notes.</p>
+                </div>
+                <div class="detail-content hidden" id="detail-content">
+                    <div class="detail-header">
+                        <div>
+                            <p class="eyebrow" id="detail-category">-</p>
+                            <h3 id="detail-name">-</h3>
+                        </div>
+                        <a id="detail-website" class="ghost-link" href="#" target="_blank" rel="noreferrer">Open Website</a>
+                    </div>
+
+                    <p id="detail-description" class="detail-description"></p>
+
+                    <div class="detail-meta">
+                        <div class="meta-block">
+                            <span id="detail-label-limits">Limits</span>
+                            <strong id="detail-limits">-</strong>
+                        </div>
+                        <div class="meta-block">
+                            <span id="detail-label-status">Status</span>
+                            <strong id="detail-status">-</strong>
+                        </div>
+                        <div class="meta-block">
+                            <span id="detail-label-compatibility">Compatibility</span>
+                            <strong id="detail-compatibility">-</strong>
+                        </div>
+                    </div>
+
+                    <section class="detail-section">
+                        <h4 id="detail-section-requirements">Requirements</h4>
+                        <ul id="detail-requirements"></ul>
+                    </section>
+
+                    <section class="detail-section">
+                        <h4 id="detail-section-models">Representative Models</h4>
+                        <ul id="detail-models"></ul>
+                    </section>
+
+                    <section class="detail-section">
+                        <h4 id="detail-section-notes">Notes</h4>
+                        <ul id="detail-notes"></ul>
+                    </section>
+
+                    <section class="detail-section">
+                        <h4 id="detail-section-source">Source</h4>
+                        <p id="detail-source"></p>
+                    </section>
+                </div>
+            </aside>
+        </section>
+    </div>
+
+    <script src="/resources/app.js"></script>
+</body>
+</html>

@@ -108,6 +108,21 @@ test('GET /config-files/codex returns raw file viewer payload', { skip: shouldSk
   assert.ok(typeof json?.file?.content === 'string');
 });
 
+test('GET /api/resources returns catalog payload', { skip: shouldSkip }, async () => {
+  const { status, json, text } = await getJson('/api/resources');
+  assert.equal(status, 200, `Expected 200, got ${status}: ${text}`);
+  assert.equal(json?.success, true);
+  assert.ok(Array.isArray(json?.items));
+  assert.ok(typeof json?.summary?.total === 'number');
+});
+
+test('GET /api/resources/openrouter returns resource detail', { skip: shouldSkip }, async () => {
+  const { status, json, text } = await getJson('/api/resources/openrouter');
+  assert.equal(status, 200, `Expected 200, got ${status}: ${text}`);
+  assert.equal(json?.success, true);
+  assert.equal(json?.item?.id, 'openrouter');
+});
+
 test('POST /v1/messages/count_tokens returns input_tokens', { skip: shouldSkip }, async () => {
   const payload = {
     system: 'hello',

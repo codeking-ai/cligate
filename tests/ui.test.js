@@ -79,6 +79,26 @@ test('Dashboard template includes config viewer entry points', async () => {
   assert.ok(html.includes("@click=\"openConfigViewer('openclaw')\""));
 });
 
+test('Dashboard template includes resources catalog entry link', async () => {
+  const res = await fetch(UI_URL);
+  assert.equal(res.status, 200);
+  const html = await res.text();
+
+  assert.ok(html.includes("window.location.href='/resources/'"));
+  assert.ok(html.includes("t('resources')"));
+});
+
+test('Resources page loads its standalone assets', async () => {
+  const res = await fetch(new URL('/resources/', UI_URL));
+  assert.equal(res.status, 200);
+  const html = await res.text();
+
+  assert.ok(html.includes('<title>ProxyPool Hub Resources</title>'));
+  assert.ok(html.includes('id="resource-list"'));
+  assert.ok(html.includes('id="topbar-note"'));
+  assert.ok(html.includes('<script src="/resources/app.js"></script>'));
+});
+
 test('Health endpoint drives Online/Offline indicator (server contract)', async () => {
   // This checks the server contract used by the UI (checkHealth -> /health).
   const res = await fetch(new URL('/health', UI_URL));

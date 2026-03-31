@@ -187,10 +187,12 @@ html.light .alert {
 .shadow-neon-purple { --tw-shadow-color: rgba(168, 85, 247, 0.4); box-shadow: 0 0 15px var(--tw-shadow-color); }
 
 .nav-item {
+    display: flex;
     background: transparent;
     color: #9ca3af;
     border-radius: 0.5rem;
     margin: 0 0.5rem;
+    text-decoration: none;
     transition: all 0.15s ease;
 }
 

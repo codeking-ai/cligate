@@ -16,6 +16,7 @@ const i18n = {
     system: 'System',
     logs: 'Logs',
     settings: 'Settings',
+    resources: 'Resources',
 
     // Dashboard
     chatgptProxySystem: 'CHATGPT PROXY SYSTEM',
@@ -475,6 +476,7 @@ const i18n = {
     system: '系统',
     logs: '日志',
     settings: '设置',
+    resources: '资源目录',
     chatgptProxySystem: 'CHATGPT 代理系统',
     live: '实时',
     totalAccounts: '账户总数',

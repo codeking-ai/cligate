@@ -118,6 +118,7 @@ test('handleSwitchAccount: returns result for non-existent email (graceful)', ()
 
 import { handleAddAccountManual } from '../../src/routes/accounts-route.js';
 import { handleGetConfigFile } from '../../src/routes/config-files-route.js';
+import { handleListResources, handleGetResourceSummary, handleGetResourceById } from '../../src/routes/resources-route.js';
 
 test('handleAddAccountManual: rejects missing code with 400', async () => {
   const req = mockReq({});
@@ -146,4 +147,33 @@ test('handleGetConfigFile: returns file payload for codex', () => {
   assert.ok(typeof res._body.file?.path === 'string' && res._body.file.path.length > 0);
   assert.ok(typeof res._body.file?.exists === 'boolean');
   assert.ok(typeof res._body.file?.content === 'string');
+});
+
+test('handleListResources: returns catalog list and summary', () => {
+  const req = mockReq({}, {}, { category: 'free', status: 'all', q: '' });
+  const res = mockRes();
+  handleListResources(req, res);
+  assert.equal(res._status, 200);
+  assert.equal(res._body.success, true);
+  assert.ok(Array.isArray(res._body.items));
+  assert.ok(res._body.items.length > 0);
+  assert.ok(typeof res._body.summary?.total === 'number');
+});
+
+test('handleGetResourceSummary: returns counts', () => {
+  const req = mockReq();
+  const res = mockRes();
+  handleGetResourceSummary(req, res);
+  assert.equal(res._status, 200);
+  assert.equal(res._body.success, true);
+  assert.ok(typeof res._body.summary?.free === 'number');
+});
+
+test('handleGetResourceById: returns item for openrouter', () => {
+  const req = mockReq({}, { id: 'openrouter' });
+  const res = mockRes();
+  handleGetResourceById(req, res);
+  assert.equal(res._status, 200);
+  assert.equal(res._body.success, true);
+  assert.equal(res._body.item?.id, 'openrouter');
 });
