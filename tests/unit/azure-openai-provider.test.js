@@ -80,6 +80,86 @@ test('AzureOpenAIProvider.sendRequest surfaces nested fetch cause details', asyn
   }
 });
 
+test('AzureOpenAIProvider.sendResponsesRequest retries once after transient network close', async () => {
+  const provider = new AzureOpenAIProvider({
+    id: 'azure_retry_1',
+    name: 'azure-test',
+    apiKey: 'test-key',
+    baseUrl: 'https://example-resource.openai.azure.com/',
+    deploymentName: 'deployment-gpt54'
+  });
+
+  const originalFetch = global.fetch;
+  let attempts = 0;
+
+  global.fetch = async () => {
+    attempts++;
+    if (attempts === 1) {
+      const cause = new Error('other side closed');
+      cause.code = 'UND_ERR_SOCKET';
+      throw new TypeError('fetch failed', { cause });
+    }
+
+    return new Response(JSON.stringify({
+      object: 'response',
+      model: 'deployment-gpt54',
+      status: 'completed',
+      output: [],
+      usage: {
+        input_tokens: 2,
+        output_tokens: 1,
+        total_tokens: 3
+      }
+    }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' }
+    });
+  };
+
+  try {
+    const response = await provider.sendResponsesRequest({
+      model: 'gpt-5.4',
+      input: 'hello'
+    });
+
+    assert.equal(response.status, 200);
+    assert.equal(attempts, 2);
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
+test('AzureOpenAIProvider.sendResponsesRequest does not retry non-network errors', async () => {
+  const provider = new AzureOpenAIProvider({
+    id: 'azure_retry_2',
+    name: 'azure-test',
+    apiKey: 'test-key',
+    baseUrl: 'https://example-resource.openai.azure.com/',
+    deploymentName: 'deployment-gpt54'
+  });
+
+  const originalFetch = global.fetch;
+  let attempts = 0;
+
+  global.fetch = async () => {
+    attempts++;
+    throw new TypeError('invalid url');
+  };
+
+  try {
+    await assert.rejects(
+      () => provider.sendResponsesRequest({
+        model: 'gpt-5.4',
+        input: 'hello'
+      }),
+      /Azure OpenAI responses request failed: invalid url/
+    );
+    assert.equal(attempts, 1);
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
 test('AzureOpenAIProvider.sendResponsesRequest strips encrypted content fields for Azure compatibility', async () => {
   const provider = new AzureOpenAIProvider({
     id: 'azure_3',

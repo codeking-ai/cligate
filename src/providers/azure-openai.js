@@ -16,6 +16,8 @@ import { logger } from '../utils/logger.js';
 import { estimateCostWithRegistry, getDefaultPricing } from '../pricing-registry.js';
 
 const DEFAULT_API_VERSION = '2024-10-21';
+const AZURE_NETWORK_RETRY_ATTEMPTS = 2;
+const AZURE_NETWORK_RETRY_DELAY_MS = 250;
 
 function sanitizeAnthropicToolSchemaForAzureResponses(schema) {
     if (Array.isArray(schema)) {
@@ -214,6 +216,52 @@ function normalizeResponsesPayloadForAzure(body) {
     };
 }
 
+function sleep(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function collectErrorMessages(error) {
+    const messages = [];
+    const queue = [error];
+    const seen = new Set();
+
+    while (queue.length > 0) {
+        const current = queue.shift();
+        if (!current || seen.has(current)) continue;
+        seen.add(current);
+
+        if (typeof current.message === 'string' && current.message.length > 0) {
+            messages.push(current.message);
+        }
+        if (typeof current.code === 'string' && current.code.length > 0) {
+            messages.push(current.code);
+        }
+        if (current.cause && typeof current.cause === 'object') {
+            queue.push(current.cause);
+        }
+    }
+
+    return messages.map(msg => msg.toLowerCase());
+}
+
+function isRetryableAzureNetworkError(error) {
+    const haystack = collectErrorMessages(error).join(' | ');
+    return [
+        'other side closed',
+        'socket hang up',
+        'fetch failed',
+        'econnreset',
+        'etimedout',
+        'eai_again',
+        'enotfound',
+        'und_err_socket',
+        'und_err_connect_timeout',
+        'connect timeout',
+        'headers timeout',
+        'body timeout'
+    ].some(pattern => haystack.includes(pattern));
+}
+
 export class AzureOpenAIProvider extends BaseProvider {
     constructor(config) {
         super({
@@ -251,46 +299,58 @@ export class AzureOpenAIProvider extends BaseProvider {
         return parts.join(': ');
     }
 
-    async sendRequest(body) {
-        try {
-            const url = this._buildChatUrl();
-            const response = await fetch(url, {
-                method: 'POST',
-                headers: {
-                    'api-key': this.apiKey,
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify(body)
-            });
-            return response;
-        } catch (error) {
-            throw new Error(this._buildErrorMessage('chat completions', error), { cause: error });
+    async _fetchWithRetry(operation, url, options) {
+        let lastError;
+
+        for (let attempt = 1; attempt <= AZURE_NETWORK_RETRY_ATTEMPTS; attempt++) {
+            try {
+                return await fetch(url, options);
+            } catch (error) {
+                lastError = error;
+                const retryable = isRetryableAzureNetworkError(error);
+                const hasNextAttempt = attempt < AZURE_NETWORK_RETRY_ATTEMPTS;
+                if (!retryable || !hasNextAttempt) {
+                    break;
+                }
+
+                logger.warn(`[Azure OpenAI] Retrying ${operation} after transient network error (attempt ${attempt + 1}/${AZURE_NETWORK_RETRY_ATTEMPTS}): ${error?.cause?.code || error?.code || error?.cause?.message || error?.message}`);
+                await sleep(AZURE_NETWORK_RETRY_DELAY_MS * attempt);
+            }
         }
+
+        throw new Error(this._buildErrorMessage(operation, lastError), { cause: lastError });
+    }
+
+    async sendRequest(body) {
+        const url = this._buildChatUrl();
+        return this._fetchWithRetry('chat completions', url, {
+            method: 'POST',
+            headers: {
+                'api-key': this.apiKey,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(body)
+        });
     }
 
     async sendResponsesRequest(body) {
-        try {
-            const url = this._buildResponsesUrl();
-            const sanitizeStats = { encryptedFieldsRemoved: 0, compactionItemsRemoved: 0, includeEntriesRemoved: 0, signatureFieldsRemoved: 0 };
-            const responsesBody = {
-                ...sanitizeResponsesPayloadForAzure(body, '', sanitizeStats),
-                model: this.deploymentName || body.model
-            };
-            if (sanitizeStats.encryptedFieldsRemoved || sanitizeStats.compactionItemsRemoved || sanitizeStats.includeEntriesRemoved || sanitizeStats.signatureFieldsRemoved) {
-                logger.info(`[Azure OpenAI] Sanitized responses payload | encrypted_fields=${sanitizeStats.encryptedFieldsRemoved} | signature_fields=${sanitizeStats.signatureFieldsRemoved} | compaction_items=${sanitizeStats.compactionItemsRemoved} | include_entries=${sanitizeStats.includeEntriesRemoved}`);
-            }
-            const response = await fetch(url, {
-                method: 'POST',
-                headers: {
-                    'api-key': this.apiKey,
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify(responsesBody)
-            });
-            return response;
-        } catch (error) {
-            throw new Error(this._buildErrorMessage('responses', error), { cause: error });
+        const url = this._buildResponsesUrl();
+        const sanitizeStats = { encryptedFieldsRemoved: 0, compactionItemsRemoved: 0, includeEntriesRemoved: 0, signatureFieldsRemoved: 0 };
+        const responsesBody = {
+            ...sanitizeResponsesPayloadForAzure(body, '', sanitizeStats),
+            model: this.deploymentName || body.model
+        };
+        if (sanitizeStats.encryptedFieldsRemoved || sanitizeStats.compactionItemsRemoved || sanitizeStats.includeEntriesRemoved || sanitizeStats.signatureFieldsRemoved) {
+            logger.info(`[Azure OpenAI] Sanitized responses payload | encrypted_fields=${sanitizeStats.encryptedFieldsRemoved} | signature_fields=${sanitizeStats.signatureFieldsRemoved} | compaction_items=${sanitizeStats.compactionItemsRemoved} | include_entries=${sanitizeStats.includeEntriesRemoved}`);
         }
+        return this._fetchWithRetry('responses', url, {
+            method: 'POST',
+            headers: {
+                'api-key': this.apiKey,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(responsesBody)
+        });
     }
 
     async validateKey() {

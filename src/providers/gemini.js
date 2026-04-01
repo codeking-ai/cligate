@@ -12,6 +12,12 @@ const DEFAULT_BASE_URL = 'https://generativelanguage.googleapis.com/v1beta';
 
 const DEFAULT_MODEL = 'gemini-3-flash-preview';
 
+function truncateForLog(value, maxLength = 600) {
+    const text = String(value || '');
+    if (text.length <= maxLength) return text;
+    return `${text.slice(0, maxLength)}...`;
+}
+
 function anthropicContentArrayToGeminiParts(content) {
     if (!Array.isArray(content)) return [];
 
@@ -119,13 +125,67 @@ export class GeminiProvider extends BaseProvider {
      * Strip fields unsupported by Gemini from JSON Schema (e.g. additionalProperties).
      */
     _cleanSchema(schema) {
-        if (!schema || typeof schema !== 'object') return schema;
-        if (Array.isArray(schema)) return schema.map(s => this._cleanSchema(s));
+        if (!schema || typeof schema !== 'object') {
+            return schema;
+        }
+        if (Array.isArray(schema)) {
+            return schema.map(s => this._cleanSchema(s));
+        }
+
         const cleaned = {};
         for (const [key, value] of Object.entries(schema)) {
-            if (key === 'additionalProperties') continue;
-            cleaned[key] = this._cleanSchema(value);
+            if (key === 'const') {
+                cleaned.enum = [value];
+                continue;
+            }
+
+            if (key === 'type') {
+                if (Array.isArray(value)) {
+                    const nonNullTypes = value.filter(item => item !== 'null');
+                    cleaned.type = nonNullTypes[0] || 'string';
+                } else {
+                    cleaned.type = value;
+                }
+                continue;
+            }
+
+            if (key === 'properties' && value && typeof value === 'object' && !Array.isArray(value)) {
+                cleaned.properties = {};
+                for (const [propKey, propValue] of Object.entries(value)) {
+                    cleaned.properties[propKey] = this._cleanSchema(propValue);
+                }
+                continue;
+            }
+
+            if (key === 'items') {
+                cleaned.items = Array.isArray(value)
+                    ? value.map(item => this._cleanSchema(item))
+                    : this._cleanSchema(value);
+                continue;
+            }
+
+            if (key === 'required' && Array.isArray(value)) {
+                cleaned.required = value;
+                continue;
+            }
+
+            if (key === 'enum' && Array.isArray(value)) {
+                cleaned.enum = value;
+                continue;
+            }
+
+            if (['description', 'title', 'format', 'nullable'].includes(key)) {
+                cleaned[key] = value;
+            }
         }
+
+        if (!cleaned.type) {
+            cleaned.type = 'object';
+        }
+        if (cleaned.type === 'object' && !cleaned.properties) {
+            cleaned.properties = {};
+        }
+
         return cleaned;
     }
 
@@ -142,6 +202,31 @@ export class GeminiProvider extends BaseProvider {
                 parameters: this._cleanSchema(t.function.parameters || { type: 'object', properties: {} })
             }));
         return functionDeclarations.length > 0 ? [{ functionDeclarations }] : null;
+    }
+
+    _convertAnthropicTools(tools) {
+        if (!Array.isArray(tools) || tools.length === 0) return null;
+        const functionDeclarations = tools.map(tool => ({
+            name: tool.name,
+            description: tool.description || '',
+            parameters: this._cleanSchema(tool.input_schema || { type: 'object', properties: {} })
+        }));
+        return functionDeclarations.length > 0 ? [{ functionDeclarations }] : null;
+    }
+
+    _summarizeAnthropicTools(tools) {
+        if (!Array.isArray(tools) || tools.length === 0) {
+            return { count: 0, names: [], firstSchemaPreview: '' };
+        }
+
+        const names = tools.slice(0, 5).map(tool => tool?.name || 'unknown');
+        const firstTool = tools[0];
+        const firstSchema = this._cleanSchema(firstTool?.input_schema || { type: 'object', properties: {} });
+        return {
+            count: tools.length,
+            names,
+            firstSchemaPreview: truncateForLog(JSON.stringify(firstSchema))
+        };
     }
 
     /**
@@ -196,6 +281,7 @@ export class GeminiProvider extends BaseProvider {
     _mapToGeminiModel(model) {
         if (!model) return DEFAULT_MODEL;
         const m = model.toLowerCase();
+        if (m.startsWith('gemini-')) return model;
         if (m.includes('opus')) return 'gemini-2.5-pro';
         if (m.includes('sonnet')) return DEFAULT_MODEL;
         if (m.includes('haiku')) return 'gemini-2.0-flash';
@@ -319,6 +405,7 @@ export class GeminiProvider extends BaseProvider {
         const candidate = geminiResponse.candidates?.[0];
         const parts = candidate?.content?.parts || [];
         const usage = geminiResponse.usageMetadata || {};
+        const finishReason = candidate?.finishReason || geminiResponse.finishReason;
 
         const content = [];
         for (const part of parts) {
@@ -337,13 +424,21 @@ export class GeminiProvider extends BaseProvider {
             content.push({ type: 'text', text: '' });
         }
 
+        const hasToolUse = content.some(block => block.type === 'tool_use');
+        let stopReason = 'end_turn';
+        if (hasToolUse) {
+            stopReason = 'tool_use';
+        } else if (String(finishReason || '').toUpperCase() === 'MAX_TOKENS') {
+            stopReason = 'max_tokens';
+        }
+
         return {
             id: `msg_gemini_${Date.now()}`,
             type: 'message',
             role: 'assistant',
             content,
             model: originalModel,
-            stop_reason: 'end_turn',
+            stop_reason: stopReason,
             stop_sequence: null,
             usage: {
                 input_tokens: usage.promptTokenCount || 0,
@@ -359,6 +454,7 @@ export class GeminiProvider extends BaseProvider {
      * send to Gemini API, and return response in Anthropic Messages format.
      */
     async sendAnthropicRequest(body) {
+        const appId = body?._proxypoolAppId || 'unknown-anthropic-client';
         const geminiModel = this._mapToGeminiModel(body.model);
         const { contents, systemInstruction } = this._convertAnthropicToGemini(
             body.messages || [], body.system
@@ -374,6 +470,18 @@ export class GeminiProvider extends BaseProvider {
         };
         if (systemInstruction) geminiBody.systemInstruction = systemInstruction;
 
+        const geminiTools = this._convertAnthropicTools(body.tools);
+        if (geminiTools) {
+            geminiBody.tools = geminiTools;
+            if (appId === 'claude-code') {
+                // Claude Code relies heavily on multi-turn tool calls, but Gemini's
+                // thought-signature requirements are incompatible with Anthropic bridging.
+                geminiBody.generationConfig.thinkingConfig = { thinkingBudget: 0 };
+                const toolSummary = this._summarizeAnthropicTools(body.tools);
+                logger.info(`[Gemini] Enabled Claude Code tool compatibility | model=${geminiModel} | tools=${toolSummary.count} | tool_names=${toolSummary.names.join(',')}`);
+            }
+        }
+
         const url = `${this.baseUrl}/models/${geminiModel}:generateContent?key=${this.apiKey}`;
         const response = await fetch(url, {
             method: 'POST',
@@ -381,7 +489,17 @@ export class GeminiProvider extends BaseProvider {
             body: JSON.stringify(geminiBody)
         });
 
-        if (!response.ok) return response;
+        if (!response.ok) {
+            const errorText = await response.text();
+            const toolSummary = this._summarizeAnthropicTools(body.tools);
+            logger.warn(
+                `[Gemini] Anthropic bridge upstream error | model=${geminiModel} | app=${appId} | tools=${toolSummary.count} | tool_names=${toolSummary.names.join(',')} | first_tool_schema=${toolSummary.firstSchemaPreview || '(none)'} | body=${truncateForLog(errorText, 1200)}`
+            );
+            return new Response(errorText, {
+                status: response.status,
+                headers: response.headers
+            });
+        }
 
         const data = await response.json();
         const anthropicResponse = this._convertGeminiToAnthropic(data, body.model);

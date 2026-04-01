@@ -231,7 +231,7 @@ export async function handleMessages(req, res) {
             if (result !== false) return;
         }
         if (hasCompatibleKeys) {
-            const result = await _handleViaCompatibleKeys(res, body, requestedModel, isStreaming, startTime);
+            const result = await _handleViaCompatibleKeys(res, body, requestedModel, isStreaming, startTime, appId);
             if (result !== false) return;
         }
         if (hasAccounts) {
@@ -261,7 +261,7 @@ export async function handleMessages(req, res) {
             if (result !== false) return;
         }
         if (hasCompatibleKeys) {
-            const result = await _handleViaCompatibleKeys(res, body, requestedModel, isStreaming, startTime);
+            const result = await _handleViaCompatibleKeys(res, body, requestedModel, isStreaming, startTime, appId);
             if (result !== false) return;
         }
         if (hasAntigravityAccounts) {
@@ -320,7 +320,10 @@ async function _handleViaAssignedApiKey(req, res, body, requestedModel, isStream
         if (typeof provider.sendAnthropicRequest === 'function') {
             const mappedModel = _resolveMessagesProviderModel(provider.type, requestedModel);
             const mappedBody = { ...body, model: mappedModel };
-            const response = await provider.sendAnthropicRequest(mappedBody);
+            const response = await provider.sendAnthropicRequest({
+                ...mappedBody,
+                _proxypoolAppId: detectRequestApp(req)
+            });
             if (!response.ok) return false;
             const actualModel = _resolveActualProviderModel(response, mappedModel);
             const contentType = response.headers?.get?.('content-type') || '';
@@ -678,7 +681,7 @@ function _getCompatibleProviders() {
  * Each provider handles its own format conversion internally.
  * Returns false if no providers succeed.
  */
-async function _handleViaCompatibleKeys(res, body, requestedModel, isStreaming, startTime) {
+async function _handleViaCompatibleKeys(res, body, requestedModel, isStreaming, startTime, appId = 'unknown-anthropic-client') {
     const providers = _getCompatibleProviders();
     if (providers.length === 0) return false;
 
@@ -694,7 +697,10 @@ async function _handleViaCompatibleKeys(res, body, requestedModel, isStreaming, 
             const mappedModel = _resolveMessagesProviderModel(provider.type, requestedModel);
             const mappedBody = { ...body, model: mappedModel };
             logger.info(`[Messages] Model mapping: ${requestedModel} → ${mappedModel} (${provider.type})`);
-            const response = await provider.sendAnthropicRequest(mappedBody);
+            const response = await provider.sendAnthropicRequest({
+                ...mappedBody,
+                _proxypoolAppId: appId
+            });
             const durationMs = Date.now() - startTime;
             const actualModel = _resolveActualProviderModel(response, mappedModel);
 

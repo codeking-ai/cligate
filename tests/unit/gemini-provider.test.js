@@ -94,3 +94,230 @@ test('GeminiProvider.sendAnthropicRequest downgrades tool_result image content t
     logger.info = originalLoggerInfo;
   }
 });
+
+test('GeminiProvider.sendAnthropicRequest enables Claude Code tool compatibility for Anthropic bridge', async () => {
+  const provider = new GeminiProvider({
+    id: 'gemini_tools_1',
+    name: 'gemini-test',
+    apiKey: 'test-key'
+  });
+
+  const originalFetch = global.fetch;
+  let capturedBody = null;
+
+  global.fetch = async (_url, options) => {
+    capturedBody = JSON.parse(options.body);
+    return new Response(JSON.stringify({
+      candidates: [{
+        finishReason: 'STOP',
+        content: {
+          parts: [{
+            functionCall: {
+              id: 'call_read_1',
+              name: 'Read',
+              args: { file_path: 'D:\\tmp\\demo.png' }
+            }
+          }]
+        }
+      }],
+      usageMetadata: {
+        promptTokenCount: 5,
+        candidatesTokenCount: 3
+      }
+    }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' }
+    });
+  };
+
+  try {
+    const response = await provider.sendAnthropicRequest({
+      model: 'claude-opus-4-6',
+      _proxypoolAppId: 'claude-code',
+      messages: [{ role: 'user', content: '请查看 D:\\tmp\\demo.png' }],
+      tools: [{
+        name: 'Read',
+        description: 'Read a local file',
+        input_schema: {
+          type: 'object',
+          properties: {
+            file_path: { type: 'string' }
+          },
+          required: ['file_path'],
+          additionalProperties: false
+        }
+      }]
+    });
+
+    const decl = capturedBody.tools[0].functionDeclarations[0];
+    assert.equal(decl.name, 'Read');
+    assert.equal(decl.description, 'Read a local file');
+    assert.equal(decl.parameters.type, 'object');
+    assert.deepEqual(decl.parameters.required, ['file_path']);
+    assert.equal(decl.parameters.properties.file_path.type, 'string');
+    assert.deepEqual(capturedBody.generationConfig.thinkingConfig, { thinkingBudget: 0 });
+
+    const anthropic = await response.json();
+    assert.equal(anthropic.stop_reason, 'tool_use');
+    assert.equal(anthropic.content[0].type, 'tool_use');
+    assert.equal(anthropic.content[0].name, 'Read');
+    assert.deepEqual(anthropic.content[0].input, { file_path: 'D:\\tmp\\demo.png' });
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
+test('GeminiProvider.sendAnthropicRequest preserves already-mapped Gemini model ids and strips unsupported schema keys', async () => {
+  const provider = new GeminiProvider({
+    id: 'gemini_tools_2',
+    name: 'gemini-test',
+    apiKey: 'test-key'
+  });
+
+  const originalFetch = global.fetch;
+  let capturedUrl = null;
+  let capturedBody = null;
+
+  global.fetch = async (url, options) => {
+    capturedUrl = url;
+    capturedBody = JSON.parse(options.body);
+    return new Response(JSON.stringify({
+      candidates: [{
+        finishReason: 'STOP',
+        content: { parts: [{ text: 'ok' }] }
+      }],
+      usageMetadata: {
+        promptTokenCount: 2,
+        candidatesTokenCount: 1
+      }
+    }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' }
+    });
+  };
+
+  try {
+    await provider.sendAnthropicRequest({
+      model: 'gemini-3.1-pro-preview',
+      _proxypoolAppId: 'claude-code',
+      messages: [{ role: 'user', content: 'inspect image' }],
+      tools: [{
+        name: 'Read',
+        description: 'Read a local file',
+        input_schema: {
+          type: 'object',
+          properties: {
+            file_path: { type: 'string', minLength: 1 },
+            mode: { const: 'safe' },
+            options: {
+              type: 'object',
+              propertyNames: { pattern: '^[a-z]+$' },
+              properties: {
+                cwd: { type: ['string', 'null'] }
+              },
+              additionalProperties: false
+            }
+          },
+          required: ['file_path'],
+          additionalProperties: false,
+          $schema: 'http://json-schema.org/draft-07/schema#',
+          examples: [{ file_path: 'D:\\tmp\\demo.png' }]
+        }
+      }]
+    });
+
+    assert.equal(capturedUrl, 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-pro-preview:generateContent?key=test-key');
+    const params = capturedBody.tools[0].functionDeclarations[0].parameters;
+    assert.equal('$schema' in params, false);
+    assert.equal('examples' in params, false);
+    assert.equal('additionalProperties' in params, false);
+    assert.equal('minLength' in params.properties.file_path, false);
+    assert.equal('propertyNames' in params.properties.options, false);
+    assert.deepEqual(params.properties.mode.enum, ['safe']);
+    assert.equal(params.properties.options.properties.cwd.type, 'string');
+    assert.deepEqual(params.required, ['file_path']);
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
+test('GeminiProvider.sendAnthropicRequest strips nested unsupported schema keys that Gemini rejects', async () => {
+  const provider = new GeminiProvider({
+    id: 'gemini_tools_3',
+    name: 'gemini-test',
+    apiKey: 'test-key'
+  });
+
+  const originalFetch = global.fetch;
+  let capturedBody = null;
+
+  global.fetch = async (_url, options) => {
+    capturedBody = JSON.parse(options.body);
+    return new Response(JSON.stringify({
+      candidates: [{
+        finishReason: 'STOP',
+        content: { parts: [{ text: 'ok' }] }
+      }],
+      usageMetadata: {
+        promptTokenCount: 2,
+        candidatesTokenCount: 1
+      }
+    }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' }
+    });
+  };
+
+  try {
+    await provider.sendAnthropicRequest({
+      model: 'gemini-3.1-pro-preview',
+      _proxypoolAppId: 'claude-code',
+      messages: [{ role: 'user', content: 'inspect image' }],
+      tools: [{
+        name: 'ComplexTool',
+        description: 'Tool with nested schema',
+        input_schema: {
+          type: 'object',
+          properties: {
+            query: { type: 'string', minLength: 1 },
+            options: {
+              type: 'object',
+              title: 'Options',
+              properties: {
+                cwd: { type: ['string', 'null'] },
+                mode: { const: 'safe' },
+                nested: {
+                  type: 'object',
+                  properties: {
+                    pattern: { type: 'string', pattern: '^[a-z]+$' }
+                  },
+                  additionalProperties: false
+                }
+              },
+              propertyNames: { pattern: '^[a-z]+$' },
+              additionalProperties: false
+            }
+          },
+          required: ['query'],
+          $schema: 'http://json-schema.org/draft-07/schema#'
+        }
+      }]
+    });
+
+    const params = capturedBody.tools[0].functionDeclarations[0].parameters;
+    assert.equal(params.type, 'object');
+    assert.equal(params.properties.query.type, 'string');
+    assert.equal('minLength' in params.properties.query, false);
+    assert.equal(params.properties.options.type, 'object');
+    assert.equal(params.properties.options.title, 'Options');
+    assert.equal('propertyNames' in params.properties.options, false);
+    assert.equal('additionalProperties' in params.properties.options, false);
+    assert.equal(params.properties.options.properties.cwd.type, 'string');
+    assert.deepEqual(params.properties.options.properties.mode.enum, ['safe']);
+    assert.equal(params.properties.options.properties.nested.type, 'object');
+    assert.equal(params.properties.options.properties.nested.properties.pattern.type, 'string');
+    assert.equal('pattern' in params.properties.options.properties.nested.properties.pattern, false);
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
