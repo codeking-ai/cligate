@@ -1235,6 +1235,24 @@ document.addEventListener('alpine:init', () => {
             this.appRoutingForm = { ...this.appRoutingForm, ...patch };
         },
 
+        async updateAppRoutingToggle(field, value) {
+            const appId = this.selectedAppRoutingId;
+            if (!appId) return;
+            const nextRouting = JSON.parse(JSON.stringify(this.appRoutingDraft || {}));
+            const current = nextRouting[appId] || this.createEmptyAppRoutingForm();
+            nextRouting[appId] = {
+                enabled: field === 'enabled' ? value === true : current.enabled === true,
+                fallbackToDefault: field === 'fallbackToDefault' ? value !== false : current.fallbackToDefault !== false,
+                bindings: Array.isArray(current.bindings) ? current.bindings : []
+            };
+            this.appRoutingDraft = nextRouting;
+            this.appRoutingForm = {
+                ...this.appRoutingForm,
+                [field]: field === 'enabled' ? value === true : value !== false
+            };
+            await this.saveAppRoutingConfig(appId, nextRouting);
+        },
+
         async removeAppRoutingBinding(index) {
             const appId = this.selectedAppRoutingId;
             if (!appId) return;
@@ -1309,11 +1327,13 @@ document.addEventListener('alpine:init', () => {
                 });
             }
             const nextRouting = JSON.parse(JSON.stringify(this.appRoutingDraft || {}));
+            const shouldEnable = bindings.length > 0 ? true : this.appRoutingForm.enabled === true;
             nextRouting[appId] = {
-                enabled: this.appRoutingForm.enabled === true,
+                enabled: shouldEnable,
                 fallbackToDefault: this.appRoutingForm.fallbackToDefault !== false,
                 bindings
             };
+            this.appRoutingForm = { ...this.appRoutingForm, enabled: shouldEnable, bindings };
             await this.saveAppRoutingConfig(appId, nextRouting);
         },
 

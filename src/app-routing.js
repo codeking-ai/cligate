@@ -120,11 +120,24 @@ function assigned(appId, appBinding, binding, credential) {
   };
 }
 
+function assignedCandidates(appId, appBinding, assignments, attempts = []) {
+  return {
+    matched: true,
+    appId,
+    appBinding,
+    assignments,
+    attempts,
+    fallbackToDefault: appBinding?.fallbackToDefault !== false,
+    unavailableReason: attempts[0]?.reason || null
+  };
+}
+
 function unavailableAssigned(appId, appBinding, reason, attempts = []) {
   return {
     matched: true,
     appId,
     appBinding,
+    assignments: [],
     fallbackToDefault: appBinding?.fallbackToDefault !== false,
     unavailableReason: reason,
     attempts
@@ -164,18 +177,33 @@ function resolveSingleBinding(binding) {
 }
 
 export function resolveAssignedCredential(settings, appId) {
+  const resolved = resolveAssignedCredentials(settings, appId);
+  if (!resolved.matched) return resolved;
+  if (resolved.assignments?.length > 0) return resolved.assignments[0];
+  return unavailableAssigned(appId, resolved.appBinding, resolved.unavailableReason, resolved.attempts);
+}
+
+export function resolveAssignedCredentials(settings, appId) {
   const appBinding = getAppBinding(settings, appId);
   if (!appBinding || !appBinding.enabled) {
-    return { matched: false, appId, appBinding, fallbackToDefault: true };
+    return { matched: false, appId, appBinding, assignments: [], attempts: [], fallbackToDefault: true };
   }
 
+  const assignments = [];
   const attempts = [];
   for (const binding of appBinding.bindings || []) {
     const resolved = resolveSingleBinding(binding);
     if (resolved.ok) {
-      return assigned(appId, appBinding, binding, resolved.credential);
+      const entry = assigned(appId, appBinding, binding, resolved.credential);
+      assignments.push(entry);
+      attempts.push({ binding, reason: 'resolved' });
+      continue;
     }
     attempts.push({ binding, reason: resolved.reason });
+  }
+
+  if (assignments.length > 0) {
+    return assignedCandidates(appId, appBinding, assignments, attempts);
   }
 
   return unavailableAssigned(appId, appBinding, attempts[0]?.reason || 'invalid_binding', attempts);

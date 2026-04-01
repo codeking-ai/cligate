@@ -14,7 +14,7 @@ import { getServerSettings } from '../server-settings.js';
 import { selectKey, getAllProviders, recordUsage, recordError, recordRateLimit } from '../api-key-manager.js';
 import { recordRequest } from '../usage-tracker.js';
 import { logRequest } from '../request-logger.js';
-import { detectRequestApp, resolveAssignedCredential } from '../app-routing.js';
+import { detectRequestApp, resolveAssignedCredentials } from '../app-routing.js';
 import { resolveModel, resolveModelForced } from '../model-mapping.js';
 
 const MAX_RETRIES = 5;
@@ -203,7 +203,7 @@ export async function handleMessages(req, res) {
     const hasCompatibleKeys = _getCompatibleProviders().length > 0;
 
     if (settings.routingMode === 'app-assigned') {
-        const assignment = resolveAssignedCredential(settings, appId);
+        const assignment = resolveAssignedCredentials(settings, appId);
         if (assignment.matched) {
             const result = await _handleMessagesAssignment(req, res, body, requestedModel, upstreamModel, isStreaming, startTime, clientBeta, assignment);
             if (result !== false) return;
@@ -285,18 +285,35 @@ export async function handleMessages(req, res) {
 }
 
 async function _handleMessagesAssignment(req, res, body, requestedModel, upstreamModel, isStreaming, startTime, clientBeta, assignment) {
-    if (!assignment.credential) return false;
+    const assignments = Array.isArray(assignment.assignments)
+        ? assignment.assignments
+        : (assignment.credential ? [assignment] : []);
 
-    if (assignment.credentialType === 'chatgpt-account') {
-        return _handleViaAssignedAccount(req, res, body, requestedModel, upstreamModel, isStreaming, startTime, assignment.credential.email);
+    for (const candidate of assignments) {
+        if (!candidate?.credential) continue;
+        const targetId = candidate.credential?.email || candidate.credential?.id || candidate.binding?.targetId || 'unknown';
+        logger.info(`[Messages] Assigned binding | app=${assignment.appId} | type=${candidate.credentialType} | target=${targetId}`);
+
+        if (candidate.credentialType === 'chatgpt-account') {
+            const result = await _handleViaAssignedAccount(req, res, body, requestedModel, upstreamModel, isStreaming, startTime, candidate.credential.email);
+            if (result !== false) return result;
+            continue;
+        }
+        if (candidate.credentialType === 'claude-account') {
+            const result = await _handleViaAssignedClaudeAccount(req, res, body, requestedModel, isStreaming, startTime, clientBeta, candidate.credential.email);
+            if (result !== false) return result;
+            continue;
+        }
+        if (candidate.credentialType === 'antigravity-account') {
+            const result = await _handleViaAssignedAntigravityAccount(res, body, requestedModel, isStreaming, startTime, candidate.credential.email);
+            if (result !== false) return result;
+            continue;
+        }
+        const result = await _handleViaAssignedApiKey(req, res, body, requestedModel, isStreaming, startTime, candidate.credential);
+        if (result !== false) return result;
     }
-    if (assignment.credentialType === 'claude-account') {
-        return _handleViaAssignedClaudeAccount(req, res, body, requestedModel, isStreaming, startTime, clientBeta, assignment.credential.email);
-    }
-    if (assignment.credentialType === 'antigravity-account') {
-        return _handleViaAssignedAntigravityAccount(res, body, requestedModel, isStreaming, startTime, assignment.credential.email);
-    }
-    return _handleViaAssignedApiKey(req, res, body, requestedModel, isStreaming, startTime, assignment.credential);
+
+    return false;
 }
 
 async function _handleViaAssignedApiKey(req, res, body, requestedModel, isStreaming, startTime, provider) {
@@ -305,15 +322,40 @@ async function _handleViaAssignedApiKey(req, res, body, requestedModel, isStream
             const response = await provider.sendRequest(body, {
                 extraHeaders: _getAnthropicProxyHeaders(req)
             });
-            if (!response.ok) return false;
+            const durationMs = Date.now() - startTime;
+            if (!response.ok) {
+                const errorBody = await response.text();
+                if (response.status === 429) recordRateLimit(provider.id, 60000);
+                if (response.status === 401 || response.status === 403) recordError(provider.id);
+                recordRequest({ provider: 'anthropic', keyId: provider.id, model: body.model, durationMs, success: false, error: errorBody.slice(0, 200) });
+                logRequest({ route: '/v1/messages', provider: 'anthropic', keyId: provider.id, model: body.model, requestBody: body, responseBody: errorBody, durationMs, status: response.status, success: false, error: errorBody.slice(0, 200) });
+                logger.warn(`[Messages] Assigned API key error ${response.status}: ${provider.name} | model=${body.model}`);
+                return false;
+            }
             const contentType = response.headers?.get?.('content-type') || '';
             if (contentType.includes('text/event-stream')) {
                 await _pipeAnthropicSSE(res, response);
+                recordRequest({ provider: 'anthropic', keyId: provider.id, model: body.model, durationMs, success: true });
+                logRequest({ route: '/v1/messages', provider: 'anthropic', keyId: provider.id, model: body.model, requestBody: body, durationMs, status: 200, success: true });
+                logger.info(`[Messages] OK via assigned API key (stream) | ${provider.name} | model=${body.model} | ${durationMs}ms`);
                 return true;
             }
 
             const responseBody = await response.text();
-            if (isStreaming) _sendAsAnthropicSSE(res, JSON.parse(responseBody)); else res.status(200).type('json').send(responseBody);
+            let parsed = null;
+            let inputTokens = 0;
+            let outputTokens = 0;
+            try {
+                parsed = JSON.parse(responseBody);
+                inputTokens = parsed.usage?.input_tokens || 0;
+                outputTokens = parsed.usage?.output_tokens || 0;
+            } catch { /* ignore */ }
+            const cost = provider.estimateCost(body.model, inputTokens, outputTokens);
+            recordUsage(provider.id, { inputTokens, outputTokens, model: body.model });
+            recordRequest({ provider: 'anthropic', keyId: provider.id, model: body.model, inputTokens, outputTokens, cost, durationMs, success: true });
+            logRequest({ route: '/v1/messages', provider: 'anthropic', keyId: provider.id, model: body.model, requestBody: body, responseBody, inputTokens, outputTokens, cost, durationMs, status: 200, success: true });
+            logger.info(`[Messages] OK via assigned API key | ${provider.name} | model=${body.model} | ${inputTokens}+${outputTokens} tokens | $${cost.toFixed(4)} | ${durationMs}ms`);
+            if (isStreaming && parsed) _sendAsAnthropicSSE(res, parsed); else res.status(200).type('json').send(responseBody);
             return true;
         }
 
@@ -324,7 +366,16 @@ async function _handleViaAssignedApiKey(req, res, body, requestedModel, isStream
                 ...mappedBody,
                 _proxypoolAppId: detectRequestApp(req)
             });
-            if (!response.ok) return false;
+            const durationMs = Date.now() - startTime;
+            if (!response.ok) {
+                const errorBody = await response.text();
+                if (response.status === 429) recordRateLimit(provider.id, 60000);
+                if (response.status === 401 || response.status === 403) recordError(provider.id);
+                recordRequest({ provider: provider.type, keyId: provider.id, model: mappedModel, durationMs, success: false, error: errorBody.slice(0, 200) });
+                logRequest({ route: '/v1/messages', provider: provider.type, keyId: provider.id, model: requestedModel, mappedModel, requestBody: mappedBody, responseBody: errorBody, durationMs, status: response.status, success: false, error: errorBody.slice(0, 200) });
+                logger.warn(`[Messages] Assigned ${provider.type} error ${response.status}: ${provider.name} | model=${requestedModel}→${mappedModel}`);
+                return false;
+            }
             const actualModel = _resolveActualProviderModel(response, mappedModel);
             const contentType = response.headers?.get?.('content-type') || '';
             if (contentType.includes('text/event-stream')) {
@@ -341,15 +392,28 @@ async function _handleViaAssignedApiKey(req, res, body, requestedModel, isStream
                     res.write(value);
                 }
                 if (!res.writableEnded) res.end();
+                recordRequest({ provider: provider.type, keyId: provider.id, model: actualModel, durationMs, success: true });
+                logRequest({ route: '/v1/messages', provider: provider.type, keyId: provider.id, model: requestedModel, mappedModel: actualModel, requestBody: mappedBody, durationMs, status: 200, success: true });
+                logger.info(`[Messages] OK via assigned ${provider.type} (stream) | ${provider.name} | model=${requestedModel}→${actualModel} | ${durationMs}ms`);
                 return true;
             }
 
             const responseBody = await response.text();
             const parsed = JSON.parse(responseBody);
+            const inputTokens = parsed.usage?.input_tokens || 0;
+            const outputTokens = parsed.usage?.output_tokens || 0;
+            const cost = provider.estimateCost(actualModel, inputTokens, outputTokens);
+            recordUsage(provider.id, { inputTokens, outputTokens, model: actualModel });
+            recordRequest({ provider: provider.type, keyId: provider.id, model: actualModel, inputTokens, outputTokens, cost, durationMs, success: true });
+            logRequest({ route: '/v1/messages', provider: provider.type, keyId: provider.id, model: requestedModel, mappedModel: actualModel, requestBody: mappedBody, responseBody, inputTokens, outputTokens, cost, durationMs, status: 200, success: true });
+            logger.info(`[Messages] OK via assigned ${provider.type} | ${provider.name} | model=${requestedModel}→${actualModel} | ${inputTokens}+${outputTokens} tokens | $${cost.toFixed(4)} | ${durationMs}ms`);
             if (isStreaming) _sendAsAnthropicSSE(res, parsed); else res.status(200).type('json').send(responseBody);
             return true;
         }
-    } catch {
+    } catch (error) {
+        recordError(provider.id);
+        recordRequest({ provider: provider.type, keyId: provider.id, model: requestedModel, durationMs: Date.now() - startTime, success: false, error: error.message });
+        logger.error(`[Messages] Assigned ${provider.type} network error: ${provider.name} - ${error.message}`);
         return false;
     }
 
@@ -394,12 +458,25 @@ async function _handleViaAssignedClaudeAccount(req, res, body, requestedModel, i
                 res.write(value);
             }
             if (!res.writableEnded) res.end();
+            const durationMs = Date.now() - startTime;
+            recordRequest({ provider: 'claude-pool', keyId: account.email, model: body.model, durationMs, success: true });
+            logRequest({ route: '/v1/messages', method: 'POST', provider: 'claude-pool', keyId: account.email, model: requestedModel, mappedModel: body.model, requestBody: body, durationMs, status: 200, success: true });
+            logger.success(`[Messages] <<< OK via assigned Claude account (stream) | ${account.email} | model=${body.model} | ${durationMs}ms`);
         } else {
             const result = await sendClaudeMessage(claudeBody, account.accessToken, { clientBeta });
+            const durationMs = Date.now() - startTime;
+            const inputTokens = result.usage?.input_tokens || 0;
+            const outputTokens = result.usage?.output_tokens || 0;
+            recordRequest({ provider: 'claude-pool', keyId: account.email, model: body.model, inputTokens, outputTokens, durationMs, success: true });
+            logRequest({ route: '/v1/messages', method: 'POST', provider: 'claude-pool', keyId: account.email, model: requestedModel, mappedModel: body.model, requestBody: body, inputTokens, outputTokens, durationMs, status: 200, success: true });
+            logger.success(`[Messages] <<< OK via assigned Claude account | ${account.email} | model=${body.model} | ${inputTokens}+${outputTokens} tokens | ${durationMs}ms`);
             res.json(result);
         }
         return true;
-    } catch {
+    } catch (error) {
+        recordRequest({ provider: 'claude-pool', keyId: account.email, model: body.model, durationMs: Date.now() - startTime, success: false, error: error.message });
+        logRequest({ route: '/v1/messages', method: 'POST', provider: 'claude-pool', keyId: account.email, model: requestedModel, mappedModel: body.model, requestBody: body, durationMs: Date.now() - startTime, status: 500, success: false, error: error.message });
+        logger.error(`[Messages] Assigned Claude account error: ${account.email} - ${error.message}`);
         return false;
     }
 }

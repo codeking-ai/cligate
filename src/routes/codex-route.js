@@ -22,7 +22,7 @@ import { recordRequest } from '../usage-tracker.js';
 import { sendResponsesSSE } from '../utils/responses-sse.js';
 import { resolveModel } from '../model-mapping.js';
 import { logRequest } from '../request-logger.js';
-import { detectRequestApp, resolveAssignedCredential } from '../app-routing.js';
+import { detectRequestApp, resolveAssignedCredentials } from '../app-routing.js';
 import { getDiscoveredModels } from '../model-discovery.js';
 
 const UPSTREAM_BASE = 'https://chatgpt.com/backend-api';
@@ -316,7 +316,7 @@ export async function handleCodexResponses(req, res) {
     const hasAntigravityAccounts = settings.antigravityEnabled !== false && listAntigravityAccounts().total > 0;
 
     if (settings.routingMode === 'app-assigned') {
-        const assignment = resolveAssignedCredential(settings, appId);
+        const assignment = resolveAssignedCredentials(settings, appId);
         if (assignment.matched) {
             const result = await _handleCodexAssignment(req, res, body, modelId, isStreaming, startTime, assignment);
             if (result !== false) return;
@@ -379,18 +379,35 @@ export async function handleCodexResponses(req, res) {
 }
 
 async function _handleCodexAssignment(req, res, body, modelId, isStreaming, startTime, assignment) {
-    if (!assignment.credential) return false;
+    const assignments = Array.isArray(assignment.assignments)
+        ? assignment.assignments
+        : (assignment.credential ? [assignment] : []);
 
-    if (assignment.credentialType === 'chatgpt-account') {
-        return _handleCodexViaAssignedAccount(req, res, body, modelId, isStreaming, startTime, assignment.credential.email);
+    for (const candidate of assignments) {
+        if (!candidate?.credential) continue;
+        const targetId = candidate.credential?.email || candidate.credential?.id || candidate.binding?.targetId || 'unknown';
+        logger.info(`[Codex] Assigned binding | app=${assignment.appId} | type=${candidate.credentialType} | target=${targetId}`);
+
+        if (candidate.credentialType === 'chatgpt-account') {
+            const result = await _handleCodexViaAssignedAccount(req, res, body, modelId, isStreaming, startTime, candidate.credential.email);
+            if (result !== false) return result;
+            continue;
+        }
+        if (candidate.credentialType === 'claude-account') {
+            const result = await _handleCodexViaAssignedClaudeAccount(res, body, modelId, isStreaming, startTime, candidate.credential.email);
+            if (result !== false) return result;
+            continue;
+        }
+        if (candidate.credentialType === 'antigravity-account') {
+            const result = await _handleCodexViaAssignedAntigravityAccount(res, body, modelId, isStreaming, startTime, candidate.credential.email);
+            if (result !== false) return result;
+            continue;
+        }
+        const result = await _handleCodexViaAssignedApiKey(res, body, modelId, isStreaming, startTime, candidate.credential);
+        if (result !== false) return result;
     }
-    if (assignment.credentialType === 'claude-account') {
-        return _handleCodexViaAssignedClaudeAccount(res, body, modelId, isStreaming, startTime, assignment.credential.email);
-    }
-    if (assignment.credentialType === 'antigravity-account') {
-        return _handleCodexViaAssignedAntigravityAccount(res, body, modelId, isStreaming, startTime, assignment.credential.email);
-    }
-    return _handleCodexViaAssignedApiKey(res, body, modelId, isStreaming, startTime, assignment.credential);
+
+    return false;
 }
 
 async function _handleCodexViaAssignedApiKey(res, body, modelId, isStreaming, startTime, provider) {
@@ -422,9 +439,11 @@ async function _handleCodexViaAssignedApiKey(res, body, modelId, isStreaming, st
         recordUsage(provider.id, { inputTokens, outputTokens, model: mappedModel });
         recordRequest({ provider: provider.type, keyId: provider.id, model: mappedModel, inputTokens, outputTokens, cost, durationMs, success: true });
         logRequest({ route: '/backend-api/codex/responses', provider: provider.type, keyId: provider.id, model: modelId, mappedModel, requestBody: body, responseBody, inputTokens, outputTokens, cost, durationMs, status: 200, success: true });
+        logger.success(`[Codex] <<< Assigned API KEY OK | ${provider.type}/${provider.name} | model=${modelId} | ${durationMs}ms`);
         if (isStreaming) sendResponsesSSE(res, codexResponse); else res.json(codexResponse);
         return true;
-    } catch {
+    } catch (error) {
+        logger.error(`[Codex] Assigned API key error: ${provider.name} - ${error.message}`);
         return false;
     }
 }
@@ -468,8 +487,10 @@ async function _handleCodexViaAssignedAccount(req, res, body, modelId, isStreami
         const duration = Date.now() - startTime;
         recordRequest({ provider: 'chatgpt-pool', keyId: creds.email, model: modelId, durationMs: duration, success: true });
         logRequest({ route: '/backend-api/codex/responses', method: 'POST', provider: 'chatgpt-pool', keyId: creds.email, model: modelId, durationMs: duration, status: 200, success: true });
+        logger.success(`[Codex] <<< Assigned account OK | account=${creds.email} | model=${modelId} | ${duration}ms`);
         return true;
-    } catch {
+    } catch (error) {
+        logger.error(`[Codex] Assigned account error: ${email} - ${error.message}`);
         return false;
     }
 }
@@ -487,9 +508,11 @@ async function _handleCodexViaAssignedClaudeAccount(res, body, modelId, isStream
         const outputTokens = claudeResponse.usage?.output_tokens || 0;
         recordRequest({ provider: 'claude-pool', keyId: account.email, model: anthropicBody.model, inputTokens, outputTokens, durationMs, success: true });
         logRequest({ route: '/backend-api/codex/responses', provider: 'claude-pool', keyId: account.email, model: modelId, mappedModel: anthropicBody.model, requestBody: body, inputTokens, outputTokens, durationMs, status: 200, success: true });
+        logger.success(`[Codex] <<< Assigned Claude account OK | ${account.email} | model=${modelId} | ${inputTokens}+${outputTokens} tokens | ${durationMs}ms`);
         if (isStreaming) sendResponsesSSE(res, codexFormat); else res.json(codexFormat);
         return true;
-    } catch {
+    } catch (error) {
+        logger.error(`[Codex] Assigned Claude account error: ${account.email} - ${error.message}`);
         return false;
     }
 }

@@ -1347,13 +1347,13 @@
                         <label class="inline-flex items-center gap-2 text-xs text-gray-300 pb-1">
                             <input type="checkbox" class="checkbox checkbox-xs"
                                 :checked="appRoutingForm.enabled === true"
-                                @change="updateAppRoutingFormField('enabled', $event.target.checked)">
+                                @change="updateAppRoutingToggle('enabled', $event.target.checked)">
                             <span x-text="t('bindingEnabled')"></span>
                         </label>
                         <label class="inline-flex items-center gap-2 text-xs text-gray-300 pb-1">
                             <input type="checkbox" class="checkbox checkbox-xs"
                                 :checked="appRoutingForm.fallbackToDefault !== false"
-                                @change="updateAppRoutingFormField('fallbackToDefault', $event.target.checked)">
+                                @change="updateAppRoutingToggle('fallbackToDefault', $event.target.checked)">
                             <span x-text="t('fallbackToDefault')"></span>
                         </label>
                     </div>

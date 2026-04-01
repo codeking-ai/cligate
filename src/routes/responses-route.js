@@ -23,7 +23,7 @@ import { decompress as fzstdDecompress } from 'fzstd';
 import { sendResponsesSSE } from '../utils/responses-sse.js';
 import { resolveModel } from '../model-mapping.js';
 import { logRequest } from '../request-logger.js';
-import { detectRequestApp, resolveAssignedCredential } from '../app-routing.js';
+import { detectRequestApp, resolveAssignedCredentials } from '../app-routing.js';
 
 const UPSTREAM_URL = 'https://chatgpt.com/backend-api/codex/responses';
 const UPSTREAM_COMPACT_URL = 'https://chatgpt.com/backend-api/codex/responses/compact';
@@ -327,7 +327,7 @@ export async function handleResponses(req, res) {
     const hasAntigravityAccounts = settings.antigravityEnabled !== false && listAntigravityAccounts().total > 0;
 
     if (settings.routingMode === 'app-assigned') {
-        const assignment = resolveAssignedCredential(settings, appId);
+        const assignment = resolveAssignedCredentials(settings, appId);
         if (assignment.matched) {
             const result = await _handleResponsesAssignment(req, res, assignment, rawBody, contentEncoding, parsed, modelId, isStreaming, startTime, isCompact);
             if (result !== false) return;
@@ -394,23 +394,40 @@ export async function handleResponses(req, res) {
 }
 
 async function _handleResponsesAssignment(req, res, assignment, rawBody, contentEncoding, parsed, modelId, isStreaming, startTime, isCompact) {
-    if (!assignment.credential) return false;
+    const assignments = Array.isArray(assignment.assignments)
+        ? assignment.assignments
+        : (assignment.credential ? [assignment] : []);
 
-    if (assignment.credentialType === 'chatgpt-account') {
-        return _handleResponsesViaAssignedAccount(req, res, rawBody, contentEncoding, modelId, isStreaming, startTime, isCompact, assignment.credential.email);
+    for (const candidate of assignments) {
+        if (!candidate?.credential) continue;
+        const targetId = candidate.credential?.email || candidate.credential?.id || candidate.binding?.targetId || 'unknown';
+        logger.info(`[Codex] Assigned binding | app=${assignment.appId} | type=${candidate.credentialType} | target=${targetId}`);
+
+        if (candidate.credentialType === 'chatgpt-account') {
+            const result = await _handleResponsesViaAssignedAccount(req, res, rawBody, contentEncoding, modelId, isStreaming, startTime, isCompact, candidate.credential.email);
+            if (result !== false) return result;
+            continue;
+        }
+
+        if (candidate.credentialType === 'claude-account') {
+            if (!parsed) continue;
+            const result = await _handleResponsesViaAssignedClaudeAccount(res, parsed, modelId, isStreaming, startTime, candidate.credential.email);
+            if (result !== false) return result;
+            continue;
+        }
+        if (candidate.credentialType === 'antigravity-account') {
+            if (!parsed) continue;
+            const result = await _handleResponsesViaAssignedAntigravityAccount(res, parsed, modelId, isStreaming, startTime, candidate.credential.email);
+            if (result !== false) return result;
+            continue;
+        }
+
+        if (!parsed) continue;
+        const result = await _handleResponsesViaAssignedApiKey(res, parsed, modelId, isStreaming, startTime, candidate.credential);
+        if (result !== false) return result;
     }
 
-    if (assignment.credentialType === 'claude-account') {
-        if (!parsed) return false;
-        return _handleResponsesViaAssignedClaudeAccount(res, parsed, modelId, isStreaming, startTime, assignment.credential.email);
-    }
-    if (assignment.credentialType === 'antigravity-account') {
-        if (!parsed) return false;
-        return _handleResponsesViaAssignedAntigravityAccount(res, parsed, modelId, isStreaming, startTime, assignment.credential.email);
-    }
-
-    if (!parsed) return false;
-    return _handleResponsesViaAssignedApiKey(res, parsed, modelId, isStreaming, startTime, assignment.credential);
+    return false;
 }
 
 async function _handleResponsesViaAssignedApiKey(res, parsed, modelId, isStreaming, startTime, provider) {
@@ -450,10 +467,12 @@ async function _handleResponsesViaAssignedApiKey(res, parsed, modelId, isStreami
         recordUsage(provider.id, { inputTokens, outputTokens, model: mappedModel });
         recordRequest({ provider: provider.type, keyId: provider.id, model: mappedModel, inputTokens, outputTokens, cost, durationMs, success: true });
         logRequest({ route: '/responses', provider: provider.type, keyId: provider.id, model: modelId, mappedModel, requestBody: parsed, responseBody, inputTokens, outputTokens, cost, durationMs, status: 200, success: true });
+        logger.success(`[Codex] <<< Assigned API KEY OK | ${provider.type}/${provider.name} | model=${modelId} | ${durationMs}ms`);
 
         if (isStreaming) sendResponsesSSE(res, responsesFormat); else res.json(responsesFormat);
         return true;
-    } catch {
+    } catch (error) {
+        logger.error(`[Codex] Assigned API key error: ${provider.name} - ${error.message}`);
         return false;
     }
 }
@@ -471,9 +490,11 @@ async function _handleResponsesViaAssignedClaudeAccount(res, parsed, modelId, is
         const outputTokens = claudeResponse.usage?.output_tokens || 0;
         recordRequest({ provider: 'claude-pool', keyId: account.email, model: anthropicBody.model, inputTokens, outputTokens, durationMs, success: true });
         logRequest({ route: '/responses', provider: 'claude-pool', keyId: account.email, model: modelId, mappedModel: anthropicBody.model, requestBody: parsed, inputTokens, outputTokens, durationMs, status: 200, success: true });
+        logger.success(`[Codex] <<< Assigned Claude account OK | ${account.email} | model=${modelId} | ${inputTokens}+${outputTokens} tokens | ${durationMs}ms`);
         if (isStreaming) sendResponsesSSE(res, responsesFormat); else res.json(responsesFormat);
         return true;
-    } catch {
+    } catch (error) {
+        logger.error(`[Codex] Assigned Claude account error: ${account.email} - ${error.message}`);
         return false;
     }
 }
@@ -526,8 +547,10 @@ async function _handleResponsesViaAssignedAccount(req, res, rawBody, contentEnco
         const duration = Date.now() - startTime;
         recordRequest({ provider: 'chatgpt-pool', keyId: creds.email, model: modelId, durationMs: duration, success: true });
         logRequest({ route: '/responses', method: 'POST', provider: 'chatgpt-pool', keyId: creds.email, model: modelId, mappedModel: modelId, durationMs: duration, status: 200, success: true });
+        logger.success(`[Codex] <<< Assigned account OK | account=${creds.email} | model=${modelId} | ${duration}ms`);
         return true;
-    } catch {
+    } catch (error) {
+        logger.error(`[Codex] Assigned account error: ${email} - ${error.message}`);
         return false;
     }
 }
