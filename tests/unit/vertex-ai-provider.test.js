@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 
 import { VertexAIProvider } from '../../src/providers/vertex-ai.js';
 import { clearThinkingSignatureCache } from '../../src/signature-cache.js';
+import { logger } from '../../src/utils/logger.js';
 
 test('VertexAIProvider.sendAnthropicRequest bridges gemini models to Vertex generateContent and returns Anthropic tool_use blocks', async () => {
   clearThinkingSignatureCache();
@@ -585,5 +586,173 @@ test('VertexAIProvider degrades uncached prior tool history to text for Gemini t
   } finally {
     global.fetch = originalFetch;
     clearThinkingSignatureCache();
+  }
+});
+
+test('VertexAIProvider.sendAnthropicRequest preserves tool_result image content for Gemini functionResponse', async () => {
+  const provider = new VertexAIProvider({
+    id: 'vertex_7',
+    name: 'vertex-test',
+    apiKey: 'raw-oauth-token',
+    projectId: 'demo-project',
+    location: 'global'
+  });
+
+  const originalFetch = global.fetch;
+  let capturedBody = null;
+
+  global.fetch = async (_url, options) => {
+    capturedBody = JSON.parse(options.body);
+    return new Response(JSON.stringify({
+      candidates: [{
+        finishReason: 'STOP',
+        content: { parts: [{ text: 'The image contains text.' }] }
+      }],
+      usageMetadata: {
+        promptTokenCount: 6,
+        candidatesTokenCount: 4
+      }
+    }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' }
+    });
+  };
+
+  try {
+    const response = await provider.sendAnthropicRequest({
+      model: 'gemini-3.1-pro-preview',
+      messages: [
+        {
+          role: 'assistant',
+          content: [
+            {
+              type: 'tool_use',
+              id: 'toolu_read_img_1',
+              name: 'Read',
+              input: { file_path: 'D:\\tmp\\demo.png', pages: '1' }
+            }
+          ]
+        },
+        {
+          role: 'user',
+          content: [
+            {
+              type: 'tool_result',
+              tool_use_id: 'toolu_read_img_1',
+              content: [
+                {
+                  type: 'image',
+                  source: {
+                    type: 'base64',
+                    media_type: 'image/png',
+                    data: 'iVBORw0KGgoAAAANSUhEUgAAAAUA'
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    });
+
+    assert.equal(response.status, 200);
+    assert.equal(capturedBody.contents[0].role, 'model');
+    assert.equal(capturedBody.contents[1].role, 'user');
+    assert.deepEqual(capturedBody.contents[1].parts[0], {
+      inlineData: {
+        mimeType: 'image/png',
+        data: 'iVBORw0KGgoAAAANSUhEUgAAAAUA'
+      }
+    });
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
+test('VertexAIProvider.sendAnthropicRequest logs Gemini upstream error body before returning error response', async () => {
+  const provider = new VertexAIProvider({
+    id: 'vertex_8',
+    name: 'vertex-test',
+    apiKey: 'raw-oauth-token',
+    projectId: 'demo-project',
+    location: 'global'
+  });
+
+  const originalFetch = global.fetch;
+  const originalLoggerError = logger.error;
+  const logged = [];
+
+  logger.error = (...args) => {
+    logged.push(args.join(' '));
+  };
+
+  global.fetch = async (_url, _options) => new Response(JSON.stringify({
+    error: {
+      code: 403,
+      message: 'Permission denied for publisher model.'
+    }
+  }), {
+    status: 403,
+    headers: { 'Content-Type': 'application/json' }
+  });
+
+  try {
+    const response = await provider.sendAnthropicRequest({
+      model: 'gemini-2.5-pro',
+      messages: [{ role: 'user', content: 'hello' }]
+    });
+
+    assert.equal(response.status, 403);
+    const body = await response.text();
+    assert.match(body, /Permission denied/);
+    assert.equal(logged.length, 1);
+    assert.match(logged[0], /Gemini generateContent upstream error/);
+    assert.match(logged[0], /model=gemini-2\.5-pro/);
+    assert.match(logged[0], /status=403/);
+    assert.match(logged[0], /Permission denied for publisher model/);
+  } finally {
+    global.fetch = originalFetch;
+    logger.error = originalLoggerError;
+  }
+});
+
+test('VertexAIProvider.sendRequest surfaces Claude network cause details and logs them', async () => {
+  const provider = new VertexAIProvider({
+    id: 'vertex_9',
+    name: 'vertex-test',
+    apiKey: 'raw-oauth-token',
+    projectId: 'demo-project',
+    location: 'europe-west1'
+  });
+
+  const originalFetch = global.fetch;
+  const originalLoggerError = logger.error;
+  const logged = [];
+
+  logger.error = (...args) => {
+    logged.push(args.join(' '));
+  };
+
+  global.fetch = async () => {
+    const cause = new Error('connect ETIMEDOUT europe-west1-aiplatform.googleapis.com');
+    throw new TypeError('fetch failed', { cause });
+  };
+
+  try {
+    await assert.rejects(
+      () => provider.sendRequest({
+        model: 'claude-sonnet-4-6',
+        messages: [{ role: 'user', content: 'hi' }]
+      }),
+      /Vertex AI Claude rawPredict request failed: connect ETIMEDOUT/
+    );
+
+    assert.equal(logged.length, 1);
+    assert.match(logged[0], /Claude rawPredict network error/);
+    assert.match(logged[0], /model=claude-sonnet-4-6/);
+    assert.match(logged[0], /cause=connect ETIMEDOUT europe-west1-aiplatform\.googleapis\.com/);
+  } finally {
+    global.fetch = originalFetch;
+    logger.error = originalLoggerError;
   }
 });

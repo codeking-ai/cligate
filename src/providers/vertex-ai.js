@@ -22,6 +22,7 @@ import { estimateCostWithRegistry, getDefaultPricing } from '../pricing-registry
 import { sanitizeClaudeBody } from '../claude-api.js';
 import { cleanCacheControl } from '../thinking-utils.js';
 import { getCachedSignature, cacheSignature, SIGNATURE_CONSTANTS } from '../signature-cache.js';
+import { logger } from '../utils/logger.js';
 
 const DEFAULT_MODEL = 'gemini-3-flash-preview';
 const TOKEN_URL = 'https://oauth2.googleapis.com/token';
@@ -154,6 +155,38 @@ function _geminiFallbackModels(model) {
     return [model, ...fallbacks.filter(candidate => candidate !== model)];
 }
 
+function _anthropicContentArrayToGeminiParts(content) {
+    if (!Array.isArray(content)) return [];
+
+    const parts = [];
+    for (const item of content) {
+        if (item?.type === 'text') {
+            parts.push({ text: item.text || '' });
+            continue;
+        }
+        if (item?.type === 'image') {
+            const source = item.source || {};
+            if (source.type === 'base64' && source.data) {
+                parts.push({
+                    inlineData: {
+                        mimeType: source.media_type || 'image/jpeg',
+                        data: source.data
+                    }
+                });
+            } else if (source.type === 'url' && source.url) {
+                parts.push({
+                    fileData: {
+                        mimeType: source.media_type || 'image/jpeg',
+                        fileUri: source.url
+                    }
+                });
+            }
+        }
+    }
+
+    return parts;
+}
+
 function _summarizeAnthropicVisionPayload(body) {
     const messages = Array.isArray(body?.messages) ? body.messages : [];
     let imageBlocks = 0;
@@ -171,6 +204,41 @@ function _summarizeAnthropicVisionPayload(body) {
     }
 
     return { imageBlocks, base64Images, urlImages, messageCount: messages.length };
+}
+
+function _truncateForLog(value, maxLength = 2000) {
+    const text = String(value || '');
+    if (text.length <= maxLength) return text;
+    return `${text.slice(0, maxLength)}...`;
+}
+
+function _buildVertexRequestErrorMessage(operation, error) {
+    const parts = [`Vertex AI ${operation} request failed`];
+    if (error?.cause?.message && error.cause.message !== error.message) {
+        parts.push(error.cause.message);
+    } else if (error?.message) {
+        parts.push(error.message);
+    }
+    return parts.join(': ');
+}
+
+function _logVertexUpstreamError(operation, { model, url, status, errorText }) {
+    logger.error(
+        `[Vertex AI] ${operation} upstream error | model=${model} | status=${status} | url=${url} | body=${_truncateForLog(errorText || '(empty body)')}`
+    );
+}
+
+function _logVertexNetworkError(operation, { model, url, error }) {
+    const details = [
+        `[Vertex AI] ${operation} network error`,
+        `model=${model}`,
+        `url=${url}`,
+        `error=${error?.message || 'unknown error'}`
+    ];
+    if (error?.cause?.message && error.cause.message !== error.message) {
+        details.push(`cause=${error.cause.message}`);
+    }
+    logger.error(details.join(' | '));
 }
 
 // ─── Provider ───────────────────────────────────────────────────────────────
@@ -481,16 +549,29 @@ export class VertexAIProvider extends BaseProvider {
         }
 
         const url = this._buildGeminiUrl(model);
-        const response = await fetch(url, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${token}`
-            },
-            body: JSON.stringify(vertexBody)
-        });
+        let response;
+        try {
+            response = await fetch(url, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`
+                },
+                body: JSON.stringify(vertexBody)
+            });
+        } catch (error) {
+            _logVertexNetworkError('Gemini generateContent', { model, url, error });
+            throw new Error(_buildVertexRequestErrorMessage('Gemini generateContent', error), { cause: error });
+        }
 
-        if (!response.ok) return response;
+        if (!response.ok) {
+            const errorText = await response.text();
+            _logVertexUpstreamError('Gemini generateContent', { model, url, status: response.status, errorText });
+            return new Response(errorText, {
+                status: response.status,
+                headers: response.headers
+            });
+        }
 
         const data = await response.json();
         return new Response(JSON.stringify(this._convertGeminiResponse(data, model)), {
@@ -504,20 +585,28 @@ export class VertexAIProvider extends BaseProvider {
 
         for (let index = 0; index < modelCandidates.length; index++) {
             const model = modelCandidates[index];
-            const response = await fetch(this._buildGeminiUrl(model), {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${token}`
-                },
-                body: JSON.stringify(vertexBody)
-            });
+            const url = this._buildGeminiUrl(model);
+            let response;
+            try {
+                response = await fetch(url, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${token}`
+                    },
+                    body: JSON.stringify(vertexBody)
+                });
+            } catch (error) {
+                _logVertexNetworkError('Gemini generateContent', { model, url, error });
+                throw new Error(_buildVertexRequestErrorMessage('Gemini generateContent', error), { cause: error });
+            }
 
             if (response.ok) {
                 return { response, model };
             }
 
             const errorText = await response.text();
+            _logVertexUpstreamError('Gemini generateContent', { model, url, status: response.status, errorText });
             lastErrorResponse = new Response(errorText, {
                 status: response.status,
                 headers: response.headers
@@ -714,6 +803,9 @@ export class VertexAIProvider extends BaseProvider {
                                 .map(item => item.text || '')
                                 .join('\n')
                             : JSON.stringify(block.content ?? '');
+                    const responseParts = Array.isArray(block.content)
+                        ? _anthropicContentArrayToGeminiParts(block.content)
+                        : [];
                     const functionName = toolNamesById.get(block.tool_use_id) || 'tool_result';
                     const encoding = toolEncodingById.get(block.tool_use_id) || 'text';
                     if (encoding === 'structured') {
@@ -722,14 +814,25 @@ export class VertexAIProvider extends BaseProvider {
                                 name: functionName,
                                 response: {
                                     tool_use_id: block.tool_use_id,
-                                    content: block.is_error ? `Error: ${responseText}` : responseText
+                                    content: responseParts.length > 0
+                                        ? responseParts
+                                        : (block.is_error ? `Error: ${responseText}` : responseText)
                                 }
                             }
                         });
                     } else {
-                        parts.push({
-                            text: `[Function ${functionName} returned: ${block.is_error ? `Error: ${responseText}` : responseText}]`
-                        });
+                        if (responseParts.length > 0) {
+                            if (responseText) {
+                                parts.push({
+                                    text: `[Function ${functionName} returned${block.is_error ? ' with error' : ''}: ${block.is_error ? `Error: ${responseText}` : responseText}]`
+                                });
+                            }
+                            parts.push(...responseParts);
+                        } else {
+                            parts.push({
+                                text: `[Function ${functionName} returned: ${block.is_error ? `Error: ${responseText}` : responseText}]`
+                            });
+                        }
                     }
                     continue;
                 }
@@ -839,16 +942,29 @@ export class VertexAIProvider extends BaseProvider {
         if (anthropicTools) claudeBody.tools = anthropicTools;
 
         const url = this._buildClaudeUrl(model);
-        const response = await fetch(url, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${token}`
-            },
-            body: JSON.stringify(claudeBody)
-        });
+        let response;
+        try {
+            response = await fetch(url, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`
+                },
+                body: JSON.stringify(claudeBody)
+            });
+        } catch (error) {
+            _logVertexNetworkError('Claude rawPredict', { model, url, error });
+            throw new Error(_buildVertexRequestErrorMessage('Claude rawPredict', error), { cause: error });
+        }
 
-        if (!response.ok) return response;
+        if (!response.ok) {
+            const errorText = await response.text();
+            _logVertexUpstreamError('Claude rawPredict', { model, url, status: response.status, errorText });
+            return new Response(errorText, {
+                status: response.status,
+                headers: response.headers
+            });
+        }
 
         // Convert Anthropic response → OpenAI format
         const data = await response.json();
@@ -936,14 +1052,28 @@ export class VertexAIProvider extends BaseProvider {
         delete vertexBody.model;
 
         const url = this._buildClaudeUrl(model, { stream: isStream });
-        return fetch(url, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${token}`
-            },
-            body: JSON.stringify(vertexBody)
-        });
+        try {
+            const response = await fetch(url, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`
+                },
+                body: JSON.stringify(vertexBody)
+            });
+            if (!response.ok) {
+                const errorText = await response.text();
+                _logVertexUpstreamError('Claude rawPredict', { model, url, status: response.status, errorText });
+                return new Response(errorText, {
+                    status: response.status,
+                    headers: response.headers
+                });
+            }
+            return response;
+        } catch (error) {
+            _logVertexNetworkError('Claude rawPredict', { model, url, error });
+            throw new Error(_buildVertexRequestErrorMessage('Claude rawPredict', error), { cause: error });
+        }
     }
 
     // ─── Public interface ────────────────────────────────────────────────────
