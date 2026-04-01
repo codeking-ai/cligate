@@ -664,6 +664,7 @@ test('VertexAIProvider.sendAnthropicRequest preserves tool_result image content 
         data: 'iVBORw0KGgoAAAANSUhEUgAAAAUA'
       }
     });
+    assert.equal(capturedBody.contents[1].parts.some(part => part.functionResponse), false);
   } finally {
     global.fetch = originalFetch;
   }

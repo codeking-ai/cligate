@@ -6,10 +6,47 @@
 
 import { BaseProvider } from './base.js';
 import { estimateCostWithRegistry, getDefaultPricing } from '../pricing-registry.js';
+import { logger } from '../utils/logger.js';
 
 const DEFAULT_BASE_URL = 'https://generativelanguage.googleapis.com/v1beta';
 
 const DEFAULT_MODEL = 'gemini-3-flash-preview';
+
+function anthropicContentArrayToGeminiParts(content) {
+    if (!Array.isArray(content)) return [];
+
+    const parts = [];
+    for (const item of content) {
+        if (item?.type === 'text') {
+            parts.push({ text: item.text || '' });
+            continue;
+        }
+        if (item?.type === 'image') {
+            const source = item.source || {};
+            if (source.type === 'base64' && source.data) {
+                parts.push({
+                    inlineData: {
+                        mimeType: source.media_type || 'image/jpeg',
+                        data: source.data
+                    }
+                });
+            } else if (source.type === 'url' && source.url) {
+                parts.push({
+                    fileData: {
+                        mimeType: source.media_type || 'image/jpeg',
+                        fileUri: source.url
+                    }
+                });
+            }
+        }
+    }
+
+    return parts;
+}
+
+function hasGeminiVisionParts(parts) {
+    return Array.isArray(parts) && parts.some(part => part?.inlineData || part?.fileData);
+}
 
 export class GeminiProvider extends BaseProvider {
     constructor(config) {
@@ -170,6 +207,7 @@ export class GeminiProvider extends BaseProvider {
     _convertAnthropicToGemini(messages, system) {
         const contents = [];
         let systemInstruction = null;
+        const toolNamesById = new Map();
 
         // Handle system prompt (string or content block array)
         if (system) {
@@ -193,6 +231,9 @@ export class GeminiProvider extends BaseProvider {
                     if (block.type === 'text') {
                         parts.push({ text: block.text });
                     } else if (block.type === 'tool_use') {
+                        if (block.id && block.name) {
+                            toolNamesById.set(block.id, block.name);
+                        }
                         parts.push({
                             functionCall: {
                                 name: block.name,
@@ -208,15 +249,32 @@ export class GeminiProvider extends BaseProvider {
                                     .map(item => item.text || '')
                                     .join('\n')
                                 : JSON.stringify(block.content ?? '');
-                        parts.push({
-                            functionResponse: {
-                                name: block.tool_use_id || 'tool_result',
-                                response: {
-                                    tool_use_id: block.tool_use_id,
-                                    content: block.is_error ? `Error: ${responseText}` : responseText
-                                }
+                        const responseParts = Array.isArray(block.content)
+                            ? anthropicContentArrayToGeminiParts(block.content)
+                            : [];
+                        const functionName = toolNamesById.get(block.tool_use_id) || block.tool_use_id || 'tool_result';
+
+                        if (hasGeminiVisionParts(responseParts)) {
+                            logger.info(`[Gemini] Downgrading multimodal tool_result to user parts | tool=${functionName} | tool_use_id=${block.tool_use_id || 'unknown'}`);
+                            if (responseText) {
+                                parts.push({
+                                    text: `[Function ${functionName} returned${block.is_error ? ' with error' : ''}: ${block.is_error ? `Error: ${responseText}` : responseText}]`
+                                });
                             }
-                        });
+                            parts.push(...responseParts);
+                        } else {
+                            parts.push({
+                                functionResponse: {
+                                    name: functionName,
+                                    response: {
+                                        tool_use_id: block.tool_use_id,
+                                        content: responseParts.length > 0
+                                            ? responseParts
+                                            : (block.is_error ? `Error: ${responseText}` : responseText)
+                                    }
+                                }
+                            });
+                        }
                     } else if (block.type === 'image') {
                         const source = block.source || {};
                         if (source.type === 'base64' && source.data) {

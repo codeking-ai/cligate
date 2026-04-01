@@ -808,7 +808,8 @@ export class VertexAIProvider extends BaseProvider {
                         : [];
                     const functionName = toolNamesById.get(block.tool_use_id) || 'tool_result';
                     const encoding = toolEncodingById.get(block.tool_use_id) || 'text';
-                    if (encoding === 'structured') {
+                    const hasVisionParts = responseParts.some(part => part?.inlineData || part?.fileData);
+                    if (encoding === 'structured' && !hasVisionParts) {
                         parts.push({
                             functionResponse: {
                                 name: functionName,
@@ -821,6 +822,9 @@ export class VertexAIProvider extends BaseProvider {
                             }
                         });
                     } else {
+                        if (encoding === 'structured' && hasVisionParts) {
+                            logger.info(`[Vertex AI] Downgrading multimodal tool_result to user parts | tool=${functionName} | tool_use_id=${block.tool_use_id || 'unknown'}`);
+                        }
                         if (responseParts.length > 0) {
                             if (responseText) {
                                 parts.push({
