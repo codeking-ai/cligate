@@ -262,9 +262,13 @@ export async function handleResponses(req, res) {
     const modelId = tryExtractModel(rawBody, contentEncoding);
     const parsed = tryExtractSummary(rawBody, contentEncoding);
 
-    // For compact requests via API key/Claude, ensure store=false
+    // Compact requests must return a final JSON payload, not SSE.
+    // Codex parses /responses/compact as a completed value.
     if (isCompact && parsed && parsed.store !== false) {
         parsed.store = false;
+    }
+    if (isCompact && parsed && parsed.stream !== false) {
+        parsed.stream = false;
     }
 
     // --- Request logging ---
@@ -274,7 +278,7 @@ export async function handleResponses(req, res) {
 
 
 
-    const isStreaming = parsed ? parsed.stream !== false : true;
+    const isStreaming = resolveResponsesStreamingMode(isCompact, parsed);
 
     const settings = getServerSettings();
     const appId = detectRequestApp(req);
@@ -751,6 +755,11 @@ function normalizeCompactResponse(responseBody, modelId) {
     }
 
     return parsed;
+}
+
+function resolveResponsesStreamingMode(isCompact, parsed) {
+    if (isCompact) return false;
+    return parsed ? parsed.stream !== false : true;
 }
 
 function providerSupportsNativeResponses(provider) {
@@ -1361,7 +1370,8 @@ async function _handleResponsesViaAntigravityAccount(res, parsed, modelId, isStr
 export const _testExports = {
     normalizeCompactResponse,
     _responsesToChatBody: _responsesToChatBody,
-    findToolCallSequenceError
+    findToolCallSequenceError,
+    resolveResponsesStreamingMode
 };
 
 export default { handleResponses };

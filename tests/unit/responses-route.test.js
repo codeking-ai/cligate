@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 
 import { _testExports } from '../../src/routes/responses-route.js';
 
-const { _responsesToChatBody, findToolCallSequenceError } = _testExports;
+const { _responsesToChatBody, findToolCallSequenceError, resolveResponsesStreamingMode } = _testExports;
 
 test('_responsesToChatBody merges assistant text before function_call into one tool-calling assistant message', () => {
   const parsed = {
@@ -128,4 +128,16 @@ test('_responsesToChatBody preserves antigravity model id for route dispatch', (
   assert.equal(body.model, 'antigravity/gemini-2.5-pro');
   assert.equal(body.messages.length, 1);
   assert.equal(body.messages[0].role, 'user');
+});
+
+test('resolveResponsesStreamingMode disables streaming for compact requests', () => {
+  assert.equal(resolveResponsesStreamingMode(true, { stream: true }), false);
+  assert.equal(resolveResponsesStreamingMode(true, { stream: false }), false);
+  assert.equal(resolveResponsesStreamingMode(true, null), false);
+});
+
+test('resolveResponsesStreamingMode preserves normal responses streaming behavior', () => {
+  assert.equal(resolveResponsesStreamingMode(false, { stream: true }), true);
+  assert.equal(resolveResponsesStreamingMode(false, { stream: false }), false);
+  assert.equal(resolveResponsesStreamingMode(false, null), true);
 });
