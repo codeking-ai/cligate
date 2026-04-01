@@ -193,10 +193,47 @@ export class GeminiProvider extends BaseProvider {
                     if (block.type === 'text') {
                         parts.push({ text: block.text });
                     } else if (block.type === 'tool_use') {
-                        parts.push({ text: `[Tool call: ${block.name}(${JSON.stringify(block.input)})]` });
+                        parts.push({
+                            functionCall: {
+                                name: block.name,
+                                args: block.input || {}
+                            }
+                        });
                     } else if (block.type === 'tool_result') {
-                        const r = typeof block.content === 'string' ? block.content : JSON.stringify(block.content);
-                        parts.push({ text: `[Tool result: ${r}]` });
+                        const responseText = typeof block.content === 'string'
+                            ? block.content
+                            : Array.isArray(block.content)
+                                ? block.content
+                                    .filter(item => item?.type === 'text')
+                                    .map(item => item.text || '')
+                                    .join('\n')
+                                : JSON.stringify(block.content ?? '');
+                        parts.push({
+                            functionResponse: {
+                                name: block.tool_use_id || 'tool_result',
+                                response: {
+                                    tool_use_id: block.tool_use_id,
+                                    content: block.is_error ? `Error: ${responseText}` : responseText
+                                }
+                            }
+                        });
+                    } else if (block.type === 'image') {
+                        const source = block.source || {};
+                        if (source.type === 'base64' && source.data) {
+                            parts.push({
+                                inlineData: {
+                                    mimeType: source.media_type || 'image/jpeg',
+                                    data: source.data
+                                }
+                            });
+                        } else if (source.type === 'url' && source.url) {
+                            parts.push({
+                                fileData: {
+                                    mimeType: source.media_type || 'image/jpeg',
+                                    fileUri: source.url
+                                }
+                            });
+                        }
                     } else if (block.type === 'thinking') {
                         // skip thinking blocks
                     }
@@ -229,6 +266,13 @@ export class GeminiProvider extends BaseProvider {
         for (const part of parts) {
             if (part.text !== undefined && !part.thought) {
                 content.push({ type: 'text', text: part.text });
+            } else if (part.functionCall?.name) {
+                content.push({
+                    type: 'tool_use',
+                    id: part.functionCall.id || `toolu_${Date.now()}`,
+                    name: part.functionCall.name,
+                    input: part.functionCall.args || {}
+                });
             }
         }
         if (content.length === 0) {

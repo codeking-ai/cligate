@@ -26,7 +26,7 @@ export function anthropicToOpenAI(body) {
     // Convert messages
     for (const msg of (body.messages || [])) {
         if (msg.role === 'user' || msg.role === 'system') {
-            messages.push({ role: msg.role, content: _convertContentToOpenAI(msg.content) });
+            messages.push(..._convertUserMessageToOpenAI(msg.role, msg.content));
         } else if (msg.role === 'assistant') {
             const result = _convertAssistantToOpenAI(msg.content);
             messages.push(result);
@@ -80,8 +80,16 @@ export function openAIToAnthropic(data, originalModel) {
     const content = [];
 
     // Text content
-    if (message.content) {
+    if (typeof message.content === 'string' && message.content) {
         content.push({ type: 'text', text: message.content });
+    } else if (Array.isArray(message.content)) {
+        const text = message.content
+            .filter(part => part?.type === 'text' && typeof part.text === 'string')
+            .map(part => part.text)
+            .join('');
+        if (text) {
+            content.push({ type: 'text', text });
+        }
     }
 
     // Tool calls
@@ -151,6 +159,89 @@ function _convertContentToOpenAI(content) {
         }
     }
     return parts.join('\n');
+}
+
+function _anthropicImageToOpenAI(block) {
+    const source = block?.source || {};
+    if (source.type === 'base64' && source.data) {
+        return {
+            type: 'image_url',
+            image_url: {
+                url: `data:${source.media_type || 'image/jpeg'};base64,${source.data}`
+            }
+        };
+    }
+    if (source.type === 'url' && source.url) {
+        return {
+            type: 'image_url',
+            image_url: {
+                url: source.url
+            }
+        };
+    }
+    return null;
+}
+
+function _convertUserMessageToOpenAI(role, content) {
+    if (typeof content === 'string') {
+        return [{ role, content }];
+    }
+    if (!Array.isArray(content)) {
+        return [{ role, content: '' }];
+    }
+
+    const richParts = [];
+    const textParts = [];
+    const toolMessages = [];
+
+    for (const block of content) {
+        if (!block) continue;
+
+        if (block.type === 'text') {
+            const text = block.text || '';
+            textParts.push(text);
+            richParts.push({ type: 'text', text });
+            continue;
+        }
+
+        if (block.type === 'image') {
+            const imagePart = _anthropicImageToOpenAI(block);
+            if (imagePart) richParts.push(imagePart);
+            continue;
+        }
+
+        if (block.type === 'tool_result') {
+            const resultText = typeof block.content === 'string'
+                ? block.content
+                : Array.isArray(block.content)
+                    ? block.content
+                        .filter(item => item?.type === 'text')
+                        .map(item => item.text || '')
+                        .join('\n')
+                    : JSON.stringify(block.content ?? '');
+
+            toolMessages.push({
+                role: 'tool',
+                tool_call_id: block.tool_use_id,
+                content: block.is_error ? `Error: ${resultText}` : resultText
+            });
+        }
+    }
+
+    const result = [...toolMessages];
+    if (richParts.length > 0) {
+        const hasOnlyText = richParts.every(part => part.type === 'text');
+        result.push({
+            role,
+            content: hasOnlyText ? textParts.join('\n') : richParts
+        });
+    }
+
+    if (result.length === 0) {
+        result.push({ role, content: '' });
+    }
+
+    return result;
 }
 
 function _convertAssistantToOpenAI(content) {

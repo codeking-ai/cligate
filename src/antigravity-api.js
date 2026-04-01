@@ -229,6 +229,13 @@ function buildGeminiRequest(body, projectId, modelId) {
 }
 
 function geminiPartToAnthropicBlocks(part, fallbackIdSeed) {
+    if (part?.thought === true && typeof part.text === 'string' && part.text.length > 0) {
+        return [{
+            type: 'thinking',
+            thinking: part.text,
+            signature: part.signature || ''
+        }];
+    }
     if (typeof part?.text === 'string' && part.text.length > 0) {
         return [{ type: 'text', text: part.text }];
     }
@@ -468,6 +475,30 @@ export function writeAnthropicSSEFromMessage(res, message) {
     });
 
     (message.content || []).forEach((block, index) => {
+        if (block.type === 'thinking') {
+            sse('content_block_start', {
+                type: 'content_block_start',
+                index,
+                content_block: { type: 'thinking', thinking: '' }
+            });
+            if (block.thinking) {
+                sse('content_block_delta', {
+                    type: 'content_block_delta',
+                    index,
+                    delta: { type: 'thinking_delta', thinking: block.thinking }
+                });
+            }
+            if (block.signature) {
+                sse('content_block_delta', {
+                    type: 'content_block_delta',
+                    index,
+                    delta: { type: 'signature_delta', signature: block.signature }
+                });
+            }
+            sse('content_block_stop', { type: 'content_block_stop', index });
+            return;
+        }
+
         if (block.type === 'text') {
             sse('content_block_start', { type: 'content_block_start', index, content_block: { type: 'text', text: '' } });
             sse('content_block_delta', { type: 'content_block_delta', index, delta: { type: 'text_delta', text: block.text || '' } });

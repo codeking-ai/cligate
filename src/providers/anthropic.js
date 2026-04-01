@@ -27,14 +27,15 @@ export class AnthropicProvider extends BaseProvider {
         });
     }
 
-    async sendRequest(body, { stream = false } = {}) {
+    async sendRequest(body, { stream = false, extraHeaders = {} } = {}) {
         const url = `${this.baseUrl}/v1/messages`;
         const response = await fetch(url, {
             method: 'POST',
             headers: {
                 'x-api-key': this.apiKey,
                 'anthropic-version': API_VERSION,
-                'Content-Type': 'application/json'
+                'Content-Type': 'application/json',
+                ...extraHeaders
             },
             body: JSON.stringify(body)
         });

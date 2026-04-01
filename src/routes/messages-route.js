@@ -23,6 +23,136 @@ const SHORT_RATE_LIMIT_THRESHOLD_MS = 5000;
 let accountRotator = null;
 let currentStrategy = null;
 
+function _getAnthropicProxyHeaders(req) {
+    const headers = {};
+    const anthropicBeta = req.headers['anthropic-beta'];
+    const anthropicVersion = req.headers['anthropic-version'];
+    const xClientRequestId = req.headers['x-client-request-id'];
+
+    if (anthropicBeta) headers['anthropic-beta'] = anthropicBeta;
+    if (anthropicVersion) headers['anthropic-version'] = anthropicVersion;
+    if (xClientRequestId) headers['x-client-request-id'] = xClientRequestId;
+
+    return headers;
+}
+
+async function _pipeAnthropicSSE(res, response) {
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Accel-Buffering', 'no');
+    res.flushHeaders();
+
+    const reader = response.body?.getReader?.();
+    if (!reader) {
+        if (!res.writableEnded) res.end();
+        return;
+    }
+
+    try {
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            if (res.writableEnded || res.destroyed) break;
+            res.write(value);
+        }
+    } finally {
+        if (!res.writableEnded) {
+            try { res.end(); } catch { /* ignore */ }
+        }
+    }
+}
+
+function _normalizeAnthropicUsage(usage, { outputTokens = 0 } = {}) {
+    return {
+        input_tokens: usage?.input_tokens || 0,
+        cache_creation_input_tokens: usage?.cache_creation_input_tokens || 0,
+        cache_read_input_tokens: usage?.cache_read_input_tokens || 0,
+        output_tokens: outputTokens ?? usage?.output_tokens ?? 0
+    };
+}
+
+function _emitAnthropicContentBlockSSE(sse, block, index) {
+    if (!block?.type) return;
+
+    if (block.type === 'text') {
+        sse('content_block_start', {
+            type: 'content_block_start',
+            index,
+            content_block: { type: 'text', text: '' }
+        });
+        if (block.text) {
+            sse('content_block_delta', {
+                type: 'content_block_delta',
+                index,
+                delta: { type: 'text_delta', text: block.text }
+            });
+        }
+        sse('content_block_stop', { type: 'content_block_stop', index });
+        return;
+    }
+
+    if (block.type === 'thinking') {
+        sse('content_block_start', {
+            type: 'content_block_start',
+            index,
+            content_block: { type: 'thinking', thinking: '' }
+        });
+        if (block.thinking) {
+            sse('content_block_delta', {
+                type: 'content_block_delta',
+                index,
+                delta: { type: 'thinking_delta', thinking: block.thinking }
+            });
+        }
+        if (block.signature) {
+            sse('content_block_delta', {
+                type: 'content_block_delta',
+                index,
+                delta: { type: 'signature_delta', signature: block.signature }
+            });
+        }
+        sse('content_block_stop', { type: 'content_block_stop', index });
+        return;
+    }
+
+    if (block.type === 'redacted_thinking') {
+        sse('content_block_start', {
+            type: 'content_block_start',
+            index,
+            content_block: {
+                type: 'redacted_thinking',
+                data: block.data || ''
+            }
+        });
+        sse('content_block_stop', { type: 'content_block_stop', index });
+        return;
+    }
+
+    if (block.type === 'tool_use') {
+        sse('content_block_start', {
+            type: 'content_block_start',
+            index,
+            content_block: {
+                type: 'tool_use',
+                id: block.id,
+                name: block.name,
+                input: {}
+            }
+        });
+        sse('content_block_delta', {
+            type: 'content_block_delta',
+            index,
+            delta: {
+                type: 'input_json_delta',
+                partial_json: JSON.stringify(block.input || {})
+            }
+        });
+        sse('content_block_stop', { type: 'content_block_stop', index });
+        return;
+    }
+}
+
 function getAccountRotator() {
     const settings = getServerSettings();
     const strategy = settings.accountStrategy || 'sequential';
@@ -157,8 +287,16 @@ async function _handleMessagesAssignment(req, res, body, requestedModel, upstrea
 async function _handleViaAssignedApiKey(req, res, body, requestedModel, isStreaming, startTime, provider) {
     try {
         if (provider.type === 'anthropic') {
-            const response = await provider.sendRequest(body);
+            const response = await provider.sendRequest(body, {
+                extraHeaders: _getAnthropicProxyHeaders(req)
+            });
             if (!response.ok) return false;
+            const contentType = response.headers?.get?.('content-type') || '';
+            if (contentType.includes('text/event-stream')) {
+                await _pipeAnthropicSSE(res, response);
+                return true;
+            }
+
             const responseBody = await response.text();
             if (isStreaming) _sendAsAnthropicSSE(res, JSON.parse(responseBody)); else res.status(200).type('json').send(responseBody);
             return true;
@@ -255,12 +393,14 @@ async function _handleViaAssignedAntigravityAccount(res, body, requestedModel, i
  */
 async function _handleViaApiKey(req, res, body, requestedModel, startTime) {
     const MAX_KEY_RETRIES = 3;
+    const isStreaming = body.stream !== false;
+    const extraHeaders = _getAnthropicProxyHeaders(req);
     for (let attempt = 0; attempt < MAX_KEY_RETRIES; attempt++) {
         const provider = selectKey('anthropic');
         if (!provider) return false;
 
         try {
-            const response = await provider.sendRequest(body);
+            const response = await provider.sendRequest(body, { extraHeaders });
             const durationMs = Date.now() - startTime;
 
             if (response.status === 429) {
@@ -274,6 +414,15 @@ async function _handleViaApiKey(req, res, body, requestedModel, startTime) {
                 recordError(provider.id);
                 logger.error(`[Messages] API key auth failed: ${provider.name}`);
                 continue;
+            }
+
+            const contentType = response.headers?.get?.('content-type') || '';
+            if (response.ok && contentType.includes('text/event-stream')) {
+                await _pipeAnthropicSSE(res, response);
+                recordRequest({ provider: 'anthropic', keyId: provider.id, model: body.model, durationMs: Date.now() - startTime, success: true });
+                logRequest({ route: '/v1/messages', provider: 'anthropic', keyId: provider.id, model: body.model, requestBody: body, durationMs: Date.now() - startTime, status: 200, success: true });
+                logger.info(`[Messages] OK via API key (stream) | ${provider.name} | model=${body.model} | ${Date.now() - startTime}ms`);
+                return;
             }
 
             const responseBody = await response.text();
@@ -298,7 +447,11 @@ async function _handleViaApiKey(req, res, body, requestedModel, startTime) {
             recordRequest({ provider: 'anthropic', keyId: provider.id, model: body.model, inputTokens, outputTokens, cost, durationMs, success: true });
             logRequest({ route: '/v1/messages', provider: 'anthropic', keyId: provider.id, model: body.model, requestBody: body, responseBody, inputTokens, outputTokens, cost, durationMs, status: 200, success: true });
             logger.info(`[Messages] OK via API key | ${provider.name} | model=${body.model} | ${inputTokens}+${outputTokens} tokens | $${cost.toFixed(4)} | ${durationMs}ms`);
-            res.status(200).type('json').send(responseBody);
+            if (isStreaming) {
+                _sendAsAnthropicSSE(res, JSON.parse(responseBody));
+            } else {
+                res.status(200).type('json').send(responseBody);
+            }
             return;
         } catch (error) {
             recordError(provider.id);
@@ -465,23 +618,14 @@ function _sendAsAnthropicSSE(res, msg) {
             model: msg.model,
             stop_reason: null,
             stop_sequence: null,
-            usage: { input_tokens: msg.usage?.input_tokens || 0, output_tokens: 0 }
+            usage: _normalizeAnthropicUsage(msg.usage, { outputTokens: 0 })
         }
     });
 
     // content blocks
     const content = msg.content || [];
     for (let i = 0; i < content.length; i++) {
-        const block = content[i];
-        if (block.type === 'text') {
-            sse('content_block_start', { type: 'content_block_start', index: i, content_block: { type: 'text', text: '' } });
-            sse('content_block_delta', { type: 'content_block_delta', index: i, delta: { type: 'text_delta', text: block.text } });
-            sse('content_block_stop', { type: 'content_block_stop', index: i });
-        } else if (block.type === 'tool_use') {
-            sse('content_block_start', { type: 'content_block_start', index: i, content_block: { type: 'tool_use', id: block.id, name: block.name, input: {} } });
-            sse('content_block_delta', { type: 'content_block_delta', index: i, delta: { type: 'input_json_delta', partial_json: JSON.stringify(block.input || {}) } });
-            sse('content_block_stop', { type: 'content_block_stop', index: i });
-        }
+        _emitAnthropicContentBlockSSE(sse, content[i], i);
     }
 
     // message_delta + message_stop
