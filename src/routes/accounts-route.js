@@ -24,7 +24,9 @@ import {
   listAccounts,
   refreshActiveAccount,
   refreshAccountToken,
+  refreshAccountStatus,
   refreshAllAccounts,
+  refreshAllAccountStatus,
   importFromCodex,
   getStatus,
   loadAccounts,
@@ -184,16 +186,20 @@ export function handleSwitchAccount(req, res) {
 
 export async function handleRefreshAccount(req, res) {
   const email = decodeURIComponent(req.params.email);
-  const result = await refreshAccountToken(email);
+  const result = await refreshAccountStatus(email);
   if (result.success) {
-    logger.info(`Refreshed token for: ${email}`);
+    logger.info(`Refreshed account status for: ${email}`);
   }
   res.json(result);
 }
 
 export async function handleRefreshAllAccounts(req, res) {
-  const result = await refreshAllAccounts();
-  res.json(result);
+  const result = await refreshAllAccountStatus();
+  res.json({
+    success: true,
+    message: 'Account statuses refreshed',
+    results: result
+  });
 }
 
 export async function handleRefreshActiveAccount(req, res) {

@@ -14,6 +14,7 @@ const ACCOUNTS_FILE = join(CONFIG_DIR, 'accounts.json');
 const ACCOUNTS_DIR = join(CONFIG_DIR, 'accounts');
 
 const TOKEN_CHECK_INTERVAL_MS = 10 * 60 * 1000;  // Check every 10 minutes
+const AUTO_REFRESH_CHECK_INTERVAL_MS = 30 * 60 * 1000; // Check every 30 minutes
 const TOKEN_EXPIRY_BUFFER_MS = 5 * 60 * 1000;    // Refresh when < 5 min left
 const CODEX_AUTH_FILE = join(homedir(), '.codex', 'auth.json');
 
@@ -25,6 +26,7 @@ const DEFAULT_ACCOUNTS = {
 
 let autoRefreshIntervalId = null;
 const tokenCache = new Map();
+const refreshInFlight = new Map();
 let accountsData = null;
 
 function ensureConfigDir() {
@@ -49,27 +51,34 @@ function getAccountAuthFile(email) {
     return join(getAccountDir(email), 'auth.json');
 }
 
+function _readAccountsFromDisk() {
+    ensureConfigDir();
+
+    if (!existsSync(ACCOUNTS_FILE)) {
+        return { ...DEFAULT_ACCOUNTS };
+    }
+
+    try {
+        const data = JSON.parse(readFileSync(ACCOUNTS_FILE, 'utf8'));
+        return { ...DEFAULT_ACCOUNTS, ...data };
+    } catch (e) {
+        console.error('[AccountManager] Error loading accounts:', e.message);
+        return { ...DEFAULT_ACCOUNTS };
+    }
+}
+
+function reloadAccounts() {
+    accountsData = _readAccountsFromDisk();
+    return accountsData;
+}
+
 function loadAccounts() {
     if (accountsData !== null) {
         return accountsData;
     }
-    
-    ensureConfigDir();
-    
-    if (!existsSync(ACCOUNTS_FILE)) {
-        accountsData = { ...DEFAULT_ACCOUNTS };
-        return accountsData;
-    }
-    
-    try {
-        const data = JSON.parse(readFileSync(ACCOUNTS_FILE, 'utf8'));
-        accountsData = { ...DEFAULT_ACCOUNTS, ...data };
-        return accountsData;
-    } catch (e) {
-        console.error('[AccountManager] Error loading accounts:', e.message);
-        accountsData = { ...DEFAULT_ACCOUNTS };
-        return accountsData;
-    }
+
+    accountsData = _readAccountsFromDisk();
+    return accountsData;
 }
 
 function saveAccounts(data) {
@@ -84,6 +93,28 @@ function save() {
     }
     ensureConfigDir();
     writeFileSync(ACCOUNTS_FILE, JSON.stringify(accountsData, null, 2), { mode: 0o600 });
+}
+
+function _isPermanentRefreshFailureCode(code) {
+    return code === 'refresh_token_reused'
+        || code === 'refresh_token_expired'
+        || code === 'refresh_token_invalidated';
+}
+
+function _setRefreshFailure(data, index, code, message) {
+    data.accounts[index].refreshFailure = {
+        code,
+        message,
+        failedAt: new Date().toISOString(),
+        refreshToken: data.accounts[index].refreshToken || null
+    };
+    saveAccounts(data);
+}
+
+function _clearRefreshFailure(data, index) {
+    if (data.accounts[index].refreshFailure) {
+        delete data.accounts[index].refreshFailure;
+    }
 }
 
 function getAccount(email) {
@@ -201,7 +232,8 @@ function listAccounts() {
             isActive: account.email === data.activeAccount,
             enabled: account.enabled !== false,
             tokenExpired: info?.expiresAt ? info.expiresAt < Date.now() : false,
-            quota: account.quota || null
+            quota: account.quota || null,
+            refreshFailure: account.refreshFailure || null
         };
     });
     
@@ -240,6 +272,22 @@ function getAccountQuota(email) {
     return account.quota || null;
 }
 
+function _derivePlanTypeFromQuota(quotaData, fallbackPlanType = 'unknown') {
+    const usagePlan = quotaData?.usage?.planType;
+    if (usagePlan) return usagePlan;
+
+    const defaultAccountId = quotaData?.account?.default_account_id;
+    const matchedAccount = quotaData?.account?.accounts?.find(acc =>
+        acc?.id && defaultAccountId && acc.id === defaultAccountId
+    );
+    if (matchedAccount?.plan_type) return matchedAccount.plan_type;
+
+    const firstAccountPlan = quotaData?.account?.accounts?.find(acc => acc?.plan_type)?.plan_type;
+    if (firstAccountPlan) return firstAccountPlan;
+
+    return fallbackPlanType;
+}
+
 function isTokenExpiredOrExpiringSoon(account) {
     if (!account.expiresAt) return true;
     return Date.now() >= (account.expiresAt - TOKEN_EXPIRY_BUFFER_MS);
@@ -271,45 +319,93 @@ function _writeBackToCodex(account) {
     }
 }
 
-async function refreshAccountToken(email) {
-    const data = loadAccounts();
-    const account = data.accounts.find(a => a.email === email);
+function _extractRefreshErrorCode(error) {
+    const message = error?.message || String(error || '');
+    const jsonStart = message.indexOf('{');
+    if (jsonStart < 0) return null;
 
-    if (!account) {
+    try {
+        const parsed = JSON.parse(message.slice(jsonStart));
+        return parsed?.error?.code || parsed?.code || null;
+    } catch {
+        return null;
+    }
+}
+
+function _persistRefreshedAccount(data, index, tokens, accountInfo) {
+    data.accounts[index].accessToken = tokens.accessToken;
+    data.accounts[index].refreshToken = tokens.refreshToken || data.accounts[index].refreshToken;
+    data.accounts[index].idToken = tokens.idToken || data.accounts[index].idToken;
+    data.accounts[index].expiresAt = accountInfo?.expiresAt || (Date.now() + tokens.expiresIn * 1000);
+    if (accountInfo?.planType) {
+        data.accounts[index].planType = accountInfo.planType;
+    }
+    _clearRefreshFailure(data, index);
+    saveAccounts(data);
+
+    tokenCache.set(data.accounts[index].email, {
+        token: tokens.accessToken,
+        extractedAt: Date.now()
+    });
+
+    if (data.activeAccount === data.accounts[index].email) {
+        updateAccountAuth(data.accounts[index]);
+    }
+
+    if (data.accounts[index].source === 'imported') {
+        _writeBackToCodex(data.accounts[index]);
+    }
+}
+
+async function _refreshAccountTokenInternal(email) {
+    const initialData = loadAccounts();
+    const initialAccount = initialData.accounts.find(a => a.email === email);
+
+    if (!initialAccount) {
         return { success: false, message: `Account not found: ${email}` };
     }
 
-    if (!account.refreshToken) {
+    if (!initialAccount.refreshToken) {
         return { success: false, message: 'No refresh token available' };
     }
 
+    const initialRefreshToken = initialAccount.refreshToken;
+    const latestData = reloadAccounts();
+    const latestAccount = latestData.accounts.find(a => a.email === email);
+
+    if (!latestAccount) {
+        return { success: false, message: `Account not found: ${email}` };
+    }
+
+    if (!latestAccount.refreshToken) {
+        return { success: false, message: 'No refresh token available' };
+    }
+
+    if (latestAccount.refreshToken !== initialRefreshToken) {
+        console.log(`[AccountManager] Skipping refresh for ${email}: token already rotated`);
+        return { success: true, message: `Token already refreshed for: ${email}` };
+    }
+
+    const refreshTokenToUse = latestAccount.refreshToken;
+    if (latestAccount.refreshFailure?.refreshToken === refreshTokenToUse
+        && _isPermanentRefreshFailureCode(latestAccount.refreshFailure.code)) {
+        return {
+            success: false,
+            message: latestAccount.refreshFailure.message || 'Refresh token is no longer valid. Please sign in again.'
+        };
+    }
+
     try {
-        const tokens = await refreshAccessToken(account.refreshToken);
+        const tokens = await refreshAccessToken(refreshTokenToUse);
         const accountInfo = extractAccountInfo(tokens.accessToken);
 
+        const data = reloadAccounts();
         const index = data.accounts.findIndex(a => a.email === email);
         if (index >= 0) {
-            data.accounts[index].accessToken = tokens.accessToken;
-            data.accounts[index].refreshToken = tokens.refreshToken || data.accounts[index].refreshToken;
-            data.accounts[index].idToken = tokens.idToken || data.accounts[index].idToken;
-            data.accounts[index].expiresAt = accountInfo?.expiresAt || (Date.now() + tokens.expiresIn * 1000);
-            if (accountInfo?.planType) {
-                data.accounts[index].planType = accountInfo.planType;
-            }
-            saveAccounts(data);
-
-            tokenCache.set(email, {
-                token: tokens.accessToken,
-                extractedAt: Date.now()
-            });
-
-            if (data.activeAccount === email) {
-                updateAccountAuth(data.accounts[index]);
-            }
-
-            // Write back to Codex if this account was imported from there
-            if (data.accounts[index].source === 'imported') {
-                _writeBackToCodex(data.accounts[index]);
+            if (data.accounts[index].refreshToken !== refreshTokenToUse) {
+                console.log(`[AccountManager] Skipping persist for ${email}: newer token already saved`);
+            } else {
+                _persistRefreshedAccount(data, index, tokens, accountInfo);
             }
         }
 
@@ -326,9 +422,49 @@ async function refreshAccountToken(email) {
 
         return { success: true, message: `Token refreshed for: ${email}` };
     } catch (error) {
+        if (_extractRefreshErrorCode(error) === 'refresh_token_reused') {
+            const reloaded = reloadAccounts();
+            const reloadedAccount = reloaded.accounts.find(a => a.email === email);
+            if (reloadedAccount?.refreshToken && reloadedAccount.refreshToken !== refreshTokenToUse && reloadedAccount.accessToken) {
+                console.warn(`[AccountManager] Concurrent refresh detected for ${email}, using newly persisted token`);
+                return { success: true, message: `Token already refreshed for: ${email}` };
+            }
+        }
+
         console.error(`[AccountManager] Token refresh failed for ${email}:`, error.message);
+        const errorCode = _extractRefreshErrorCode(error);
+        if (_isPermanentRefreshFailureCode(errorCode)) {
+            const failedData = reloadAccounts();
+            const failedIndex = failedData.accounts.findIndex(a => a.email === email);
+            if (failedIndex >= 0 && failedData.accounts[failedIndex].refreshToken === refreshTokenToUse) {
+                const permanentMessage = errorCode === 'refresh_token_reused'
+                    ? 'Refresh token already used or rotated elsewhere. Please sign in again or re-import the latest source credentials.'
+                    : errorCode === 'refresh_token_expired'
+                        ? 'Refresh token expired. Please sign in again.'
+                        : 'Refresh token was invalidated. Please sign in again.';
+                _setRefreshFailure(failedData, failedIndex, errorCode, permanentMessage);
+                return { success: false, message: permanentMessage };
+            }
+        }
         return { success: false, message: `Token refresh failed: ${error.message}` };
     }
+}
+
+async function refreshAccountToken(email) {
+    const inFlight = refreshInFlight.get(email);
+    if (inFlight) {
+        return inFlight;
+    }
+
+    const refreshPromise = _refreshAccountTokenInternal(email)
+        .finally(() => {
+            if (refreshInFlight.get(email) === refreshPromise) {
+                refreshInFlight.delete(email);
+            }
+        });
+
+    refreshInFlight.set(email, refreshPromise);
+    return refreshPromise;
 }
 
 async function refreshAllAccounts() {
@@ -345,6 +481,55 @@ async function refreshAllAccounts() {
     return results;
 }
 
+async function refreshAccountStatus(email) {
+    const data = reloadAccounts();
+    const account = data.accounts.find(a => a.email === email);
+
+    if (!account) {
+        return { success: false, message: `Account not found: ${email}` };
+    }
+
+    if (!account.accessToken || !account.accountId) {
+        return { success: false, message: `Account ${email} missing token or accountId` };
+    }
+
+    if (isTokenExpiredOrExpiringSoon(account)) {
+        return refreshAccountToken(email);
+    }
+
+    try {
+        const quotaData = await fetchQuota(account.accessToken, account.accountId);
+        updateAccountQuota(email, quotaData);
+
+        const refreshedData = loadAccounts();
+        const index = refreshedData.accounts.findIndex(a => a.email === email);
+        if (index >= 0) {
+            const nextPlanType = _derivePlanTypeFromQuota(quotaData, refreshedData.accounts[index].planType);
+            if (nextPlanType && nextPlanType !== refreshedData.accounts[index].planType) {
+                refreshedData.accounts[index].planType = nextPlanType;
+                saveAccounts(refreshedData);
+            }
+        }
+
+        console.log(`[AccountManager] Account status refreshed for: ${email}`);
+        return { success: true, message: `Account status refreshed for: ${email}` };
+    } catch (error) {
+        console.error(`[AccountManager] Status refresh failed for ${email}:`, error.message);
+        return { success: false, message: `Status refresh failed: ${error.message}` };
+    }
+}
+
+async function refreshAllAccountStatus() {
+    const data = loadAccounts();
+    const results = [];
+
+    for (const account of data.accounts) {
+        results.push({ email: account.email, ...(await refreshAccountStatus(account.email)) });
+    }
+
+    return results;
+}
+
 function startAutoRefresh() {
     if (autoRefreshIntervalId) {
         clearInterval(autoRefreshIntervalId);
@@ -353,10 +538,10 @@ function startAutoRefresh() {
     // Initial check on startup (delayed 3s) — only refresh if expired or expiring soon
     setTimeout(() => _checkAndRefreshExpiring('startup'), 3000);
 
-    // Periodic check every 10 minutes — only refresh tokens that are about to expire
-    autoRefreshIntervalId = setInterval(() => _checkAndRefreshExpiring('periodic'), TOKEN_CHECK_INTERVAL_MS);
+    // Periodic check every 30 minutes — only refresh tokens that are about to expire
+    autoRefreshIntervalId = setInterval(() => _checkAndRefreshExpiring('periodic'), AUTO_REFRESH_CHECK_INTERVAL_MS);
 
-    console.log('[AccountManager] Smart auto-refresh started (check every 10 min, refresh only when expiring)');
+    console.log('[AccountManager] Smart auto-refresh started (check every 30 min, refresh only when expiring)');
 }
 
 async function _checkAndRefreshExpiring(trigger) {
@@ -398,37 +583,8 @@ async function refreshActiveAccount() {
     if (!account) {
         return { success: false, message: 'No active account' };
     }
-    
-    if (!account.refreshToken) {
-        return { success: false, message: 'No refresh token available' };
-    }
-    
-    try {
-        const tokens = await refreshAccessToken(account.refreshToken);
-        const accountInfo = extractAccountInfo(tokens.accessToken);
-        
-        const data = loadAccounts();
-        const index = data.accounts.findIndex(a => a.email === account.email);
-        
-        if (index >= 0) {
-            data.accounts[index].accessToken = tokens.accessToken;
-            data.accounts[index].refreshToken = tokens.refreshToken || data.accounts[index].refreshToken;
-            data.accounts[index].idToken = tokens.idToken || data.accounts[index].idToken;
-            data.accounts[index].expiresAt = accountInfo?.expiresAt || (Date.now() + tokens.expiresIn * 1000);
-            if (accountInfo?.planType) {
-                data.accounts[index].planType = accountInfo.planType;
-            }
-            saveAccounts(data);
-            
-            updateAccountAuth(data.accounts[index]);
-            console.log(`[AccountManager] Active account token refreshed: ${account.email}`);
-        }
-        
-        return { success: true, message: `Token refreshed for: ${account.email}` };
-    } catch (error) {
-        console.error(`[AccountManager] Token refresh failed for ${account.email}:`, error.message);
-        return { success: false, message: `Token refresh failed: ${error.message}` };
-    }
+
+    return refreshAccountToken(account.email);
 }
 
 function importFromCodex() {
@@ -529,7 +685,9 @@ export {
     listAccounts,
     refreshActiveAccount,
     refreshAccountToken,
+    refreshAccountStatus,
     refreshAllAccounts,
+    refreshAllAccountStatus,
     importFromCodex,
     getStatus,
     updateAccountAuth,
@@ -553,7 +711,9 @@ export default {
     listAccounts,
     refreshActiveAccount,
     refreshAccountToken,
+    refreshAccountStatus,
     refreshAllAccounts,
+    refreshAllAccountStatus,
     importFromCodex,
     getStatus,
     ensureAccountsPersist,
