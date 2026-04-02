@@ -3,13 +3,14 @@
 ![ProxyPool Hub Dashboard](./images/dashboard.png)
 
 [![AGPL-3.0 License](https://img.shields.io/badge/License-AGPL--3.0-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
-[![Node.js Version](https://img.shields.io/badge/Node.js-18%2B-blue.svg)](https://nodejs.org/)
+[![Node.js Version](https://img.shields.io/badge/Node.js-24%2B-blue.svg)](https://nodejs.org/)
+[![npm Version](https://img.shields.io/npm/v/proxypool-hub)](https://www.npmjs.com/package/proxypool-hub)
 [![GitHub stars](https://img.shields.io/github/stars/yiyao-ai/proxypool-hub?style=social)](https://github.com/yiyao-ai/proxypool-hub)
 
 **[English](#features) | [中文](./README_CN.md)**
 
 > A multi-protocol AI API proxy server with account pooling, API key management, and a visual dashboard.
-> Use **Claude Code**, **Codex CLI**, **Gemini CLI**, and **OpenClaw** through a unified local proxy — with multi-account rotation, free model routing, usage analytics, and one-click configuration.
+> Use **Claude Code**, **Codex CLI**, **Gemini CLI**, and **OpenClaw** through a unified local proxy — with multi-account rotation, intelligent routing, free model routing, usage analytics, and one-click configuration.
 
 ---
 
@@ -17,50 +18,65 @@
 
 ### Multi-CLI Proxy Support
 - **Claude Code** — Proxies Anthropic Messages API (`/v1/messages`) with streaming
-- **Codex CLI** — Proxies OpenAI Responses API (`/v1/responses`) and Chat Completions (`/v1/chat/completions`)
+- **Codex CLI** — Proxies OpenAI Responses API (`/v1/responses`), Chat Completions (`/v1/chat/completions`), and Codex Internal API (`/backend-api/codex/responses`)
 - **Gemini CLI** — Proxies Gemini API (`/v1beta/models/*`) with one-click patch
 - **OpenClaw** — Custom provider injection via `anthropic-messages` or `openai-completions`
 
 ### Account & Key Management
-- **ChatGPT Account Pool** — OAuth login, multi-account rotation (sticky / round-robin / random), auto token refresh
+- **ChatGPT Account Pool** — OAuth login, multi-account rotation (sticky / round-robin / random), auto token refresh, per-account quota tracking
 - **Claude Account Pool** — OAuth PKCE login, token refresh with source writeback to Claude Code credentials
+- **Antigravity Account Pool** — Google OAuth login for enterprise models, automatic model discovery and project management
 - **API Key Pool** — Support for OpenAI, Azure OpenAI, Anthropic, Google Gemini, Vertex AI, MiniMax, Moonshot, ZhipuAI keys with automatic failover and load balancing
 - **Key Validation** — One-click connectivity test for each API key
 - **Smart Token Refresh** — Only refreshes when tokens are about to expire (< 5 min), syncs back to source CLI tools
 
-### Free Model Routing
-- **Kilo AI Gateway** — Routes `claude-haiku` requests to free models (DeepSeek, Qwen, MiniMax, etc.) via Kilo AI — no API key needed
-- **Configurable Haiku Model** — Choose which free model to use from the dashboard
+### Intelligent Routing
+- **Priority Mode** — Choose between Account Pool First or API Key First when both are available
+- **Routing Mode** — Automatic routing or manual per-app credential assignments
+- **App Routing** — Bind each app (Claude Code, Codex, Gemini CLI, OpenClaw) to a specific ChatGPT account, Claude account, or API key
+- **Model Mapping** — Customize which upstream model each provider resolves to
+- **Free Model Routing** — Routes `claude-haiku` requests to free models (DeepSeek, Qwen, MiniMax, etc.) via Kilo AI — no API key needed
 
 ### Analytics & Monitoring
-- **Usage Dashboard** — Per-account, per-model, per-provider usage statistics
-- **Request Logs** — Full request/response logging with date filtering
+- **Usage & Costs** — Per-account, per-model, per-provider usage and cost statistics with daily/monthly breakdown
+- **Request Logs** — Full request/response logging with date and provider filtering, error-only view
 - **Real-time Log Stream** — Live SSE log stream for debugging
+- **Pricing Registry** — View and customize per-provider, per-model pricing with manual overrides
 
 ### Web Dashboard
+- **Dashboard** — Quick status metrics (total/available accounts, expired tokens, default plan), quick test buttons, Claude Code usage example
+- **Chat UI** — Interactive chat interface with source selector (ChatGPT, Claude, API keys), model selection, system prompt, and chat history
+- **Account Management** — Tabbed interface for ChatGPT, Claude, and Antigravity accounts with add/remove/enable/disable/switch
+- **API Key Management** — Add, test, edit, disable API keys with provider-specific fields (Azure deployment name/API version, Vertex project ID/location)
+- **Tool Installer** — Detect and install/update Node.js, Claude Code, Codex CLI, Gemini CLI, OpenClaw — auto-detects OS, shows version status, checks for updates
+- **Resources Catalog** — Curated directory of free and trial LLM API resources with provider details, limits, and compatibility info
 - **One-click CLI Configuration** — Configure Claude Code, Codex CLI, Gemini CLI, OpenClaw with a single button
-- **One-click Tool Installer** — Detect and install Node.js, Claude Code, Codex CLI, Gemini CLI, OpenClaw from the dashboard — auto-detects OS, installs Node.js first, then uses npm for all CLI tools
-- **API Key Test & Edit** — Test API key connectivity with one click, edit key details including provider-specific fields (Azure deployment name/API version, Vertex project ID/location)
-- **Account Management UI** — Add, remove, enable/disable, switch accounts visually
-- **Model Mapping** — Customize which upstream model each provider resolves to
-- **API Gateway** — Expose your proxy to external apps via API keys with usage tracking
 - **i18n** — English and Chinese interface
+- **Dark/Light Theme** — Toggle between dark and light mode
 
 ---
 
 ## Screenshots
 
-| Dashboard | Account Management |
+| Dashboard | Chat UI |
 |:-:|:-:|
-| ![Dashboard](./images/dashboard.png) | ![Accounts](./images/accounts.png) |
+| ![Dashboard](./images/dashboard.png) | ![Chat](./images/chat.png) |
 
-| Settings & Model Mapping | API Key Management |
+| Account Management | API Key Management |
 |:-:|:-:|
-| ![Settings](./images/settings.png) | ![API Keys](./images/apikeys.png) |
+| ![Accounts](./images/accounts.png) | ![API Keys](./images/apikeys.png) |
 
-| Usage & Costs | Request Logs |
+| Settings & App Routing | Usage & Costs |
 |:-:|:-:|
-| ![Usage](./images/usage_costs.png) | ![Request Logs](./images/request_logs.png) |
+| ![Settings](./images/settings.png) | ![Usage](./images/usage_costs.png) |
+
+| Request Logs | Pricing Registry |
+|:-:|:-:|
+| ![Request Logs](./images/request_logs.png) | ![Pricing](./images/pricing.png) |
+
+| Tool Installer | Resources Catalog |
+|:-:|:-:|
+| ![Tool Installer](./images/tools_install.png) | ![Resources](./images/resources.png) |
 
 ### Demo
 
@@ -92,12 +108,12 @@
             │  └───────┬───────┘  │
             └──────────┼──────────┘
                        │
-       ┌───────────────┼───────────────┐
-       ▼               ▼               ▼
-┌──────────┐    ┌──────────┐    ┌──────────┐
-│ Anthropic│    │  OpenAI  │    │ Kilo AI  │
-│   API    │    │   API    │    │  (Free)  │
-└──────────┘    └──────────┘    └──────────┘
+       ┌───────┬───────┼───────┬───────┐
+       ▼       ▼       ▼       ▼       ▼
+┌────────┐┌────────┐┌────────┐┌────────┐┌────────┐
+│Anthropic││ OpenAI ││Google  ││Vertex  ││Kilo AI │
+│  API   ││  API   ││Gemini  ││  AI    ││ (Free) │
+└────────┘└────────┘└────────┘└────────┘└────────┘
 ```
 
 ---
@@ -133,12 +149,13 @@ proxypool-hub start
 
 Dashboard opens at **http://localhost:8081**
 
-### 2. Add accounts
+### 2. Add accounts or API keys
 
 **Web Dashboard** (recommended):
 1. Open http://localhost:8081 → **Accounts** tab
-2. Click **Add Account** → Login with ChatGPT/Claude
-3. Accounts are automatically saved and tokens are auto-refreshed
+2. Click **Add Account** → Login with ChatGPT / Claude / Google (Antigravity)
+3. Or go to **API Keys** tab → **Add API Key** with your OpenAI, Azure, Gemini, Vertex AI, or other provider keys
+4. Accounts are automatically saved and tokens are auto-refreshed
 
 **CLI**:
 ```bash
@@ -148,7 +165,7 @@ proxypool-hub accounts add --no-browser  # Headless/VM
 
 ### 3. Configure your CLI tool
 
-Click the **one-click configure** button in the Settings tab, or manually:
+Click the **one-click configure** button in the Dashboard or Settings tab, or manually:
 
 **Claude Code:**
 ```bash
@@ -180,6 +197,13 @@ openai_base_url = "http://localhost:8081"
   }
 }
 ```
+
+### 4. Configure routing (optional)
+
+In the **Settings** tab:
+- **Priority Mode** — Choose "Account Pool First" or "API Key First"
+- **Routing Mode** — "Automatic" for smart routing, or "App Assigned" to bind each app to a specific credential
+- **App Assignments** — Bind Claude Code, Codex, Gemini CLI, or OpenClaw to a specific account or API key
 
 ---
 
