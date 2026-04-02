@@ -6,6 +6,7 @@
 import crypto from 'crypto';
 import { cleanCacheControl, processAssistantContent, hasUnsignedThinkingBlocks } from './thinking-utils.js';
 import { getCachedSignature, cacheSignature, cacheThinkingSignature, SIGNATURE_CONSTANTS } from './signature-cache.js';
+import { normalizeJsonSchema } from './json-schema-normalizer.js';
 
 const { MIN_SIGNATURE_LENGTH } = SIGNATURE_CONSTANTS;
 
@@ -319,82 +320,7 @@ function convertAnthropicToolsToOpenAI(tools) {
 }
 
 function sanitizeSchema(schema) {
-    if (typeof schema !== 'object' || schema === null) {
-        return { type: 'object' };
-    }
-    
-    const result = {};
-    
-    for (const [key, value] of Object.entries(schema)) {
-        if (key === 'const') {
-            result.enum = [value];
-            continue;
-        }
-        
-        if ([
-            '$schema', '$id', '$ref', '$defs', '$comment',
-            'additionalItems', 'definitions', 'examples',
-            'minLength', 'maxLength', 'pattern', 'format',
-            'minItems', 'maxItems', 'minimum', 'maximum',
-            'exclusiveMinimum', 'exclusiveMaximum',
-            'allOf', 'anyOf', 'oneOf', 'not'
-        ].includes(key)) {
-            continue;
-        }
-        
-        if (key === 'additionalProperties' && typeof value === 'boolean') {
-            continue;
-        }
-        
-        if (key === 'type' && Array.isArray(value)) {
-            const nonNullTypes = value.filter(t => t !== 'null');
-            result.type = nonNullTypes.length > 0 ? nonNullTypes[0] : 'string';
-            continue;
-        }
-        
-        if (key === 'properties' && value && typeof value === 'object') {
-            result.properties = {};
-            for (const [propKey, propValue] of Object.entries(value)) {
-                result.properties[propKey] = sanitizeSchema(propValue);
-            }
-            continue;
-        }
-        
-        if (key === 'items') {
-            if (Array.isArray(value)) {
-                result.items = value.map(item => sanitizeSchema(item));
-            } else if (typeof value === 'object') {
-                result.items = sanitizeSchema(value);
-            } else {
-                result.items = value;
-            }
-            continue;
-        }
-        
-        if (key === 'required' && Array.isArray(value)) {
-            result.required = value;
-            continue;
-        }
-        
-        if (key === 'enum' && Array.isArray(value)) {
-            result.enum = value;
-            continue;
-        }
-        
-        if (['type', 'description', 'title'].includes(key)) {
-            result[key] = value;
-        }
-    }
-    
-    if (!result.type) {
-        result.type = 'object';
-    }
-    
-    if (result.type === 'object' && !result.properties) {
-        result.properties = {};
-    }
-    
-    return result;
+    return normalizeJsonSchema(schema || { type: 'object', properties: {} });
 }
 
 /**

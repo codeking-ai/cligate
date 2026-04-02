@@ -389,6 +389,76 @@ test('AzureOpenAIProvider.sendAnthropicRequest preserves tool schema constraints
   }
 });
 
+test('AzureOpenAIProvider.sendAnthropicRequest normalizes top-level union tool schemas for Azure responses', async () => {
+  const provider = new AzureOpenAIProvider({
+    id: 'azure_5b',
+    name: 'azure-test',
+    apiKey: 'test-key',
+    baseUrl: 'https://example-resource.openai.azure.com/',
+    deploymentName: 'deployment-gpt54'
+  });
+
+  const originalFetch = global.fetch;
+  let capturedOptions = null;
+
+  global.fetch = async (_url, options) => {
+    capturedOptions = options;
+    return new Response(JSON.stringify({
+      id: 'resp_124b',
+      object: 'response',
+      model: 'deployment-gpt54',
+      status: 'completed',
+      output: [],
+      usage: {
+        input_tokens: 5,
+        output_tokens: 3,
+        total_tokens: 8
+      }
+    }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' }
+    });
+  };
+
+  try {
+    await provider.sendAnthropicRequest({
+      model: 'claude-opus-4-6',
+      messages: [{ role: 'user', content: 'run a browser click' }],
+      tools: [{
+        name: 'browser_click',
+        description: 'Click an element',
+        input_schema: {
+          oneOf: [
+            {
+              type: 'object',
+              properties: {
+                selector: { type: 'string' }
+              },
+              required: ['selector']
+            },
+            {
+              type: 'object',
+              properties: {
+                x: { type: 'number' },
+                y: { type: 'number' }
+              },
+              required: ['x', 'y']
+            }
+          ]
+        }
+      }]
+    });
+
+    const payload = JSON.parse(capturedOptions.body);
+    assert.equal(payload.tools[0].parameters.type, 'object');
+    assert.equal(payload.tools[0].parameters.oneOf, undefined);
+    assert.equal(payload.tools[0].parameters.anyOf, undefined);
+    assert.equal(payload.tools[0].parameters.allOf, undefined);
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
 test('AzureOpenAIProvider.sendAnthropicRequest preserves anthropic image blocks as responses input_image content', async () => {
   const provider = new AzureOpenAIProvider({
     id: 'azure_6',

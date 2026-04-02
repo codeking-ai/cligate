@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 
 import { _testExports } from '../../src/routes/codex-route.js';
 
-const { _codexToChatBody, findToolCallSequenceError } = _testExports;
+const { _codexToChatBody, _codexToAnthropicBody, findToolCallSequenceError } = _testExports;
 
 test('_codexToChatBody merges assistant text before function_call into one tool-calling assistant message', () => {
   const body = {
@@ -110,5 +110,42 @@ test('_codexToChatBody keeps antigravity model id untouched for downstream mappi
 
 test('codex route test exports remain available after strict compatibility changes', () => {
   assert.equal(typeof _codexToChatBody, 'function');
+  assert.equal(typeof _codexToAnthropicBody, 'function');
   assert.equal(typeof findToolCallSequenceError, 'function');
+});
+
+test('_codexToAnthropicBody normalizes top-level union tool schemas for Claude', () => {
+  const body = _codexToAnthropicBody({
+    model: 'gpt-5.4',
+    input: [{ type: 'message', role: 'user', content: 'click browser element' }],
+    tools: [{
+      type: 'function',
+      name: 'browser_click',
+      description: 'Click an element',
+      parameters: {
+        anyOf: [
+          {
+            type: 'object',
+            properties: {
+              selector: { type: 'string' }
+            },
+            required: ['selector']
+          },
+          {
+            type: 'object',
+            properties: {
+              x: { type: 'number' },
+              y: { type: 'number' }
+            },
+            required: ['x', 'y']
+          }
+        ]
+      }
+    }]
+  });
+
+  assert.equal(body.tools[0].input_schema.type, 'object');
+  assert.equal(body.tools[0].input_schema.oneOf, undefined);
+  assert.equal(body.tools[0].input_schema.anyOf, undefined);
+  assert.equal(body.tools[0].input_schema.allOf, undefined);
 });

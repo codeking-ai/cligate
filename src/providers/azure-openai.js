@@ -14,14 +14,32 @@ import { BaseProvider } from './base.js';
 import { convertAnthropicToResponsesAPI, convertOutputToAnthropic, generateMessageId } from '../format-converter.js';
 import { logger } from '../utils/logger.js';
 import { estimateCostWithRegistry, getDefaultPricing } from '../pricing-registry.js';
+import { normalizeJsonSchema } from '../json-schema-normalizer.js';
 
 const DEFAULT_API_VERSION = '2024-10-21';
 const AZURE_NETWORK_RETRY_ATTEMPTS = 2;
 const AZURE_NETWORK_RETRY_DELAY_MS = 250;
 
 function sanitizeAnthropicToolSchemaForAzureResponses(schema) {
+    if (!schema || typeof schema !== 'object' || Array.isArray(schema)) {
+        return { type: 'object', properties: {} };
+    }
+
+    if (
+        !Array.isArray(schema.anyOf) &&
+        !Array.isArray(schema.oneOf) &&
+        !Array.isArray(schema.allOf) &&
+        typeof schema.$ref !== 'string'
+    ) {
+        return stripAzureSchemaMetadata(schema);
+    }
+
+    return normalizeJsonSchema(schema);
+}
+
+function stripAzureSchemaMetadata(schema) {
     if (Array.isArray(schema)) {
-        return schema.map(item => sanitizeAnthropicToolSchemaForAzureResponses(item));
+        return schema.map(item => stripAzureSchemaMetadata(item));
     }
 
     if (!schema || typeof schema !== 'object') {
@@ -30,16 +48,14 @@ function sanitizeAnthropicToolSchemaForAzureResponses(schema) {
 
     const result = {};
     for (const [key, value] of Object.entries(schema)) {
-        if (['$schema', '$id', '$ref', '$defs', '$comment', 'definitions', 'examples'].includes(key)) {
+        if (['$schema', '$id', '$defs', '$comment', 'definitions', 'examples'].includes(key)) {
             continue;
         }
-
         if (key === 'const') {
             result.enum = [value];
             continue;
         }
-
-        result[key] = sanitizeAnthropicToolSchemaForAzureResponses(value);
+        result[key] = stripAzureSchemaMetadata(value);
     }
 
     return result;

@@ -20,7 +20,8 @@ const ALLOWED_SCHEMA_FIELDS = new Set([
     'required',
     'items',
     'enum',
-    'title'
+    'title',
+    'additionalProperties'
 ]);
 
 const SCHEMA_HINT_FIELDS = new Set([
@@ -254,6 +255,10 @@ function cleanJsonSchemaRecursive(value, isSchemaNode = true, depth = 0) {
         if (!('type' in value)) value.type = 'array';
     }
 
+    if (isObject(value.additionalProperties)) {
+        cleanJsonSchemaRecursive(value.additionalProperties, true, depth + 1);
+    }
+
     if (!value.properties && value.items === undefined) {
         for (const [key, child] of Object.entries(value)) {
             if (!['anyOf', 'oneOf', 'allOf', 'enum', 'type'].includes(key)) {
@@ -323,7 +328,7 @@ function cleanJsonSchemaRecursive(value, isSchemaNode = true, depth = 0) {
     }
 
     const keysToRemove = Object.keys(value).filter((key) => {
-        if (key === 'enum' || key === 'type' || key === 'properties' || key === 'required' || key === 'items' || key === 'description' || key === 'title') {
+        if (key === 'enum' || key === 'type' || key === 'properties' || key === 'required' || key === 'items' || key === 'description' || key === 'title' || key === 'additionalProperties') {
             return false;
         }
         return true;

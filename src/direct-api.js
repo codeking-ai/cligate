@@ -97,6 +97,62 @@ export async function* sendMessageStream(anthropicRequest, accessToken, accountI
     yield* streamResponsesAPI(response, anthropicRequest.model);
 }
 
+export async function openMessageStream(anthropicRequest, accessToken, accountId, accountRotator = null, currentEmail = null) {
+    const modelId = anthropicRequest.model;
+    const request = convertAnthropicToResponsesAPI(anthropicRequest);
+
+    let response;
+    try {
+        response = await fetch(API_URL, {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${accessToken}`,
+                'ChatGPT-Account-ID': accountId,
+                'Content-Type': 'application/json',
+                'Accept': 'text/event-stream'
+            },
+            body: JSON.stringify(request)
+        });
+    } catch (fetchError) {
+        console.error('[DirectAPI] fetch() failed:', fetchError.message);
+        throw new Error(`FETCH_ERROR: ${fetchError.message}`);
+    }
+
+    if (!response.ok) {
+        const errorText = await response.text();
+
+        if (response.status === 401) {
+            if (accountRotator && currentEmail) {
+                accountRotator.markInvalid(currentEmail, 'Token expired or revoked');
+            }
+            throw new Error('AUTH_EXPIRED: Token expired or revoked. Please re-authenticate.');
+        }
+
+        if (response.status === 429) {
+            const resetMs = parseResetTime(response, errorText);
+            if (accountRotator && currentEmail) {
+                accountRotator.markRateLimited(currentEmail, resetMs, modelId);
+            }
+            throw new Error(`RATE_LIMITED:${resetMs}:${errorText}`);
+        }
+
+        if (response.status === 403) {
+            if (errorText.includes('challenge') || errorText.includes('cloudflare')) {
+                throw new Error('CLOUDFLARE_BLOCKED: Request blocked by Cloudflare.');
+            }
+            throw new Error(`FORBIDDEN: ${errorText}`);
+        }
+
+        if (response.status === 400) {
+            throw new Error(`INVALID_REQUEST: ${errorText}`);
+        }
+
+        throw new Error(`API_ERROR: ${response.status} - ${errorText}`);
+    }
+
+    return response;
+}
+
 /**
  * Send a non-streaming request to ChatGPT API
  */
@@ -165,6 +221,7 @@ export { parseResetTime };
 
 export default {
     sendMessageStream,
+    openMessageStream,
     sendMessage,
     parseResetTime
 };

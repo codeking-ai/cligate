@@ -5,6 +5,7 @@
  */
 
 import { logger } from './utils/logger.js';
+import { normalizeJsonSchema } from './json-schema-normalizer.js';
 
 const CLAUDE_API_URL = 'https://api.anthropic.com/v1/messages';
 const ANTHROPIC_VERSION = '2023-06-01';
@@ -50,7 +51,45 @@ export function sanitizeClaudeBody(body) {
     if (cleaned.messages && Array.isArray(cleaned.messages)) {
         cleaned.messages = _fixMessageOrder(cleaned.messages);
     }
+    if (Array.isArray(cleaned.tools)) {
+        cleaned.tools = cleaned.tools.map(tool => ({
+            ...tool,
+            input_schema: sanitizeClaudeToolSchema(tool?.input_schema)
+        }));
+    }
     return cleaned;
+}
+
+function hasTopLevelClaudeUnsupportedComposition(schema) {
+    return !!schema && typeof schema === 'object' && !Array.isArray(schema) && (
+        Array.isArray(schema.anyOf) ||
+        Array.isArray(schema.oneOf) ||
+        Array.isArray(schema.allOf) ||
+        typeof schema.$ref === 'string'
+    );
+}
+
+export function sanitizeClaudeToolSchema(schema) {
+    if (!schema || typeof schema !== 'object' || Array.isArray(schema)) {
+        return { type: 'object', properties: {} };
+    }
+
+    if (!hasTopLevelClaudeUnsupportedComposition(schema)) {
+        return schema;
+    }
+
+    const normalized = normalizeJsonSchema(schema);
+    if (normalized.type === 'object') {
+        return normalized;
+    }
+
+    return {
+        type: 'object',
+        properties: {
+            value: normalized
+        },
+        required: ['value']
+    };
 }
 
 /**

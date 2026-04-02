@@ -15,6 +15,7 @@ import { listAccounts as listAntigravityAccounts, getAvailableAccountForModel as
 import { sendAntigravityMessage, isAntigravityModel } from '../antigravity-api.js';
 import { getCredentialsForAccount } from '../middleware/credentials.js';
 import { logger } from '../utils/logger.js';
+import { normalizeJsonSchema } from '../json-schema-normalizer.js';
 import { getServerSettings } from '../server-settings.js';
 import { fetchModels } from '../model-api.js';
 import { selectKey, recordUsage, recordError, recordRateLimit, hasKeysForTypes, getKeyRateLimitInfo, getAllProviders } from '../api-key-manager.js';
@@ -1333,7 +1334,7 @@ function _codexToAnthropicBody(body) {
             .map(t => ({
                 name: t.name,
                 description: t.description || '',
-                input_schema: t.parameters || { type: 'object', properties: {} }
+                input_schema: normalizeJsonSchema(t.parameters || { type: 'object', properties: {} })
             }));
     }
 
@@ -1489,6 +1490,7 @@ async function _handleCodexViaAntigravityAccount(res, body, modelId, isStreaming
 
 export const _testExports = {
     _codexToChatBody,
+    _codexToAnthropicBody,
     findToolCallSequenceError
 };
 

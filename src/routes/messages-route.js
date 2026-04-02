@@ -1,5 +1,6 @@
-import { sendMessageStream, sendMessage } from '../direct-api.js';
+import { sendMessage, openMessageStream } from '../direct-api.js';
 import { sendKiloMessageStream, sendKiloMessage } from '../kilo-api.js';
+import { streamResponsesAPI as streamResponseToAnthropicEvents } from '../response-streamer.js';
 import { resolveModelRouting } from '../model-mapper.js';
 import { sendAuthError, getCredentialsForAccount } from '../middleware/credentials.js';
 import { initSSEResponse, pipeSSEStream, handleStreamError } from '../middleware/sse.js';
@@ -644,8 +645,9 @@ async function _handleViaAccountPool(req, res, body, requestedModel, upstreamMod
 }
 
 async function _streamDirectWithRotation(res, anthropicRequest, creds, responseModel, startTime, rotator) {
+    const upstream = await openMessageStream(anthropicRequest, creds.accessToken, creds.accountId, rotator, creds.email);
     initSSEResponse(res);
-    const stream = sendMessageStream(anthropicRequest, creds.accessToken, creds.accountId, rotator, creds.email);
+    const stream = streamResponseToAnthropicEvents(upstream, anthropicRequest.model);
     await pipeSSEStream(res, stream);
     const durationMs = Date.now() - startTime;
     logger.response(200, { model: anthropicRequest.model, duration: durationMs });
@@ -1102,3 +1104,7 @@ function sleep(ms) {
 }
 
 export default { handleMessages };
+
+export const _testExports = {
+    _streamDirectWithRotation
+};

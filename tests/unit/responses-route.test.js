@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 
 import { _testExports } from '../../src/routes/responses-route.js';
 
-const { _responsesToChatBody, findToolCallSequenceError, resolveResponsesStreamingMode } = _testExports;
+const { _responsesToChatBody, findToolCallSequenceError, resolveResponsesStreamingMode, _responsesToAnthropicBody } = _testExports;
 
 test('_responsesToChatBody merges assistant text before function_call into one tool-calling assistant message', () => {
   const parsed = {
@@ -140,4 +140,40 @@ test('resolveResponsesStreamingMode preserves normal responses streaming behavio
   assert.equal(resolveResponsesStreamingMode(false, { stream: true }), true);
   assert.equal(resolveResponsesStreamingMode(false, { stream: false }), false);
   assert.equal(resolveResponsesStreamingMode(false, null), true);
+});
+
+test('_responsesToAnthropicBody normalizes top-level union tool schemas for Claude', () => {
+  const body = _responsesToAnthropicBody({
+    model: 'gpt-5.4',
+    input: [{ type: 'message', role: 'user', content: 'click browser element' }],
+    tools: [{
+      type: 'function',
+      name: 'browser_click',
+      description: 'Click an element',
+      parameters: {
+        oneOf: [
+          {
+            type: 'object',
+            properties: {
+              selector: { type: 'string' }
+            },
+            required: ['selector']
+          },
+          {
+            type: 'object',
+            properties: {
+              x: { type: 'number' },
+              y: { type: 'number' }
+            },
+            required: ['x', 'y']
+          }
+        ]
+      }
+    }]
+  });
+
+  assert.equal(body.tools[0].input_schema.type, 'object');
+  assert.equal(body.tools[0].input_schema.oneOf, undefined);
+  assert.equal(body.tools[0].input_schema.anyOf, undefined);
+  assert.equal(body.tools[0].input_schema.allOf, undefined);
 });
