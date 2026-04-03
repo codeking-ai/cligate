@@ -193,6 +193,14 @@ document.addEventListener('alpine:init', () => {
             return this.antigravityAccounts.filter(a => a.email.toLowerCase().includes(q) || (a.displayName || '').toLowerCase().includes(q));
         },
 
+        get dashboardTotalAccounts() {
+            return this.accounts.length + this.claudeAccounts.length + this.antigravityAccounts.length;
+        },
+
+        get dashboardProxyReadyCount() {
+            return Object.values(this.proxyStatus).filter(Boolean).length;
+        },
+
         init() {
             document.documentElement.classList.toggle('light', !this.darkMode);
             document.documentElement.classList.toggle('dark', this.darkMode);

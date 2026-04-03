@@ -19,7 +19,7 @@ const i18n = {
     resources: 'Resources',
 
     // Dashboard
-    chatgptProxySystem: 'CHATGPT PROXY SYSTEM',
+    chatgptProxySystem: 'PROXYPOOLHUB PROXY SYSTEM',
     live: 'Live',
     totalAccounts: 'Total Accounts',
     linkedAccounts: 'Linked accounts',
@@ -455,6 +455,8 @@ const i18n = {
     discussions: 'Community Discussions',
 
     // Tool Launcher
+    dashboardCliConsole: 'CLI Console',
+    dashboardCliConsoleDesc: 'One-click proxy setup, direct restore, launch, and config access.',
     launchTool: 'Launch',
     configAndLaunch: 'Auto-configure proxy and launch in new terminal',
     toolLaunched: 'Terminal opened - tool is launching',
@@ -534,7 +536,7 @@ const i18n = {
     logs: '日志',
     settings: '设置',
     resources: '资源目录',
-    chatgptProxySystem: 'CHATGPT 代理系统',
+    chatgptProxySystem: 'PROXYPOOLHUB 代理系统',
     live: '实时',
     totalAccounts: '账户总数',
     linkedAccounts: '已关联账户',
@@ -719,6 +721,8 @@ const i18n = {
     noAntigravityAccountsDesc: '通过 Google 登录添加你的 Antigravity 账户。',
     antigravityAccountAdded: 'Antigravity 账户已添加',
     antigravityAccountsRefreshed: 'Antigravity 账户已刷新',
+    dashboardCliConsole: 'CLI 控制台',
+    dashboardCliConsoleDesc: '一键完成代理配置、直接恢复、启动工具和查看配置。',
     appLabel_codex: 'Codex',
     'appLabel_claude-code': 'Claude Code',
     'appLabel_gemini-cli': 'Gemini CLI',
