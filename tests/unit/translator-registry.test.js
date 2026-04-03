@@ -1,11 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
+import { translateRequest, translateResponse } from '../../src/translators/registry.js';
 import {
   resolveAnthropicGeminiCapabilities,
-  translateRequest,
-  translateResponse
-} from '../../src/translators/registry.js';
+  resolveAnthropicOpenAIResponsesCapabilities
+} from '../../src/translators/capability-registry.js';
 
 test('registry translates anthropic messages request into openai responses request', () => {
   const result = translateRequest('anthropic-messages', 'openai-responses', {
@@ -88,4 +88,13 @@ test('registry keeps default Gemini capability profile signature-based for gener
   assert.equal(result.profileId, 'default');
   assert.equal(result.structuredToolCallMode, 'signature');
   assert.equal(result.disableThinkingBudget, false);
+});
+
+test('registry resolves default openai responses capability profile', () => {
+  const result = resolveAnthropicOpenAIResponsesCapabilities({});
+
+  assert.equal(result.supportsHostedTools, false);
+  assert.equal(result.supportsInputFile, true);
+  assert.equal(result.supportsInputImage, true);
+  assert.equal(result.supportsStructuredToolResult, true);
 });

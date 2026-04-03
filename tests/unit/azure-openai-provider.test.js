@@ -664,3 +664,29 @@ test('AzureOpenAIProvider.sendAnthropicRequest preserves anthropic document bloc
     global.fetch = originalFetch;
   }
 });
+
+test('AzureOpenAIProvider.sendAnthropicRequest rejects hosted Anthropic tools explicitly', async () => {
+  const provider = new AzureOpenAIProvider({
+    id: 'azure_hosted_1',
+    name: 'azure-test',
+    apiKey: 'test-key',
+    baseUrl: 'https://example-resource.openai.azure.com/',
+    deploymentName: 'gpt-4.1',
+    apiVersion: '2024-10-21'
+  });
+
+  const response = await provider.sendAnthropicRequest({
+    model: 'claude-sonnet-4',
+    messages: [{ role: 'user', content: 'search the web' }],
+    tools: [{
+      type: 'web_search_20250305',
+      name: 'web_search',
+      max_uses: 3
+    }]
+  });
+
+  assert.equal(response.status, 400);
+  const body = await response.json();
+  assert.equal(body.error.type, 'invalid_request_error');
+  assert.match(body.error.message, /Hosted Anthropic tools are not supported by the Azure OpenAI Responses bridge/);
+});

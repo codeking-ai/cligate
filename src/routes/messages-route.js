@@ -189,6 +189,13 @@ function _resolveActualProviderModel(response, fallbackModel) {
     return response?.headers?.get?.('x-proxypool-upstream-model') || fallbackModel;
 }
 
+function _readTranslatorDowngradeHeaders(response) {
+    return {
+        unsupportedTools: response?.headers?.get?.('x-proxypool-unsupported-tools') || '',
+        toolChoiceReason: response?.headers?.get?.('x-proxypool-tool-choice-downgrade') || ''
+    };
+}
+
 export async function handleMessages(req, res) {
     const startTime = Date.now();
     const body = req.body;
@@ -887,6 +894,7 @@ async function _handleViaCompatibleKeys(res, body, requestedModel, isStreaming, 
             });
             const durationMs = Date.now() - startTime;
             const actualModel = _resolveActualProviderModel(response, mappedModel);
+            const translatorDowngrade = _readTranslatorDowngradeHeaders(response);
 
             if (response.status === 429) {
                 const retryAfter = response.headers?.get?.('retry-after');
@@ -951,6 +959,11 @@ async function _handleViaCompatibleKeys(res, body, requestedModel, isStreaming, 
                 recordUsage(provider.id, { inputTokens, outputTokens, model: actualModel });
                 recordRequest({ provider: provider.type, keyId: provider.id, model: actualModel, inputTokens, outputTokens, cost, durationMs, success: true });
                 logRequest({ route: '/v1/messages', provider: provider.type, keyId: provider.id, model: requestedModel, mappedModel: actualModel, requestBody: mappedBody, responseBody, inputTokens, outputTokens, cost, durationMs, status: 200, success: true });
+                if (translatorDowngrade.unsupportedTools || translatorDowngrade.toolChoiceReason) {
+                    logger.info(
+                        `[Messages] Translator downgrade | provider=${provider.type}/${provider.name} | model=${requestedModel}→${actualModel} | unsupported_tools=${translatorDowngrade.unsupportedTools || '(none)'} | tool_choice_reason=${translatorDowngrade.toolChoiceReason || '(none)'}`
+                    );
+                }
                 logger.info(`[Messages] OK via ${provider.type} | ${provider.name} | model=${requestedModel}→${actualModel} | ${inputTokens}+${outputTokens} tokens | $${cost.toFixed(4)} | ${durationMs}ms`);
 
                 if (isStreaming && parsed) {
@@ -1220,5 +1233,6 @@ function sleep(ms) {
 export default { handleMessages };
 
 export const _testExports = {
+    _readTranslatorDowngradeHeaders,
     _streamDirectWithRotation
 };

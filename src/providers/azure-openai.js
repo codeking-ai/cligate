@@ -11,6 +11,7 @@
  */
 
 import { BaseProvider } from './base.js';
+import { hasHostedAnthropicTools, listHostedAnthropicTools } from '../translators/normalizers/tools.js';
 import { translateAnthropicToOpenAIResponsesRequest } from '../translators/request/anthropic-to-openai-responses.js';
 import { convertOutputToAnthropic, generateMessageId } from '../translators/response/openai-responses-to-anthropic.js';
 import { logger } from '../utils/logger.js';
@@ -433,6 +434,20 @@ export class AzureOpenAIProvider extends BaseProvider {
      * Anthropic-compatible path without affecting Codex native responses flow.
      */
     async sendAnthropicRequest(body) {
+        if (hasHostedAnthropicTools(body.tools)) {
+            const hosted = listHostedAnthropicTools(body.tools).map(tool => tool.name || tool.hostedType).join(',');
+            return new Response(JSON.stringify({
+                type: 'error',
+                error: {
+                    type: 'invalid_request_error',
+                    message: `Hosted Anthropic tools are not supported by the Azure OpenAI Responses bridge. Requested: ${hosted}. Use an Anthropic provider or Vertex Claude rawPredict instead.`
+                }
+            }), {
+                status: 400,
+                headers: { 'Content-Type': 'application/json' }
+            });
+        }
+
         const visionStats = summarizeAnthropicVisionPayload(body);
         const responsesBody = normalizeResponsesPayloadForAzure(
             translateAnthropicToOpenAIResponsesRequest(body, { stream: false })

@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { OpenAIProvider } from '../../src/providers/openai.js';
+import { logger } from '../../src/utils/logger.js';
 
 test('OpenAIProvider.sendResponsesRequest uses native responses endpoint', async () => {
   const provider = new OpenAIProvider({
@@ -183,4 +184,28 @@ test('OpenAIProvider.sendAnthropicRequest forwards anthropic document blocks as 
   } finally {
     global.fetch = originalFetch;
   }
+});
+
+test('OpenAIProvider.sendAnthropicRequest rejects hosted Anthropic tools explicitly', async () => {
+  const provider = new OpenAIProvider({
+    id: 'openai_4',
+    name: 'openai-test',
+    apiKey: 'sk-test',
+    baseUrl: 'https://api.openai.com/v1'
+  });
+
+  const response = await provider.sendAnthropicRequest({
+    model: 'claude-sonnet-4',
+    messages: [{ role: 'user', content: 'search the web' }],
+    tools: [{
+      type: 'web_search_20250305',
+      name: 'web_search',
+      max_uses: 3
+    }]
+  });
+
+  assert.equal(response.status, 400);
+  const body = await response.json();
+  assert.equal(body.error.type, 'invalid_request_error');
+  assert.match(body.error.message, /Hosted Anthropic tools are not supported by the OpenAI Responses bridge/);
 });

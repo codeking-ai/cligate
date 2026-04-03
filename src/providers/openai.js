@@ -6,9 +6,12 @@
 
 import { BaseProvider } from './base.js';
 import { mergeRequestEchoIntoContext } from '../translators/normalizers/request-echo.js';
+import { buildTranslatorMetaHeaders, describeTranslatorMeta } from '../translators/normalizers/translator-meta.js';
+import { hasHostedAnthropicTools, listHostedAnthropicTools } from '../translators/normalizers/tools.js';
 import { translateAnthropicToOpenAIResponsesRequest } from '../translators/request/anthropic-to-openai-responses.js';
 import { translateOpenAIResponsesToAnthropicMessage } from '../translators/response/openai-responses-to-anthropic.js';
 import { estimateCostWithRegistry, getDefaultPricing } from '../pricing-registry.js';
+import { logger } from '../utils/logger.js';
 
 const DEFAULT_BASE_URL = 'https://api.openai.com/v1';
 
@@ -78,7 +81,27 @@ export class OpenAIProvider extends BaseProvider {
      * send to OpenAI, and return response in Anthropic Messages format.
      */
     async sendAnthropicRequest(body) {
+        if (hasHostedAnthropicTools(body.tools)) {
+            const hosted = listHostedAnthropicTools(body.tools).map(tool => tool.name || tool.hostedType).join(',');
+            return new Response(JSON.stringify({
+                type: 'error',
+                error: {
+                    type: 'invalid_request_error',
+                    message: `Hosted Anthropic tools are not supported by the OpenAI Responses bridge. Requested: ${hosted}. Use an Anthropic provider or Vertex Claude rawPredict instead.`
+                }
+            }), {
+                status: 400,
+                headers: { 'Content-Type': 'application/json' }
+            });
+        }
+
         const openaiBody = translateAnthropicToOpenAIResponsesRequest(body, { stream: false });
+        const translatorMeta = describeTranslatorMeta(openaiBody);
+        if (translatorMeta.unsupportedTools.length > 0 || translatorMeta.toolChoiceReason) {
+            logger.info(
+                `[OpenAI] Translator downgrade metadata | model=${body.model || openaiBody.model} | unsupported_tools=${translatorMeta.unsupportedToolNames || '(none)'} | tool_choice_reason=${translatorMeta.toolChoiceReason || '(none)'}`
+            );
+        }
         const url = `${this.baseUrl}/responses`;
         const response = await fetch(url, {
             method: 'POST',
@@ -96,10 +119,14 @@ export class OpenAIProvider extends BaseProvider {
             data,
             mergeRequestEchoIntoContext({ model: body.model }, openaiBody)
         );
+        const metaHeaders = buildTranslatorMetaHeaders(openaiBody);
 
         return new Response(JSON.stringify(anthropicResponse), {
             status: 200,
-            headers: { 'Content-Type': 'application/json' }
+            headers: {
+                'Content-Type': 'application/json',
+                ...metaHeaders
+            }
         });
     }
 

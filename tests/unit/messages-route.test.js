@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 
 import { _testExports } from '../../src/routes/messages-route.js';
 
-const { _streamDirectWithRotation } = _testExports;
+const { _readTranslatorDowngradeHeaders, _streamDirectWithRotation } = _testExports;
 
 function createMockResponse() {
   return {
@@ -63,4 +63,18 @@ test('_streamDirectWithRotation does not commit SSE headers before upstream acce
   } finally {
     global.fetch = originalFetch;
   }
+});
+
+test('_readTranslatorDowngradeHeaders extracts translator metadata headers from provider response', () => {
+  const response = new Response('{}', {
+    status: 200,
+    headers: {
+      'x-proxypool-unsupported-tools': 'web_search,code_execution',
+      'x-proxypool-tool-choice-downgrade': 'target_does_not_support_hosted_tool_choice'
+    }
+  });
+
+  const result = _readTranslatorDowngradeHeaders(response);
+  assert.equal(result.unsupportedTools, 'web_search,code_execution');
+  assert.equal(result.toolChoiceReason, 'target_does_not_support_hosted_tool_choice');
 });

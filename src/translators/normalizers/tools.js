@@ -39,6 +39,19 @@ export function canonicalizeAnthropicTools(tools) {
     return tools.map(canonicalizeAnthropicTool);
 }
 
+export function hasHostedAnthropicTools(tools) {
+    return canonicalizeAnthropicTools(tools).some(tool => tool.kind === 'hosted');
+}
+
+export function listHostedAnthropicTools(tools) {
+    return canonicalizeAnthropicTools(tools)
+        .filter(tool => tool.kind === 'hosted')
+        .map(tool => ({
+            name: tool.name,
+            hostedType: tool.hostedType || ''
+        }));
+}
+
 export function convertAnthropicToolsToOpenAIResponses(tools, options = {}) {
     const canonicalTools = canonicalizeAnthropicTools(tools);
     const convertedTools = [];
@@ -68,6 +81,55 @@ export function convertAnthropicToolsToOpenAIResponses(tools, options = {}) {
         canonicalTools,
         tools: convertedTools,
         unsupportedTools
+    };
+}
+
+export function convertAnthropicToolsToOpenAIChat(tools, options = {}) {
+    const canonicalTools = canonicalizeAnthropicTools(tools);
+    const convertedTools = [];
+    const unsupportedTools = [];
+
+    for (const tool of canonicalTools) {
+        if (tool.kind === 'function') {
+            convertedTools.push({
+                type: 'function',
+                function: {
+                    name: tool.name,
+                    description: tool.description,
+                    parameters: tool.parameters
+                }
+            });
+            continue;
+        }
+
+        unsupportedTools.push({
+            kind: tool.kind,
+            name: tool.name,
+            hostedType: tool.hostedType || null,
+            action: options.unsupportedHostedToolsAction || 'omit',
+            target: 'openai-chat'
+        });
+    }
+
+    return {
+        canonicalTools,
+        tools: convertedTools,
+        unsupportedTools
+    };
+}
+
+export function convertAnthropicToolChoiceToOpenAIChat(toolChoice, canonicalTools = [], options = {}) {
+    const result = convertAnthropicToolChoiceToOpenAIResponses(toolChoice, canonicalTools, options);
+    if (!result.meta) {
+        return result;
+    }
+
+    return {
+        value: result.value,
+        meta: {
+            ...result.meta,
+            target: 'openai-chat'
+        }
     };
 }
 
@@ -155,6 +217,10 @@ export function convertAnthropicToolChoiceToOpenAIResponses(toolChoice, canonica
 export default {
     canonicalizeAnthropicTool,
     canonicalizeAnthropicTools,
+    hasHostedAnthropicTools,
+    listHostedAnthropicTools,
+    convertAnthropicToolChoiceToOpenAIChat,
     convertAnthropicToolChoiceToOpenAIResponses,
+    convertAnthropicToolsToOpenAIChat,
     convertAnthropicToolsToOpenAIResponses
 };

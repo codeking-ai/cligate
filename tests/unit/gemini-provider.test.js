@@ -429,3 +429,59 @@ test('translateAnthropicToGeminiRequest keeps default profile signature-based wi
   assert.equal(result.contents[0].parts[0].text, '[Called function: Read({"file_path":"README.md"})]');
   assert.equal('thinkingConfig' in result.generationConfig, false);
 });
+
+test('translateAnthropicToGeminiRequest respects supportsStructuredToolResult=false capability override', () => {
+  clearThinkingSignatureCache();
+
+  const result = translateAnthropicToGeminiRequest({
+    messages: [
+      {
+        role: 'assistant',
+        content: [{
+          type: 'tool_use',
+          id: 'toolu_read_3',
+          name: 'Read',
+          input: { file_path: 'README.md' },
+          thoughtSignature: 'sig_' + 'z'.repeat(60)
+        }]
+      },
+      {
+        role: 'user',
+        content: [{
+          type: 'tool_result',
+          tool_use_id: 'toolu_read_3',
+          content: 'file contents'
+        }]
+      }
+    ]
+  }, {
+    enableStructuredToolCalls: true,
+    supportsStructuredToolResult: false
+  });
+
+  assert.equal(result.contents[1].parts[0].text, '[Function Read returned: file contents]');
+  assert.equal(result.contents[1].parts.some(part => part.functionResponse), false);
+});
+
+test('GeminiProvider.sendAnthropicRequest rejects hosted Anthropic tools explicitly', async () => {
+  const provider = new GeminiProvider({
+    id: 'gemini_hosted_1',
+    name: 'gemini-test',
+    apiKey: 'test-key'
+  });
+
+  const response = await provider.sendAnthropicRequest({
+    model: 'claude-opus-4-6',
+    messages: [{ role: 'user', content: 'search the web' }],
+    tools: [{
+      type: 'web_search_20250305',
+      name: 'web_search',
+      max_uses: 3
+    }]
+  });
+
+  assert.equal(response.status, 400);
+  const body = await response.json();
+  assert.equal(body.error.type, 'invalid_request_error');
+  assert.match(body.error.message, /Hosted Anthropic tools are not supported by the Gemini bridge/);
+});

@@ -174,6 +174,22 @@ test('convertAnthropicToOpenAIChat: tool_choice with specific tool name', () => 
   assert.deepEqual(result.tool_choice, { type: 'function', function: { name: 'search' } });
 });
 
+test('convertAnthropicToOpenAIChat: hosted tools are omitted from chat tool list', () => {
+  const req = {
+    messages: [{ role: 'user', content: 'search the web' }],
+    tools: [{
+      type: 'web_search_20250305',
+      name: 'web_search',
+      max_uses: 3
+    }],
+    tool_choice: { type: 'tool', name: 'web_search' }
+  };
+
+  const result = convertAnthropicToOpenAIChat(req, 'moonshotai/kimi-k2.5:free');
+  assert.equal(result.tools, undefined);
+  assert.equal(result.tool_choice, 'auto');
+});
+
 test('convertAnthropicToOpenAIChat: empty messages array', () => {
   const req = { messages: [] };
   const result = convertAnthropicToOpenAIChat(req, 'moonshotai/kimi-k2.5:free');

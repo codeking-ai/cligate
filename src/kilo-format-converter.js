@@ -5,6 +5,10 @@
 
 import { cleanCacheControl } from './thinking-utils.js';
 import { toAnthropicToolId, toOpenAIToolId } from './translators/normalizers/tool-ids.js';
+import {
+    convertAnthropicToolChoiceToOpenAIChat,
+    convertAnthropicToolsToOpenAIChat
+} from './translators/normalizers/tools.js';
 
 function extractSystemPrompt(system) {
     if (!system) return [];
@@ -17,106 +21,6 @@ function extractSystemPrompt(system) {
         return text ? [{ role: 'system', content: text }] : [];
     }
     return [];
-}
-
-function sanitizeSchema(schema) {
-    if (typeof schema !== 'object' || schema === null) {
-        return { type: 'object' };
-    }
-
-    const result = {};
-
-    for (const [key, value] of Object.entries(schema)) {
-        if (key === 'const') {
-            result.enum = [value];
-            continue;
-        }
-
-        if ([
-            '$schema', '$id', '$ref', '$defs', '$comment',
-            'additionalItems', 'definitions', 'examples',
-            'minLength', 'maxLength', 'pattern', 'format',
-            'minItems', 'maxItems', 'minimum', 'maximum',
-            'exclusiveMinimum', 'exclusiveMaximum',
-            'allOf', 'anyOf', 'oneOf', 'not'
-        ].includes(key)) {
-            continue;
-        }
-
-        if (key === 'additionalProperties' && typeof value === 'boolean') {
-            continue;
-        }
-
-        if (key === 'type' && Array.isArray(value)) {
-            const nonNullTypes = value.filter(t => t !== 'null');
-            result.type = nonNullTypes.length > 0 ? nonNullTypes[0] : 'string';
-            continue;
-        }
-
-        if (key === 'properties' && value && typeof value === 'object') {
-            result.properties = {};
-            for (const [propKey, propValue] of Object.entries(value)) {
-                result.properties[propKey] = sanitizeSchema(propValue);
-            }
-            continue;
-        }
-
-        if (key === 'items') {
-            if (Array.isArray(value)) {
-                result.items = value.map(item => sanitizeSchema(item));
-            } else if (typeof value === 'object') {
-                result.items = sanitizeSchema(value);
-            } else {
-                result.items = value;
-            }
-            continue;
-        }
-
-        if (key === 'required' && Array.isArray(value)) {
-            result.required = value;
-            continue;
-        }
-
-        if (key === 'enum' && Array.isArray(value)) {
-            result.enum = value;
-            continue;
-        }
-
-        if (['type', 'description', 'title'].includes(key)) {
-            result[key] = value;
-        }
-    }
-
-    if (!result.type) {
-        result.type = 'object';
-    }
-
-    if (result.type === 'object' && !result.properties) {
-        result.properties = {};
-    }
-
-    return result;
-}
-
-function convertTools(tools) {
-    if (!Array.isArray(tools)) return undefined;
-    return tools.map(tool => ({
-        type: 'function',
-        function: {
-            name: tool.name,
-            description: tool.description || '',
-            parameters: sanitizeSchema(tool.input_schema || { type: 'object' })
-        }
-    }));
-}
-
-function convertToolChoice(toolChoice) {
-    if (!toolChoice) return undefined;
-    if (typeof toolChoice === 'string') return toolChoice;
-    if (toolChoice.type === 'tool' && toolChoice.name) {
-        return { type: 'function', function: { name: toolChoice.name } };
-    }
-    return undefined;
 }
 
 function normalizeTextBlocks(content) {
@@ -246,11 +150,17 @@ export function convertAnthropicToOpenAIChat(anthropicRequest, targetModel) {
     if (typeof top_p === 'number') request.top_p = top_p;
     if (Array.isArray(stop_sequences) && stop_sequences.length > 0) request.stop = stop_sequences;
 
-    const convertedTools = convertTools(tools);
-    if (convertedTools?.length) request.tools = convertedTools;
+    const { canonicalTools, tools: convertedTools } = convertAnthropicToolsToOpenAIChat(tools, {
+        unsupportedHostedToolsAction: 'omit'
+    });
+    if (convertedTools.length > 0) request.tools = convertedTools;
 
-    const convertedToolChoice = convertToolChoice(tool_choice);
-    if (convertedToolChoice) request.tool_choice = convertedToolChoice;
+    const { value: convertedToolChoice } = convertAnthropicToolChoiceToOpenAIChat(
+        tool_choice,
+        canonicalTools,
+        { fallbackValue: undefined }
+    );
+    if (convertedToolChoice !== undefined) request.tool_choice = convertedToolChoice;
 
     return request;
 }

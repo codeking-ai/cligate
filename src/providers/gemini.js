@@ -7,12 +7,13 @@
 import { BaseProvider } from './base.js';
 import { estimateCostWithRegistry, getDefaultPricing } from '../pricing-registry.js';
 import { logger } from '../utils/logger.js';
+import { hasHostedAnthropicTools, listHostedAnthropicTools } from '../translators/normalizers/tools.js';
 import {
     translateAnthropicToGeminiRequest,
     summarizeAnthropicToolsForGemini
 } from '../translators/request/anthropic-to-gemini.js';
 import { translateGeminiToAnthropicMessage } from '../translators/response/gemini-to-anthropic.js';
-import { resolveAnthropicGeminiCapabilities } from '../translators/registry.js';
+import { resolveAnthropicGeminiCapabilities } from '../translators/capability-registry.js';
 
 const DEFAULT_BASE_URL = 'https://generativelanguage.googleapis.com/v1beta';
 
@@ -460,6 +461,20 @@ export class GeminiProvider extends BaseProvider {
      * send to Gemini API, and return response in Anthropic Messages format.
      */
     async sendAnthropicRequest(body) {
+        if (hasHostedAnthropicTools(body.tools)) {
+            const hosted = listHostedAnthropicTools(body.tools).map(tool => tool.name || tool.hostedType).join(',');
+            return new Response(JSON.stringify({
+                type: 'error',
+                error: {
+                    type: 'invalid_request_error',
+                    message: `Hosted Anthropic tools are not supported by the Gemini bridge. Requested: ${hosted}. Use an Anthropic provider or Vertex Claude rawPredict instead.`
+                }
+            }), {
+                status: 400,
+                headers: { 'Content-Type': 'application/json' }
+            });
+        }
+
         const appId = body?._proxypoolAppId || 'unknown-anthropic-client';
         const geminiModel = this._mapToGeminiModel(body.model);
         const capabilities = resolveAnthropicGeminiCapabilities({

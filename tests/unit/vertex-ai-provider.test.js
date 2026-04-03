@@ -816,3 +816,80 @@ test('VertexAIProvider.sendRequest surfaces Claude network cause details and log
     logger.error = originalLoggerError;
   }
 });
+
+test('VertexAIProvider.sendAnthropicRequest rejects hosted Anthropic tools for Gemini bridge', async () => {
+  const provider = new VertexAIProvider({
+    id: 'vertex_hosted_1',
+    name: 'vertex-test',
+    apiKey: 'raw-oauth-token',
+    projectId: 'demo-project',
+    location: 'us-central1'
+  });
+
+  const response = await provider.sendAnthropicRequest({
+    model: 'gemini-2.5-pro',
+    messages: [{ role: 'user', content: 'search the web' }],
+    tools: [{
+      type: 'web_search_20250305',
+      name: 'web_search',
+      max_uses: 3
+    }]
+  });
+
+  assert.equal(response.status, 400);
+  const body = await response.json();
+  assert.equal(body.error.type, 'invalid_request_error');
+  assert.match(body.error.message, /Hosted Anthropic tools are not supported by the Vertex Gemini bridge/);
+});
+
+test('VertexAIProvider.sendAnthropicRequest preserves hosted Anthropic tools for Claude rawPredict', async () => {
+  const provider = new VertexAIProvider({
+    id: 'vertex_hosted_2',
+    name: 'vertex-test',
+    apiKey: 'raw-oauth-token',
+    projectId: 'demo-project',
+    location: 'europe-west1'
+  });
+
+  const originalFetch = global.fetch;
+  let capturedOptions = null;
+
+  global.fetch = async (_url, options) => {
+    capturedOptions = options;
+    return new Response(JSON.stringify({
+      type: 'message',
+      role: 'assistant',
+      content: [{ type: 'text', text: 'done' }],
+      usage: { input_tokens: 2, output_tokens: 1 }
+    }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' }
+    });
+  };
+
+  try {
+    const response = await provider.sendAnthropicRequest({
+      model: 'claude-sonnet-4-6',
+      messages: [{ role: 'user', content: 'search the web' }],
+      tools: [{
+        type: 'web_search_20250305',
+        name: 'web_search',
+        max_uses: 3,
+        input_schema: {
+          type: 'object',
+          properties: {
+            query: { type: 'string' }
+          }
+        }
+      }]
+    });
+
+    assert.equal(response.status, 200);
+    const payload = JSON.parse(capturedOptions.body);
+    assert.equal(payload.tools[0].type, 'web_search_20250305');
+    assert.equal(payload.tools[0].name, 'web_search');
+    assert.equal('input_schema' in payload.tools[0], false);
+  } finally {
+    global.fetch = originalFetch;
+  }
+});

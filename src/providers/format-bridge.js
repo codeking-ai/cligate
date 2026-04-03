@@ -3,6 +3,11 @@
  * Converts request/response formats between the two APIs.
  */
 
+import {
+    convertAnthropicToolChoiceToOpenAIChat,
+    convertAnthropicToolsToOpenAIChat
+} from '../translators/normalizers/tools.js';
+
 /**
  * Convert Anthropic Messages request body to OpenAI Chat Completions format.
  * @param {object} body - Anthropic Messages API request body
@@ -43,26 +48,20 @@ export function anthropicToOpenAI(body) {
     if (body.top_p !== undefined) openaiBody.top_p = body.top_p;
     if (body.stop_sequences) openaiBody.stop = body.stop_sequences;
 
-    // Convert Anthropic tools to OpenAI tools
-    if (body.tools && body.tools.length > 0) {
-        openaiBody.tools = body.tools.map(tool => ({
-            type: 'function',
-            function: {
-                name: tool.name,
-                description: tool.description || '',
-                parameters: tool.input_schema || { type: 'object', properties: {} }
-            }
-        }));
+    const { canonicalTools, tools } = convertAnthropicToolsToOpenAIChat(body.tools, {
+        unsupportedHostedToolsAction: 'omit'
+    });
+    if (tools.length > 0) {
+        openaiBody.tools = tools;
     }
 
-    if (body.tool_choice) {
-        if (body.tool_choice.type === 'any') {
-            openaiBody.tool_choice = 'required';
-        } else if (body.tool_choice.type === 'auto') {
-            openaiBody.tool_choice = 'auto';
-        } else if (body.tool_choice.type === 'tool' && body.tool_choice.name) {
-            openaiBody.tool_choice = { type: 'function', function: { name: body.tool_choice.name } };
-        }
+    const { value: toolChoice } = convertAnthropicToolChoiceToOpenAIChat(
+        body.tool_choice,
+        canonicalTools,
+        { fallbackValue: 'auto' }
+    );
+    if (toolChoice !== undefined) {
+        openaiBody.tool_choice = toolChoice;
     }
 
     return openaiBody;

@@ -23,6 +23,7 @@ import { sanitizeClaudeBody } from '../claude-api.js';
 import { cleanCacheControl } from '../thinking-utils.js';
 import { getCachedSignature, cacheSignature, SIGNATURE_CONSTANTS } from '../signature-cache.js';
 import { logger } from '../utils/logger.js';
+import { hasHostedAnthropicTools, listHostedAnthropicTools } from '../translators/normalizers/tools.js';
 import { translateAnthropicToGeminiRequest } from '../translators/request/anthropic-to-gemini.js';
 import { translateGeminiToAnthropicMessage } from '../translators/response/gemini-to-anthropic.js';
 import { sanitizeGeminiToolSchema } from '../translators/normalizers/gemini-schema.js';
@@ -933,6 +934,17 @@ export class VertexAIProvider extends BaseProvider {
         const visionStats = _summarizeAnthropicVisionPayload(body);
 
         if (_isGeminiModel(model)) {
+            if (hasHostedAnthropicTools(body.tools)) {
+                const hosted = listHostedAnthropicTools(body.tools).map(tool => tool.name || tool.hostedType).join(',');
+                return new Response(JSON.stringify({
+                    type: 'error',
+                    error: {
+                        type: 'invalid_request_error',
+                        message: `Hosted Anthropic tools are not supported by the Vertex Gemini bridge. Requested: ${hosted}. Use Vertex Claude rawPredict instead.`
+                    }
+                }), { status: 400, headers: { 'Content-Type': 'application/json' } });
+            }
+
             const cleanedMessages = cleanCacheControl(body.messages || []);
             const cleanedSystem = _cleanAnthropicSystem(body.system);
             const vertexBody = translateAnthropicToGeminiRequest({

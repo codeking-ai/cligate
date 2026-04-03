@@ -1,7 +1,7 @@
 import { cacheToolUseSignature, restoreToolUseSignature, cleanCacheControl, SIGNATURE_CONSTANTS } from '../normalizers/thinking.js';
 import { sanitizeGeminiToolSchema } from '../normalizers/gemini-schema.js';
 import { toAnthropicToolId } from '../normalizers/tool-ids.js';
-import { resolveAnthropicGeminiCapabilities } from '../registry.js';
+import { resolveAnthropicGeminiCapabilities } from '../capability-registry.js';
 
 const { MIN_SIGNATURE_LENGTH } = SIGNATURE_CONSTANTS;
 
@@ -17,7 +17,7 @@ function extractSystemInstruction(system) {
     return text ? { parts: [{ text }] } : null;
 }
 
-function anthropicContentArrayToGeminiParts(content) {
+function anthropicContentArrayToGeminiParts(content, capabilities = {}) {
     if (!Array.isArray(content)) return [];
 
     const parts = [];
@@ -27,6 +27,9 @@ function anthropicContentArrayToGeminiParts(content) {
             continue;
         }
         if (item?.type === 'image') {
+            if (capabilities.supportsInputImage === false) {
+                continue;
+            }
             const source = item.source || {};
             if (source.type === 'base64' && source.data) {
                 parts.push({
@@ -45,6 +48,9 @@ function anthropicContentArrayToGeminiParts(content) {
             }
         }
         if (item?.type === 'document' || item?.type === 'file') {
+            if (capabilities.supportsInputFile === false) {
+                continue;
+            }
             const source = item.source || {};
             if (source.type === 'base64' && source.data) {
                 parts.push({
@@ -138,6 +144,10 @@ function resolveTranslatorCapabilities(body, context = {}) {
     return {
         ...profile,
         structuredToolCallMode,
+        supportsHostedTools: context.supportsHostedTools ?? profile.supportsHostedTools,
+        supportsInputFile: context.supportsInputFile ?? profile.supportsInputFile,
+        supportsInputImage: context.supportsInputImage ?? profile.supportsInputImage,
+        supportsStructuredToolResult: context.supportsStructuredToolResult ?? profile.supportsStructuredToolResult,
         disableThinkingBudget
     };
 }
@@ -219,13 +229,18 @@ export function translateAnthropicToGeminiRequest(body, context = {}) {
                             .join('\n')
                         : JSON.stringify(block.content ?? '');
                 const responseParts = Array.isArray(block.content)
-                    ? anthropicContentArrayToGeminiParts(block.content)
+                    ? anthropicContentArrayToGeminiParts(block.content, capabilities)
                     : [];
                 const functionName = toolNamesById.get(block.tool_use_id) || block.tool_use_id || 'tool_result';
                 const encoding = toolEncodingById.get(block.tool_use_id) || 'text';
                 const hasVisionParts = hasGeminiVisionParts(responseParts);
 
-                if (capabilities.structuredToolCallMode !== 'text' && encoding === 'structured' && !hasVisionParts) {
+                if (
+                    capabilities.supportsStructuredToolResult !== false &&
+                    capabilities.structuredToolCallMode !== 'text' &&
+                    encoding === 'structured' &&
+                    !hasVisionParts
+                ) {
                     parts.push({
                         functionResponse: {
                             name: functionName,
@@ -262,12 +277,16 @@ export function translateAnthropicToGeminiRequest(body, context = {}) {
             }
 
             if (block?.type === 'image') {
-                parts.push(...anthropicContentArrayToGeminiParts([block]));
+                if (capabilities.supportsInputImage !== false) {
+                    parts.push(...anthropicContentArrayToGeminiParts([block], capabilities));
+                }
                 continue;
             }
 
             if (block?.type === 'document' || block?.type === 'file') {
-                parts.push(...anthropicContentArrayToGeminiParts([block]));
+                if (capabilities.supportsInputFile !== false) {
+                    parts.push(...anthropicContentArrayToGeminiParts([block], capabilities));
+                }
             }
         }
 

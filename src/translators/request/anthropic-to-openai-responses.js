@@ -1,6 +1,7 @@
 import { extractSystemPrompt, convertAnthropicMessagesToResponsesInput } from '../normalizers/anthropic-messages.js';
 import { attachRequestEcho, buildRequestEcho } from '../normalizers/request-echo.js';
 import { normalizeAnthropicResponsesRequestOptions } from '../normalizers/responses-request.js';
+import { resolveAnthropicOpenAIResponsesCapabilities } from '../capability-registry.js';
 import {
     convertAnthropicToolChoiceToOpenAIResponses,
     convertAnthropicToolsToOpenAIResponses
@@ -10,6 +11,10 @@ export const SOURCE_PROTOCOL = 'anthropic-messages';
 export const TARGET_PROTOCOL = 'openai-responses';
 
 export function translateAnthropicToOpenAIResponsesRequest(anthropicRequest, context = {}) {
+    const capabilities = resolveAnthropicOpenAIResponsesCapabilities({
+        capabilityProfile: context.capabilityProfile,
+        provider: context.provider
+    });
     const instructions = extractSystemPrompt(anthropicRequest.system);
     const { normalized: requestOptions, requestEcho } = normalizeAnthropicResponsesRequestOptions(
         anthropicRequest,
@@ -23,7 +28,7 @@ export function translateAnthropicToOpenAIResponsesRequest(anthropicRequest, con
         tools,
         unsupportedTools
     } = convertAnthropicToolsToOpenAIResponses(anthropicRequest.tools, {
-        unsupportedHostedToolsAction: 'omit'
+        unsupportedHostedToolsAction: capabilities.supportsHostedTools ? 'passthrough' : 'omit'
     });
     const {
         value: toolChoice,
