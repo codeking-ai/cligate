@@ -52,3 +52,75 @@ test('OpenAIProvider.sendResponsesRequest uses native responses endpoint', async
     global.fetch = originalFetch;
   }
 });
+
+test('OpenAIProvider.sendAnthropicRequest uses responses translator path and returns anthropic message', async () => {
+  const provider = new OpenAIProvider({
+    id: 'openai_2',
+    name: 'openai-test',
+    apiKey: 'sk-test',
+    baseUrl: 'https://api.openai.com/v1'
+  });
+
+  const originalFetch = global.fetch;
+  let capturedUrl = null;
+  let capturedOptions = null;
+
+  global.fetch = async (url, options) => {
+    capturedUrl = url;
+    capturedOptions = options;
+    return new Response(JSON.stringify({
+      id: 'resp_1',
+      object: 'response',
+      model: 'gpt-5.4',
+      status: 'completed',
+      output: [
+        {
+          type: 'message',
+          content: [{ type: 'output_text', text: 'I will inspect files first.' }]
+        },
+        {
+          type: 'function_call',
+          call_id: 'fc_abc',
+          id: 'fc_abc',
+          name: 'shell_command',
+          arguments: '{"command":"Get-ChildItem"}'
+        }
+      ],
+      usage: {
+        input_tokens: 9,
+        output_tokens: 4,
+        cache_read_input_tokens: 1
+      }
+    }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' }
+    });
+  };
+
+  try {
+    const response = await provider.sendAnthropicRequest({
+      model: 'claude-sonnet-4',
+      system: 'Be concise.',
+      messages: [
+        { role: 'user', content: 'inspect repo' }
+      ]
+    });
+
+    assert.equal(response.status, 200);
+    assert.equal(capturedUrl, 'https://api.openai.com/v1/responses');
+
+    const payload = JSON.parse(capturedOptions.body);
+    assert.equal(payload.stream, false);
+    assert.equal(payload.instructions, 'Be concise.');
+    assert.equal(payload.input[0].role, 'user');
+
+    const anthropic = await response.json();
+    assert.equal(anthropic.model, 'claude-sonnet-4');
+    assert.equal(anthropic.content[0].type, 'text');
+    assert.equal(anthropic.content[1].type, 'tool_use');
+    assert.equal(anthropic.stop_reason, 'tool_use');
+    assert.equal(anthropic.usage.input_tokens, 9);
+  } finally {
+    global.fetch = originalFetch;
+  }
+});

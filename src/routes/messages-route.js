@@ -1,6 +1,6 @@
 import { sendMessage, openMessageStream } from '../direct-api.js';
 import { sendKiloMessageStream, sendKiloMessage } from '../kilo-api.js';
-import { streamResponsesAPI as streamResponseToAnthropicEvents } from '../response-streamer.js';
+import { streamOpenAIResponsesAsAnthropicEvents as streamResponseToAnthropicEvents } from '../translators/response/openai-responses-sse-to-anthropic-sse.js';
 import { resolveModelRouting } from '../model-mapper.js';
 import { sendAuthError, getCredentialsForAccount } from '../middleware/credentials.js';
 import { initSSEResponse, pipeSSEStream, handleStreamError } from '../middleware/sse.js';

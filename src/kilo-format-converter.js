@@ -4,7 +4,7 @@
  */
 
 import { cleanCacheControl } from './thinking-utils.js';
-import { toAnthropicToolId, toOpenAIToolId } from './format-converter.js';
+import { toAnthropicToolId, toOpenAIToolId } from './translators/normalizers/tool-ids.js';
 
 function extractSystemPrompt(system) {
     if (!system) return [];

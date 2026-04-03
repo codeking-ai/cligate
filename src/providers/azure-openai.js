@@ -11,7 +11,8 @@
  */
 
 import { BaseProvider } from './base.js';
-import { convertAnthropicToResponsesAPI, convertOutputToAnthropic, generateMessageId } from '../format-converter.js';
+import { translateAnthropicToOpenAIResponsesRequest } from '../translators/request/anthropic-to-openai-responses.js';
+import { convertOutputToAnthropic, generateMessageId } from '../translators/response/openai-responses-to-anthropic.js';
 import { logger } from '../utils/logger.js';
 import { estimateCostWithRegistry, getDefaultPricing } from '../pricing-registry.js';
 import { normalizeJsonSchema } from '../json-schema-normalizer.js';
@@ -433,10 +434,9 @@ export class AzureOpenAIProvider extends BaseProvider {
      */
     async sendAnthropicRequest(body) {
         const visionStats = summarizeAnthropicVisionPayload(body);
-        const responsesBody = normalizeResponsesPayloadForAzure(convertAnthropicToResponsesAPI({
-            ...body,
-            stream: false
-        }));
+        const responsesBody = normalizeResponsesPayloadForAzure(
+            translateAnthropicToOpenAIResponsesRequest(body, { stream: false })
+        );
         const responseInputImages = Array.isArray(responsesBody.input)
             ? responsesBody.input.reduce((count, item) => {
                 if (item?.type === 'message') {

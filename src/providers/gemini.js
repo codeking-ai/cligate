@@ -7,6 +7,11 @@
 import { BaseProvider } from './base.js';
 import { estimateCostWithRegistry, getDefaultPricing } from '../pricing-registry.js';
 import { logger } from '../utils/logger.js';
+import {
+    translateAnthropicToGeminiRequest,
+    summarizeAnthropicToolsForGemini
+} from '../translators/request/anthropic-to-gemini.js';
+import { translateGeminiToAnthropicMessage } from '../translators/response/gemini-to-anthropic.js';
 
 const DEFAULT_BASE_URL = 'https://generativelanguage.googleapis.com/v1beta';
 
@@ -456,30 +461,17 @@ export class GeminiProvider extends BaseProvider {
     async sendAnthropicRequest(body) {
         const appId = body?._proxypoolAppId || 'unknown-anthropic-client';
         const geminiModel = this._mapToGeminiModel(body.model);
-        const { contents, systemInstruction } = this._convertAnthropicToGemini(
-            body.messages || [], body.system
-        );
-
-        const geminiBody = {
-            contents,
-            generationConfig: {
-                maxOutputTokens: body.max_tokens || 8192,
-                temperature: body.temperature,
-                topP: body.top_p,
+        const geminiBody = translateAnthropicToGeminiRequest(body, {
+            forceStructuredToolCalls: true,
+            disableThinkingBudget: Array.isArray(body.tools) && body.tools.length > 0 && appId === 'claude-code',
+            onMultimodalToolResultDowngrade: ({ functionName, toolUseId }) => {
+                logger.info(`[Gemini] Downgrading multimodal tool_result to user parts | tool=${functionName} | tool_use_id=${toolUseId}`);
             }
-        };
-        if (systemInstruction) geminiBody.systemInstruction = systemInstruction;
+        });
 
-        const geminiTools = this._convertAnthropicTools(body.tools);
-        if (geminiTools) {
-            geminiBody.tools = geminiTools;
-            if (appId === 'claude-code') {
-                // Claude Code relies heavily on multi-turn tool calls, but Gemini's
-                // thought-signature requirements are incompatible with Anthropic bridging.
-                geminiBody.generationConfig.thinkingConfig = { thinkingBudget: 0 };
-                const toolSummary = this._summarizeAnthropicTools(body.tools);
-                logger.info(`[Gemini] Enabled Claude Code tool compatibility | model=${geminiModel} | tools=${toolSummary.count} | tool_names=${toolSummary.names.join(',')}`);
-            }
+        if (Array.isArray(body.tools) && body.tools.length > 0 && appId === 'claude-code') {
+            const toolSummary = summarizeAnthropicToolsForGemini(body.tools);
+            logger.info(`[Gemini] Enabled Claude Code tool compatibility | model=${geminiModel} | tools=${toolSummary.count} | tool_names=${toolSummary.names.join(',')}`);
         }
 
         const url = `${this.baseUrl}/models/${geminiModel}:generateContent?key=${this.apiKey}`;
@@ -502,7 +494,7 @@ export class GeminiProvider extends BaseProvider {
         }
 
         const data = await response.json();
-        const anthropicResponse = this._convertGeminiToAnthropic(data, body.model);
+        const anthropicResponse = translateGeminiToAnthropicMessage(data, body.model);
 
         return new Response(JSON.stringify(anthropicResponse), {
             status: 200,

@@ -23,6 +23,9 @@ import { sanitizeClaudeBody } from '../claude-api.js';
 import { cleanCacheControl } from '../thinking-utils.js';
 import { getCachedSignature, cacheSignature, SIGNATURE_CONSTANTS } from '../signature-cache.js';
 import { logger } from '../utils/logger.js';
+import { translateAnthropicToGeminiRequest } from '../translators/request/anthropic-to-gemini.js';
+import { translateGeminiToAnthropicMessage } from '../translators/response/gemini-to-anthropic.js';
+import { sanitizeGeminiToolSchema } from '../translators/normalizers/gemini-schema.js';
 
 const DEFAULT_MODEL = 'gemini-3-flash-preview';
 const TOKEN_URL = 'https://oauth2.googleapis.com/token';
@@ -395,68 +398,7 @@ export class VertexAIProvider extends BaseProvider {
      * Strip fields unsupported by Gemini from JSON Schema.
      */
     _cleanSchema(schema) {
-        if (!schema || typeof schema !== 'object') {
-            return schema;
-        }
-        if (Array.isArray(schema)) {
-            return schema.map(s => this._cleanSchema(s));
-        }
-
-        const cleaned = {};
-        for (const [key, value] of Object.entries(schema)) {
-            if (key === 'const') {
-                cleaned.enum = [value];
-                continue;
-            }
-
-            if (key === 'type') {
-                if (Array.isArray(value)) {
-                    const nonNullTypes = value.filter(item => item !== 'null');
-                    cleaned.type = nonNullTypes[0] || 'string';
-                } else {
-                    cleaned.type = value;
-                }
-                continue;
-            }
-
-            if (key === 'properties' && value && typeof value === 'object' && !Array.isArray(value)) {
-                cleaned.properties = {};
-                for (const [propKey, propValue] of Object.entries(value)) {
-                    cleaned.properties[propKey] = this._cleanSchema(propValue);
-                }
-                continue;
-            }
-
-            if (key === 'items') {
-                cleaned.items = Array.isArray(value)
-                    ? value.map(item => this._cleanSchema(item))
-                    : this._cleanSchema(value);
-                continue;
-            }
-
-            if (key === 'required' && Array.isArray(value)) {
-                cleaned.required = value;
-                continue;
-            }
-
-            if (key === 'enum' && Array.isArray(value)) {
-                cleaned.enum = value;
-                continue;
-            }
-
-            if (['description', 'title', 'format', 'nullable'].includes(key)) {
-                cleaned[key] = value;
-            }
-        }
-
-        if (!cleaned.type) {
-            cleaned.type = 'object';
-        }
-        if (cleaned.type === 'object' && !cleaned.properties) {
-            cleaned.properties = {};
-        }
-
-        return cleaned;
+        return sanitizeGeminiToolSchema(schema);
     }
 
     /**
@@ -993,32 +935,28 @@ export class VertexAIProvider extends BaseProvider {
         if (_isGeminiModel(model)) {
             const cleanedMessages = cleanCacheControl(body.messages || []);
             const cleanedSystem = _cleanAnthropicSystem(body.system);
-            const { contents, systemInstruction } = this._convertAnthropicToGemini(cleanedMessages, cleanedSystem);
+            const vertexBody = translateAnthropicToGeminiRequest({
+                ...body,
+                messages: cleanedMessages,
+                system: cleanedSystem
+            }, {
+                enableStructuredToolCalls: true,
+                onMultimodalToolResultDowngrade: ({ functionName, toolUseId }) => {
+                    logger.info(`[Vertex AI] Downgrading multimodal tool_result to user parts | tool=${functionName} | tool_use_id=${toolUseId}`);
+                }
+            });
+            const { contents, systemInstruction } = vertexBody;
             const geminiInlineImages = contents.reduce((count, item) => count + ((item.parts || []).filter(part => part.inlineData || part.fileData).length), 0);
             if (visionStats.imageBlocks > 0 || geminiInlineImages > 0) {
                 console.info(`[Vertex AI] Anthropic multimodal bridge | model=${model} | messages=${visionStats.messageCount} | anthropic_images=${visionStats.imageBlocks} | base64=${visionStats.base64Images} | url=${visionStats.urlImages} | gemini_image_parts=${geminiInlineImages}`);
             }
-
-            const vertexBody = {
-                contents,
-                generationConfig: {
-                    maxOutputTokens: body.max_tokens || 8192,
-                    temperature: body.temperature,
-                    topP: body.top_p,
-                }
-            };
             if (systemInstruction) vertexBody.systemInstruction = systemInstruction;
-
-            const geminiTools = this._convertAnthropicToolsToGemini(body.tools);
-            if (geminiTools) {
-                vertexBody.tools = geminiTools;
-            }
 
             const { response, model: actualModel } = await this._fetchGeminiWithFallback(_geminiFallbackModels(model), vertexBody, token);
             if (!response.ok) return response;
 
             const data = await response.json();
-            const anthropicResponse = this._convertGeminiToAnthropic(data, model);
+            const anthropicResponse = translateGeminiToAnthropicMessage(data, model);
             return new Response(JSON.stringify(anthropicResponse), {
                 status: 200,
                 headers: {

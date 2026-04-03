@@ -11,6 +11,41 @@ const CLAUDE_API_URL = 'https://api.anthropic.com/v1/messages';
 const ANTHROPIC_VERSION = '2023-06-01';
 const REQUIRED_BETA_FLAGS = ['oauth-2025-04-20', 'prompt-caching-2024-07-31'];
 
+function collectErrorMessages(error) {
+    const messages = [];
+    const queue = [error];
+    const seen = new Set();
+
+    while (queue.length > 0) {
+        const current = queue.shift();
+        if (!current || seen.has(current)) continue;
+        seen.add(current);
+
+        if (typeof current.message === 'string' && current.message.length > 0) {
+            messages.push(current.message);
+        }
+        if (typeof current.code === 'string' && current.code.length > 0) {
+            messages.push(`code=${current.code}`);
+        }
+        if (current.cause && typeof current.cause === 'object') {
+            queue.push(current.cause);
+        }
+    }
+
+    return messages;
+}
+
+function buildClaudeNetworkError(operation, error) {
+    const details = collectErrorMessages(error);
+    const summary = details.length > 0 ? details.join(' | ') : 'unknown network error';
+    return new Error(`CLAUDE_NETWORK_ERROR: ${operation} failed: ${summary}`, { cause: error });
+}
+
+function logClaudeNetworkError(operation, error) {
+    const details = collectErrorMessages(error);
+    logger.error(`[ClaudeAPI] ${operation} network error: ${details.join(' | ') || 'unknown network error'}`);
+}
+
 /**
  * Merge client-provided beta flags with our required ones.
  * Deduplicates and preserves order (client flags first, then ours).
@@ -151,16 +186,22 @@ function _cloneContent(content) {
  */
 export async function sendClaudeMessage(body, accessToken, { clientBeta } = {}) {
     const sanitized = { ...sanitizeClaudeBody(body), stream: false };
-    const response = await fetch(CLAUDE_API_URL, {
-        method: 'POST',
-        headers: {
-            'Authorization': `Bearer ${accessToken}`,
-            'anthropic-version': ANTHROPIC_VERSION,
-            'anthropic-beta': _buildBetaHeader(clientBeta),
-            'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(sanitized)
-    });
+    let response;
+    try {
+        response = await fetch(CLAUDE_API_URL, {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${accessToken}`,
+                'anthropic-version': ANTHROPIC_VERSION,
+                'anthropic-beta': _buildBetaHeader(clientBeta),
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(sanitized)
+        });
+    } catch (error) {
+        logClaudeNetworkError('messages', error);
+        throw buildClaudeNetworkError('messages', error);
+    }
 
     if (!response.ok) {
         const errorText = await response.text();
@@ -180,17 +221,23 @@ export async function sendClaudeMessage(body, accessToken, { clientBeta } = {}) 
  */
 export async function sendClaudeStream(body, accessToken, { clientBeta, signal } = {}) {
     const sanitized = { ...sanitizeClaudeBody(body), stream: true };
-    const response = await fetch(CLAUDE_API_URL, {
-        method: 'POST',
-        headers: {
-            'Authorization': `Bearer ${accessToken}`,
-            'anthropic-version': ANTHROPIC_VERSION,
-            'anthropic-beta': _buildBetaHeader(clientBeta),
-            'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(sanitized),
-        signal
-    });
+    let response;
+    try {
+        response = await fetch(CLAUDE_API_URL, {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${accessToken}`,
+                'anthropic-version': ANTHROPIC_VERSION,
+                'anthropic-beta': _buildBetaHeader(clientBeta),
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(sanitized),
+            signal
+        });
+    } catch (error) {
+        logClaudeNetworkError('stream', error);
+        throw buildClaudeNetworkError('stream', error);
+    }
 
     if (!response.ok) {
         const errorText = await response.text();
@@ -275,5 +322,10 @@ export function mapToClaudeModel(modelId) {
 // Lazy import to avoid circular dependency at module load time
 let _modelMapping = null;
 import('./model-mapping.js').then(mod => { _modelMapping = mod; }).catch(() => {});
+
+export const _testExports = {
+    collectErrorMessages,
+    buildClaudeNetworkError
+};
 
 export default { sendClaudeMessage, sendClaudeStream, mapToClaudeModel, sanitizeClaudeBody };

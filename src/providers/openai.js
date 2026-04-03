@@ -1,11 +1,12 @@
 /**
  * OpenAI Provider
  * Forwards requests to OpenAI API using API keys.
- * Also supports Anthropic Messages API passthrough via format conversion.
+ * Also supports Anthropic Messages API passthrough via translator conversion.
  */
 
 import { BaseProvider } from './base.js';
-import { anthropicToOpenAI, openAIToAnthropic } from './format-bridge.js';
+import { translateAnthropicToOpenAIResponsesRequest } from '../translators/request/anthropic-to-openai-responses.js';
+import { translateOpenAIResponsesToAnthropicMessage } from '../translators/response/openai-responses-to-anthropic.js';
 import { estimateCostWithRegistry, getDefaultPricing } from '../pricing-registry.js';
 
 const DEFAULT_BASE_URL = 'https://api.openai.com/v1';
@@ -72,12 +73,12 @@ export class OpenAIProvider extends BaseProvider {
     // ─── Anthropic Messages API passthrough (for /v1/messages endpoint) ──────
 
     /**
-     * Accept an Anthropic Messages API body, convert to OpenAI Chat Completions,
+     * Accept an Anthropic Messages API body, convert to OpenAI Responses,
      * send to OpenAI, and return response in Anthropic Messages format.
      */
     async sendAnthropicRequest(body) {
-        const openaiBody = anthropicToOpenAI(body);
-        const url = `${this.baseUrl}/chat/completions`;
+        const openaiBody = translateAnthropicToOpenAIResponsesRequest(body, { stream: false });
+        const url = `${this.baseUrl}/responses`;
         const response = await fetch(url, {
             method: 'POST',
             headers: {
@@ -90,7 +91,9 @@ export class OpenAIProvider extends BaseProvider {
         if (!response.ok) return response;
 
         const data = await response.json();
-        const anthropicResponse = openAIToAnthropic(data, body.model);
+        const anthropicResponse = translateOpenAIResponsesToAnthropicMessage(data, {
+            model: body.model
+        });
 
         return new Response(JSON.stringify(anthropicResponse), {
             status: 200,

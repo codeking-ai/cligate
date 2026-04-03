@@ -3,7 +3,7 @@
  * Shared utilities for Server-Sent Events streaming and error responses.
  */
 
-import { formatSSEEvent } from '../response-streamer.js';
+import { formatSSEEvent } from '../translators/shared/sse.js';
 import { logger } from '../utils/logger.js';
 
 /**

@@ -3,7 +3,8 @@
  * Streams OpenAI Chat Completions SSE and converts to Anthropic SSE events
  */
 
-import { generateMessageId, toAnthropicToolId } from './format-converter.js';
+import { generateMessageId } from './translators/response/openai-responses-to-anthropic.js';
+import { toAnthropicToolId } from './translators/normalizers/tool-ids.js';
 
 export async function* streamOpenAIChat(response, model) {
     const messageId = generateMessageId();
