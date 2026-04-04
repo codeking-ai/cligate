@@ -29,7 +29,7 @@ function mockReq(body = {}, params = {}, query = {}) {
 
 // ─── settings-route ───────────────────────────────────────────────────────────
 
-import { handleGetHaikuModel, handleSetHaikuModel, handleGetAppRouting, handleGetStrictCodexCompatibility, handleSetStrictCodexCompatibility, handleGetStrictTranslatorCompatibility, handleSetStrictTranslatorCompatibility } from '../../src/routes/settings-route.js';
+import { handleGetHaikuModel, handleSetHaikuModel, handleGetAppRouting, handleSetAppRouting, handleGetStrictCodexCompatibility, handleSetStrictCodexCompatibility, handleGetStrictTranslatorCompatibility, handleSetStrictTranslatorCompatibility } from '../../src/routes/settings-route.js';
 import { handleGetPricing, handleUpdatePricing, handleResetPricing } from '../../src/routes/pricing-route.js';
 import { handleGetApiKey } from '../../src/routes/api-keys-route.js';
 
@@ -52,6 +52,22 @@ test('handleGetAppRouting: exposes antigravity binding targets', () => {
   assert.ok(Array.isArray(res._body.targets?.bindingTypes));
   assert.ok(res._body.targets.bindingTypes.includes('antigravity-account'));
   assert.ok(Array.isArray(res._body.targets?.antigravityAccounts));
+});
+
+test('handleSetAppRouting: rejects enabled binding without selected targets', () => {
+  const req = mockReq({
+    appRouting: {
+      codex: {
+        enabled: true,
+        bindings: [{ type: 'api-key', targetIds: [] }]
+      }
+    }
+  });
+  const res = mockRes();
+  handleSetAppRouting(req, res);
+  assert.equal(res._status, 400);
+  assert.equal(res._body.success, false);
+  assert.match(res._body.error, /at least one targetId is required/);
 });
 
 test('handleGetStrictCodexCompatibility: returns current strict compatibility flag', () => {

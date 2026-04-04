@@ -18,17 +18,38 @@ function createEmptyBinding() {
   return {
     id: null,
     type: null,
-    targetId: null
+    targetId: null,
+    targetIds: []
   };
 }
 
+function normalizeTargetIds(binding = {}) {
+  if (Array.isArray(binding?.targetIds)) {
+    return binding.targetIds
+      .filter((targetId) => typeof targetId === 'string' && targetId.trim())
+      .map((targetId) => targetId.trim());
+  }
+
+  if (typeof binding?.targetId === 'string' && binding.targetId.trim()) {
+    return [binding.targetId.trim()];
+  }
+
+  if (typeof binding?.bindingId === 'string' && binding.bindingId.trim()) {
+    return [binding.bindingId.trim()];
+  }
+
+  return [];
+}
+
 function normalizeBinding(binding = {}, index = 0) {
+  const targetIds = normalizeTargetIds(binding);
   return {
     ...createEmptyBinding(),
     ...binding,
     id: binding?.id || `binding-${index + 1}`,
     type: binding?.type || binding?.bindingType || null,
-    targetId: binding?.targetId || binding?.bindingId || null
+    targetIds,
+    targetId: targetIds[0] || null
   };
 }
 
@@ -144,36 +165,42 @@ function unavailableAssigned(appId, appBinding, reason, attempts = []) {
   };
 }
 
-function resolveSingleBinding(binding) {
-  if (!BINDING_TYPES.includes(binding.type) || !binding.targetId) {
-    return { ok: false, reason: 'invalid_binding', binding };
+function resolveSingleBindingTarget(binding, targetId) {
+  const boundBinding = {
+    ...binding,
+    targetId,
+    targetIds: [targetId]
+  };
+
+  if (!BINDING_TYPES.includes(binding.type) || !targetId) {
+    return { ok: false, reason: 'invalid_binding', binding: boundBinding };
   }
 
   if (binding.type === 'chatgpt-account') {
-    const account = getChatGPTAccount(binding.targetId);
-    if (!account) return { ok: false, reason: 'account_not_found', binding };
-    if (account.enabled === false) return { ok: false, reason: 'account_disabled', binding };
-    return { ok: true, credential: account, binding };
+    const account = getChatGPTAccount(targetId);
+    if (!account) return { ok: false, reason: 'account_not_found', binding: boundBinding };
+    if (account.enabled === false) return { ok: false, reason: 'account_disabled', binding: boundBinding };
+    return { ok: true, credential: account, binding: boundBinding };
   }
 
   if (binding.type === 'claude-account') {
-    const account = getClaudeAccount(binding.targetId);
-    if (!account) return { ok: false, reason: 'account_not_found', binding };
-    if (account.enabled === false) return { ok: false, reason: 'account_disabled', binding };
-    return { ok: true, credential: account, binding };
+    const account = getClaudeAccount(targetId);
+    if (!account) return { ok: false, reason: 'account_not_found', binding: boundBinding };
+    if (account.enabled === false) return { ok: false, reason: 'account_disabled', binding: boundBinding };
+    return { ok: true, credential: account, binding: boundBinding };
   }
 
   if (binding.type === 'antigravity-account') {
-    const account = getAntigravityAccount(binding.targetId);
-    if (!account) return { ok: false, reason: 'account_not_found', binding };
-    if (account.enabled === false) return { ok: false, reason: 'account_disabled', binding };
-    return { ok: true, credential: account, binding };
+    const account = getAntigravityAccount(targetId);
+    if (!account) return { ok: false, reason: 'account_not_found', binding: boundBinding };
+    if (account.enabled === false) return { ok: false, reason: 'account_disabled', binding: boundBinding };
+    return { ok: true, credential: account, binding: boundBinding };
   }
 
-  const provider = getProviderById(binding.targetId);
-  if (!provider) return { ok: false, reason: 'api_key_not_found', binding };
-  if (!provider.enabled) return { ok: false, reason: 'api_key_disabled', binding };
-  return { ok: true, credential: provider, binding };
+  const provider = getProviderById(targetId);
+  if (!provider) return { ok: false, reason: 'api_key_not_found', binding: boundBinding };
+  if (!provider.enabled) return { ok: false, reason: 'api_key_disabled', binding: boundBinding };
+  return { ok: true, credential: provider, binding: boundBinding };
 }
 
 export function resolveAssignedCredential(settings, appId) {
@@ -192,14 +219,25 @@ export function resolveAssignedCredentials(settings, appId) {
   const assignments = [];
   const attempts = [];
   for (const binding of appBinding.bindings || []) {
-    const resolved = resolveSingleBinding(binding);
-    if (resolved.ok) {
-      const entry = assigned(appId, appBinding, binding, resolved.credential);
-      assignments.push(entry);
-      attempts.push({ binding, reason: 'resolved' });
+    const targetIds = Array.isArray(binding?.targetIds) && binding.targetIds.length > 0
+      ? binding.targetIds
+      : (binding?.targetId ? [binding.targetId] : []);
+
+    if (targetIds.length === 0) {
+      attempts.push({ binding, reason: 'invalid_binding' });
       continue;
     }
-    attempts.push({ binding, reason: resolved.reason });
+
+    for (const targetId of targetIds) {
+      const resolved = resolveSingleBindingTarget(binding, targetId);
+      if (resolved.ok) {
+        const entry = assigned(appId, appBinding, resolved.binding, resolved.credential);
+        assignments.push(entry);
+        attempts.push({ binding: resolved.binding, reason: 'resolved' });
+        continue;
+      }
+      attempts.push({ binding: resolved.binding, reason: resolved.reason });
+    }
   }
 
   if (assignments.length > 0) {
@@ -232,22 +270,29 @@ export function validateAppRoutingConfig(appRouting) {
         errors.push(`${prefix}: invalid binding type`);
         continue;
       }
-      if (!binding.targetId || typeof binding.targetId !== 'string') {
-        errors.push(`${prefix}: targetId is required`);
+      if (!Array.isArray(binding.targetIds) || binding.targetIds.length === 0) {
+        errors.push(`${prefix}: at least one targetId is required`);
         continue;
       }
 
-      if (binding.type === 'chatgpt-account' && !chatgptEmails.has(binding.targetId)) {
-        errors.push(`${prefix}: ChatGPT account not found`);
-      }
-      if (binding.type === 'claude-account' && !claudeEmails.has(binding.targetId)) {
-        errors.push(`${prefix}: Claude account not found`);
-      }
-      if (binding.type === 'antigravity-account' && !antigravityEmails.has(binding.targetId)) {
-        errors.push(`${prefix}: Antigravity account not found`);
-      }
-      if (binding.type === 'api-key' && !apiKeyIds.has(binding.targetId)) {
-        errors.push(`${prefix}: API key not found`);
+      for (const targetId of binding.targetIds) {
+        if (typeof targetId !== 'string' || !targetId.trim()) {
+          errors.push(`${prefix}: targetId is required`);
+          continue;
+        }
+
+        if (binding.type === 'chatgpt-account' && !chatgptEmails.has(targetId)) {
+          errors.push(`${prefix}: ChatGPT account not found`);
+        }
+        if (binding.type === 'claude-account' && !claudeEmails.has(targetId)) {
+          errors.push(`${prefix}: Claude account not found`);
+        }
+        if (binding.type === 'antigravity-account' && !antigravityEmails.has(targetId)) {
+          errors.push(`${prefix}: Antigravity account not found`);
+        }
+        if (binding.type === 'api-key' && !apiKeyIds.has(targetId)) {
+          errors.push(`${prefix}: API key not found`);
+        }
       }
     }
   }

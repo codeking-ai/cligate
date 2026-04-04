@@ -10,9 +10,10 @@ document.addEventListener('alpine:init', () => {
         lang: localStorage.getItem('proxy-lang') || 'en',
         darkMode: localStorage.getItem('proxy-theme') !== 'light',
 
-        t(key) {
+        t(key, ...args) {
             const dict = i18n[this.lang] || i18n.en;
-            return dict[key] !== undefined ? dict[key] : (i18n.en[key] || key);
+            const value = dict[key] !== undefined ? dict[key] : (i18n.en[key] || key);
+            return typeof value === 'function' ? value(...args) : value;
         },
 
         setLang(lang) {
@@ -49,7 +50,7 @@ document.addEventListener('alpine:init', () => {
         appRoutingTargets: { appIds: [], bindingTypes: [], chatgptAccounts: [], claudeAccounts: [], antigravityAccounts: [], apiKeys: [] },
         appRoutingSaving: {},
         selectedAppRoutingId: '',
-        appRoutingForm: { enabled: true, fallbackToDefault: true, bindings: [], currentType: null, currentTargetId: null },
+        appRoutingForm: { enabled: true, fallbackToDefault: true, bindings: [], currentType: null, currentTargetIds: [], targetQuery: '', targetPickerOpen: false },
         enableFreeModels: true,
         freeModelsSaving: false,
 
@@ -1317,8 +1318,37 @@ document.addEventListener('alpine:init', () => {
                 fallbackToDefault: true,
                 bindings: [],
                 currentType: null,
-                currentTargetId: null
+                currentTargetIds: [],
+                targetQuery: '',
+                targetPickerOpen: false
             };
+        },
+
+        flattenAppRoutingBindings(bindings = []) {
+            const flattened = [];
+            for (const [index, binding] of (bindings || []).entries()) {
+                const targetIds = Array.isArray(binding?.targetIds) && binding.targetIds.length > 0
+                    ? binding.targetIds.filter(Boolean)
+                    : (binding?.targetId ? [binding.targetId] : []);
+                if (targetIds.length === 0) {
+                    flattened.push({
+                        id: binding.id || ('binding-' + (index + 1)),
+                        type: binding.type || null,
+                        targetIds: [],
+                        targetId: null
+                    });
+                    continue;
+                }
+                for (const targetId of targetIds) {
+                    flattened.push({
+                        id: `${binding.id || ('binding-' + (index + 1))}-${targetId}`,
+                        type: binding.type || null,
+                        targetIds: [targetId],
+                        targetId
+                    });
+                }
+            }
+            return flattened;
         },
 
         loadAppRoutingForm(appId) {
@@ -1328,13 +1358,11 @@ document.addEventListener('alpine:init', () => {
                 this.appRoutingForm = {
                     enabled: current.enabled === true,
                     fallbackToDefault: current.fallbackToDefault !== false,
-                    bindings: (current.bindings || []).map((binding, index) => ({
-                        id: binding.id || ('binding-' + (index + 1)),
-                        type: binding.type || null,
-                        targetId: binding.targetId || null
-                    })),
+                    bindings: this.flattenAppRoutingBindings(current.bindings || []),
                     currentType: null,
-                    currentTargetId: null
+                    currentTargetIds: [],
+                    targetQuery: '',
+                    targetPickerOpen: false
                 };
                 return;
             }
@@ -1359,16 +1387,116 @@ document.addEventListener('alpine:init', () => {
             const config = this.appRouting[appId];
             if (!config?.enabled || !Array.isArray(config.bindings) || config.bindings.length === 0) return '';
             return config.bindings.map((binding) => {
-                const options = this.getBindingOptions(binding.type);
-                const option = options.find((item) => (item.id || item.email) === binding.targetId);
-                const label = option ? this.bindingOptionLabel(binding.type, option) : binding.targetId;
+                const labels = this.getBindingLabels(binding);
+                const label = labels.join(', ');
                 return `${binding.type}: ${label}`;
             }).join(' | ');
         },
 
+        getBindingTargetIds(binding) {
+            if (Array.isArray(binding?.targetIds) && binding.targetIds.length > 0) {
+                return binding.targetIds.filter(Boolean);
+            }
+            return binding?.targetId ? [binding.targetId] : [];
+        },
+
+        getBindingLabels(binding) {
+            const options = this.getBindingOptions(binding?.type);
+            return this.getBindingTargetIds(binding).map((targetId) => {
+                const option = options.find((item) => (item.id || item.email) === targetId);
+                return option ? this.bindingOptionLabel(binding.type, option) : targetId;
+            });
+        },
+
+        getFilteredBindingOptions(bindingType, query = '') {
+            const keyword = String(query || '').trim().toLowerCase();
+            const options = this.getBindingOptions(bindingType);
+            if (!keyword) return options;
+            return options.filter((option) => {
+                const id = String(option.id || option.email || '').toLowerCase();
+                const label = String(this.bindingOptionLabel(bindingType, option) || '').toLowerCase();
+                return id.includes(keyword) || label.includes(keyword);
+            });
+        },
+
+        getAppRoutingSelectionPreview(limit = 3) {
+            const selectedIds = this.appRoutingForm.currentTargetIds || [];
+            const options = this.getBindingOptions(this.appRoutingForm.currentType);
+            const labels = selectedIds.map((targetId) => {
+                const option = options.find((item) => (item.id || item.email) === targetId);
+                return option ? this.bindingOptionLabel(this.appRoutingForm.currentType, option) : targetId;
+            });
+            return labels.slice(0, limit);
+        },
+
+        getSelectedAppRoutingTargets() {
+            const selectedIds = this.appRoutingForm.currentTargetIds || [];
+            const options = this.getBindingOptions(this.appRoutingForm.currentType);
+            return selectedIds.map((targetId) => {
+                const option = options.find((item) => (item.id || item.email) === targetId);
+                return {
+                    id: targetId,
+                    label: option ? this.bindingOptionLabel(this.appRoutingForm.currentType, option) : targetId,
+                    meta: option ? (option.id || option.email || targetId) : targetId
+                };
+            });
+        },
+
+        isAppRoutingTargetSelected(targetId) {
+            return (this.appRoutingForm.currentTargetIds || []).includes(targetId);
+        },
+
+        toggleAppRoutingTarget(targetId) {
+            if (!targetId) return;
+            const selected = new Set(this.appRoutingForm.currentTargetIds || []);
+            if (selected.has(targetId)) selected.delete(targetId);
+            else selected.add(targetId);
+            this.updateAppRoutingFormField('currentTargetIds', Array.from(selected));
+        },
+
+        removeSelectedAppRoutingTarget(targetId) {
+            if (!targetId) return;
+            const selected = (this.appRoutingForm.currentTargetIds || []).filter((id) => id !== targetId);
+            this.updateAppRoutingFormField('currentTargetIds', selected);
+        },
+
+        selectAllFilteredAppRoutingTargets() {
+            const options = this.getFilteredBindingOptions(this.appRoutingForm.currentType, this.appRoutingForm.targetQuery);
+            const selected = new Set(this.appRoutingForm.currentTargetIds || []);
+            for (const option of options) {
+                selected.add(option.id || option.email);
+            }
+            this.updateAppRoutingFormField('currentTargetIds', Array.from(selected));
+        },
+
+        clearAllAppRoutingTargets() {
+            this.updateAppRoutingFormField('currentTargetIds', []);
+        },
+
+        toggleAppRoutingTargetPicker(force) {
+            const targetPickerOpen = typeof force === 'boolean'
+                ? force
+                : !this.appRoutingForm.targetPickerOpen;
+            this.appRoutingForm = {
+                ...this.appRoutingForm,
+                targetPickerOpen,
+                targetQuery: targetPickerOpen ? this.appRoutingForm.targetQuery : ''
+            };
+        },
+
+        areAllFilteredTargetsSelected() {
+            const options = this.getFilteredBindingOptions(this.appRoutingForm.currentType, this.appRoutingForm.targetQuery);
+            if (options.length === 0) return false;
+            return options.every((option) => this.isAppRoutingTargetSelected(option.id || option.email));
+        },
+
         updateAppRoutingFormField(field, value) {
             const patch = { [field]: value };
-            if (field === 'currentType') patch.currentTargetId = null;
+            if (field === 'currentType') {
+                patch.currentTargetIds = [];
+                patch.targetQuery = '';
+                patch.targetPickerOpen = false;
+            }
             this.appRoutingForm = { ...this.appRoutingForm, ...patch };
         },
 
@@ -1450,17 +1578,26 @@ document.addEventListener('alpine:init', () => {
         async saveAppRouting() {
             const appId = this.selectedAppRoutingId;
             if (!appId || this.appRoutingSaving[appId]) return;
-            const { currentType, currentTargetId } = this.appRoutingForm;
-            if (!currentType || !currentTargetId) return;
+            const { currentType, currentTargetIds } = this.appRoutingForm;
+            if (!currentType || !Array.isArray(currentTargetIds) || currentTargetIds.length === 0) return;
             const bindings = (this.appRoutingForm.bindings || []).map((b) => ({ ...b }));
-            const existingIndex = bindings.findIndex((b) => b.targetId === currentTargetId);
-            if (existingIndex >= 0) {
-                bindings[existingIndex] = { ...bindings[existingIndex], type: currentType, targetId: currentTargetId };
-            } else {
+            const normalizedTargetIds = [...new Set(currentTargetIds.filter(Boolean))];
+            for (const targetId of normalizedTargetIds) {
+                const existingIndex = bindings.findIndex((b) => b.type === currentType && this.getBindingTargetIds(b)[0] === targetId);
+                if (existingIndex >= 0) {
+                    bindings[existingIndex] = {
+                        ...bindings[existingIndex],
+                        type: currentType,
+                        targetIds: [targetId],
+                        targetId
+                    };
+                    continue;
+                }
                 bindings.push({
                     id: 'binding-' + Date.now() + '-' + Math.random().toString(16).slice(2, 8),
                     type: currentType,
-                    targetId: currentTargetId
+                    targetIds: [targetId],
+                    targetId
                 });
             }
             const nextRouting = JSON.parse(JSON.stringify(this.appRoutingDraft || {}));
@@ -1470,7 +1607,14 @@ document.addEventListener('alpine:init', () => {
                 fallbackToDefault: this.appRoutingForm.fallbackToDefault !== false,
                 bindings
             };
-            this.appRoutingForm = { ...this.appRoutingForm, enabled: shouldEnable, bindings };
+            this.appRoutingForm = {
+                ...this.appRoutingForm,
+                enabled: shouldEnable,
+                bindings,
+                currentTargetIds: [],
+                targetQuery: '',
+                targetPickerOpen: false
+            };
             await this.saveAppRoutingConfig(appId, nextRouting);
         },
 
