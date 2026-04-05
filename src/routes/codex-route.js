@@ -385,6 +385,16 @@ async function _handleCodexAssignment(req, res, body, modelId, isStreaming, star
         ? assignment.assignments
         : (assignment.credential ? [assignment] : []);
 
+    // Respect account strategy: shuffle for random, keep order for sequential
+    const settings = getServerSettings();
+    const strategy = settings.accountStrategy || 'sequential';
+    if (strategy === 'random' && assignments.length > 1) {
+        for (let i = assignments.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [assignments[i], assignments[j]] = [assignments[j], assignments[i]];
+        }
+    }
+
     for (const candidate of assignments) {
         if (!candidate?.credential) continue;
         const targetId = candidate.credential?.email || candidate.credential?.id || candidate.binding?.targetId || 'unknown';
@@ -492,6 +502,14 @@ async function _handleCodexViaAssignedAccount(req, res, body, modelId, isStreami
         logger.success(`[Codex] <<< Assigned account OK | account=${creds.email} | model=${modelId} | ${duration}ms`);
         return true;
     } catch (error) {
+        if (res.headersSent) {
+            try { res.end(); } catch (_) { /* already ended */ }
+            const duration = Date.now() - startTime;
+            recordRequest({ provider: 'chatgpt-pool', keyId: email, model: modelId, durationMs: duration, success: true });
+            logRequest({ route: '/backend-api/codex/responses', method: 'POST', provider: 'chatgpt-pool', keyId: email, model: modelId, durationMs: duration, status: 200, success: true });
+            logger.warn(`[Codex] Assigned account post-stream error (response already sent): ${email} - ${error.message}`);
+            return true;
+        }
         logger.error(`[Codex] Assigned account error: ${email} - ${error.message}`);
         return false;
     }
