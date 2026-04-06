@@ -17,3 +17,7 @@ pentagi
 apps/portfolio/dist/
 # Electron build output
 dist-electron/
+.test-config/
+.test-server-*.out.log
+.test-server-*.err.log
+tests/reports/

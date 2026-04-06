@@ -1,0 +1,50 @@
+{
+  "id": "claude-code-image-basic",
+  "name": "Claude Code Image Basic",
+  "client": "claude-code",
+  "entry": "/v1/messages",
+  "request": {
+    "method": "POST",
+    "path": "/v1/messages",
+    "headers": {
+      "content-type": "application/json",
+      "anthropic-version": "2023-06-01",
+      "x-proxypool-client": "claude-code"
+    },
+    "body": {
+      "model": "claude-sonnet-4-6",
+      "max_tokens": 128,
+      "stream": true,
+      "messages": [
+        {
+          "role": "user",
+          "content": [
+            {
+              "type": "text",
+              "text": "Describe the dominant color in this image in one short sentence."
+            },
+            {
+              "type": "image",
+              "source": {
+                "type": "base64",
+                "media_type": "image/png",
+                "data": "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAJcEhZcwAADsMAAA7DAcdvqGQAAAARSURBVBhXY/jPwPAfhBlgDABHygf5POQJCgAAAABJRU5ErkJggg=="
+              }
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "assertions": [
+    { "type": "status", "expected": 200 },
+    { "type": "content-type", "contains": "text/event-stream" },
+    {
+      "type": "request-log",
+      "expected": {
+        "route": "/v1/messages",
+        "success": true
+      }
+    }
+  ]
+}

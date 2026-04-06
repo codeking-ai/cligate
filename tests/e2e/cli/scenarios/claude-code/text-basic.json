@@ -1,0 +1,56 @@
+{
+  "id": "claude-code-cli-text-basic",
+  "name": "Claude Code CLI Text Basic",
+  "enabled": true,
+  "client": "claude-code",
+  "setup": {
+    "requests": [
+      {
+        "method": "POST",
+        "path": "/claude/config/proxy"
+      },
+      {
+        "method": "POST",
+        "path": "/settings/routing-priority",
+        "body": {
+          "routingPriority": "account-first"
+        }
+      },
+      {
+        "method": "POST",
+        "path": "/settings/account-strategy",
+        "body": {
+          "accountStrategy": "sequential"
+        }
+      }
+    ]
+  },
+  "command": {
+    "executable": "node",
+    "args": [
+      "C:\\Users\\gdf_l\\AppData\\Roaming\\npm\\node_modules\\@anthropic-ai\\claude-code\\cli.js",
+      "-p",
+      "--output-format",
+      "text",
+      "--settings",
+      "{{isolatedClaudeConfigDir}}\\settings.json",
+      "--permission-mode",
+      "bypassPermissions",
+      "--model",
+      "claude-sonnet-4-6",
+      "Reply with exactly OK_CLAUDE_CLI"
+    ]
+  },
+  "timeoutMs": 180000,
+  "assertions": [
+    { "type": "exit-code", "expected": 0 },
+    { "type": "stdout-contains", "contains": "OK_CLAUDE_CLI" },
+    {
+      "type": "request-log",
+      "expected": {
+        "route": "/v1/messages",
+        "success": true
+      }
+    }
+  ]
+}

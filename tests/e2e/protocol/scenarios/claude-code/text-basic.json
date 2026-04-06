@@ -1,0 +1,63 @@
+{
+  "id": "claude-code-text-basic",
+  "name": "Claude Code Text Basic",
+  "client": "claude-code",
+  "entry": "/v1/messages",
+  "setup": {
+    "requests": [
+      {
+        "method": "POST",
+        "path": "/settings/routing-priority",
+        "body": {
+          "routingPriority": "account-first"
+        }
+      },
+      {
+        "method": "POST",
+        "path": "/settings/account-strategy",
+        "body": {
+          "accountStrategy": "sequential"
+        }
+      }
+    ]
+  },
+  "request": {
+    "method": "POST",
+    "path": "/v1/messages",
+    "headers": {
+      "content-type": "application/json",
+      "anthropic-version": "2023-06-01",
+      "x-proxypool-client": "claude-code"
+    },
+    "body": {
+      "model": "claude-sonnet-4-6",
+      "max_tokens": 128,
+      "stream": true,
+      "messages": [
+        {
+          "role": "user",
+          "content": "Reply with exactly OK_CLAUDE_TEXT"
+        }
+      ]
+    }
+  },
+  "assertions": [
+    { "type": "status", "expected": 200 },
+    { "type": "content-type", "contains": "text/event-stream" },
+    { "type": "body-text-contains", "contains": "OK_CLAUDE_TEXT" },
+    {
+      "type": "routing-decision",
+      "expected": {
+        "appId": "claude-code",
+        "protocol": "anthropic-messages"
+      }
+    },
+    {
+      "type": "request-log",
+      "expected": {
+        "route": "/v1/messages",
+        "success": true
+      }
+    }
+  ]
+}

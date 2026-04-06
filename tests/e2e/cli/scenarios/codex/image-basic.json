@@ -1,0 +1,69 @@
+{
+  "id": "codex-cli-image-basic",
+  "name": "Codex CLI Image Basic",
+  "client": "codex",
+  "setup": {
+    "requests": [
+      {
+        "method": "POST",
+        "path": "/settings/routing-mode",
+        "body": {
+          "routingMode": "automatic"
+        }
+      },
+      {
+        "method": "POST",
+        "path": "/settings/routing-priority",
+        "body": {
+          "routingPriority": "account-first"
+        }
+      },
+      {
+        "method": "POST",
+        "path": "/settings/account-strategy",
+        "body": {
+          "accountStrategy": "sequential"
+        }
+      }
+    ]
+  },
+  "command": {
+    "executable": "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+    "args": [
+      "-NoProfile",
+      "-ExecutionPolicy",
+      "Bypass",
+      "-File",
+      "C:\\Users\\gdf_l\\AppData\\Roaming\\npm\\codex.ps1",
+      "--dangerously-bypass-approvals-and-sandbox",
+      "exec",
+      "--skip-git-repo-check",
+      "--json",
+      "--color",
+      "never",
+      "-C",
+      "{{projectRoot}}",
+      "-c",
+      "openai_base_url=\"{{baseUrl}}\"",
+      "-c",
+      "chatgpt_base_url=\"{{baseUrl}}/backend-api/\"",
+      "-i",
+      "{{projectRoot}}\\tests\\e2e\\fixtures\\images\\red-square.png",
+      "-m",
+      "gpt-5.2",
+      "Reply with exactly RED_IMAGE_OK if the image is mostly red."
+    ]
+  },
+  "timeoutMs": 180000,
+  "assertions": [
+    { "type": "exit-code", "expected": 0 },
+    { "type": "stdout-contains", "contains": "RED_IMAGE_OK" },
+    {
+      "type": "request-log",
+      "expected": {
+        "route": "/responses",
+        "success": true
+      }
+    }
+  ]
+}

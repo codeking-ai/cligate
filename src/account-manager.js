@@ -9,14 +9,18 @@ import { homedir } from 'os';
 import { refreshAccessToken, extractAccountInfo } from './oauth.js';
 import { getAccountQuota as fetchQuota } from './model-api.js';
 
-const CONFIG_DIR = join(homedir(), '.proxypool-hub');
+const CONFIG_DIR = process.env.PROXYPOOL_CONFIG_DIR
+    ? process.env.PROXYPOOL_CONFIG_DIR
+    : join(homedir(), '.proxypool-hub');
 const ACCOUNTS_FILE = join(CONFIG_DIR, 'accounts.json');
 const ACCOUNTS_DIR = join(CONFIG_DIR, 'accounts');
 
 const TOKEN_CHECK_INTERVAL_MS = 10 * 60 * 1000;  // Check every 10 minutes
 const AUTO_REFRESH_CHECK_INTERVAL_MS = 30 * 60 * 1000; // Check every 30 minutes
 const TOKEN_EXPIRY_BUFFER_MS = 5 * 60 * 1000;    // Refresh when < 5 min left
-const CODEX_AUTH_FILE = join(homedir(), '.codex', 'auth.json');
+const CODEX_AUTH_FILE = process.env.PROXYPOOL_CODEX_AUTH_FILE
+    ? process.env.PROXYPOOL_CODEX_AUTH_FILE
+    : join(homedir(), '.codex', 'auth.json');
 
 const DEFAULT_ACCOUNTS = {
     accounts: [],
@@ -588,7 +592,7 @@ async function refreshActiveAccount() {
 }
 
 function importFromCodex() {
-    const codeAuthFile = join(homedir(), '.codex', 'auth.json');
+    const codeAuthFile = CODEX_AUTH_FILE;
     
     try {
         if (!existsSync(codeAuthFile)) {

@@ -396,6 +396,10 @@ async function _handleCodexAssignment(req, res, body, modelId, isStreaming, star
     }
 
     for (const candidate of assignments) {
+        if (res.headersSent || res.writableEnded || res.destroyed) {
+            logger.warn('[Codex] Assigned binding aborted because response is already committed');
+            return true;
+        }
         if (!candidate?.credential) continue;
         const targetId = candidate.credential?.email || candidate.credential?.id || candidate.binding?.targetId || 'unknown';
         logger.info(`[Codex] Assigned binding | app=${assignment.appId} | type=${candidate.credentialType} | target=${targetId}`);
@@ -403,20 +407,24 @@ async function _handleCodexAssignment(req, res, body, modelId, isStreaming, star
         if (candidate.credentialType === 'chatgpt-account') {
             const result = await _handleCodexViaAssignedAccount(req, res, body, modelId, isStreaming, startTime, candidate.credential.email);
             if (result !== false) return result;
+            if (res.headersSent || res.writableEnded || res.destroyed) return true;
             continue;
         }
         if (candidate.credentialType === 'claude-account') {
             const result = await _handleCodexViaAssignedClaudeAccount(res, body, modelId, isStreaming, startTime, candidate.credential.email);
             if (result !== false) return result;
+            if (res.headersSent || res.writableEnded || res.destroyed) return true;
             continue;
         }
         if (candidate.credentialType === 'antigravity-account') {
             const result = await _handleCodexViaAssignedAntigravityAccount(res, body, modelId, isStreaming, startTime, candidate.credential.email);
             if (result !== false) return result;
+            if (res.headersSent || res.writableEnded || res.destroyed) return true;
             continue;
         }
         const result = await _handleCodexViaAssignedApiKey(res, body, modelId, isStreaming, startTime, candidate.credential);
         if (result !== false) return result;
+        if (res.headersSent || res.writableEnded || res.destroyed) return true;
     }
 
     return false;

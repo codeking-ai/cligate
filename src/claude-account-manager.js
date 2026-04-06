@@ -9,13 +9,17 @@ import { join } from 'path';
 import { homedir } from 'os';
 import { refreshAccessToken, fetchProfile } from './claude-oauth.js';
 
-const CONFIG_DIR = join(homedir(), '.proxypool-hub');
+const CONFIG_DIR = process.env.PROXYPOOL_CONFIG_DIR
+    ? process.env.PROXYPOOL_CONFIG_DIR
+    : join(homedir(), '.proxypool-hub');
 const CLAUDE_ACCOUNTS_FILE = join(CONFIG_DIR, 'claude-accounts.json');
 const CLAUDE_ACCOUNTS_DIR = join(CONFIG_DIR, 'claude-accounts');
 
 const TOKEN_CHECK_INTERVAL_MS = 10 * 60 * 1000;  // Check every 10 minutes
 const TOKEN_EXPIRY_BUFFER_MS = 5 * 60 * 1000;    // Refresh when < 5 min left
-const CLAUDE_CODE_CREDENTIALS_FILE = join(homedir(), '.claude', '.credentials.json');
+const CLAUDE_CODE_CREDENTIALS_FILE = process.env.PROXYPOOL_CLAUDE_CREDENTIALS_FILE
+    ? process.env.PROXYPOOL_CLAUDE_CREDENTIALS_FILE
+    : join(homedir(), '.claude', '.credentials.json');
 
 const DEFAULT_ACCOUNTS = {
     accounts: [],
@@ -381,7 +385,7 @@ function setCachedToken(email, token) {
  * (Claude Code's credential file)
  */
 function importFromClaudeCode() {
-    const credentialsFile = join(homedir(), '.claude', '.credentials.json');
+    const credentialsFile = CLAUDE_CODE_CREDENTIALS_FILE;
 
     try {
         if (!existsSync(credentialsFile)) {

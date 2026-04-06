@@ -1,0 +1,58 @@
+{
+  "id": "claude-code-haiku-mapped",
+  "name": "Claude Code Haiku Mapped",
+  "client": "claude-code",
+  "entry": "/v1/messages",
+  "setup": {
+    "requests": [
+      {
+        "method": "POST",
+        "path": "/settings/routing-priority",
+        "body": {
+          "routingPriority": "account-first"
+        }
+      },
+      {
+        "method": "POST",
+        "path": "/settings/account-strategy",
+        "body": {
+          "accountStrategy": "sequential"
+        }
+      }
+    ]
+  },
+  "request": {
+    "method": "POST",
+    "path": "/v1/messages",
+    "headers": {
+      "content-type": "application/json",
+      "anthropic-version": "2023-06-01",
+      "x-proxypool-client": "claude-code"
+    },
+    "body": {
+      "model": "claude-haiku-4",
+      "max_tokens": 128,
+      "stream": true,
+      "messages": [
+        {
+          "role": "user",
+          "content": "Reply with exactly OK_CLAUDE_HAIKU_PROTOCOL"
+        }
+      ]
+    }
+  },
+  "assertions": [
+    { "type": "status", "expected": 200 },
+    { "type": "content-type", "contains": "text/event-stream" },
+    { "type": "body-text-contains", "contains": "OK_CLAUDE_HAIKU_PROTOCOL" },
+    {
+      "type": "request-log",
+      "expected": {
+        "route": "/v1/messages",
+        "success": true,
+        "model": "claude-haiku-4",
+        "mappedModel": "gpt-5.4-mini"
+      }
+    }
+  ]
+}

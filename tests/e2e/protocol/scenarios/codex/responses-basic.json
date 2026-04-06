@@ -1,0 +1,71 @@
+{
+  "id": "codex-responses-basic",
+  "name": "Codex Responses Basic",
+  "client": "codex",
+  "entry": "/v1/responses",
+  "setup": {
+    "requests": [
+      {
+        "method": "POST",
+        "path": "/settings/routing-mode",
+        "body": {
+          "routingMode": "automatic"
+        }
+      },
+      {
+        "method": "POST",
+        "path": "/settings/routing-priority",
+        "body": {
+          "routingPriority": "account-first"
+        }
+      },
+      {
+        "method": "POST",
+        "path": "/settings/account-strategy",
+        "body": {
+          "accountStrategy": "sequential"
+        }
+      }
+    ]
+  },
+  "request": {
+    "method": "POST",
+    "path": "/v1/responses",
+    "headers": {
+      "content-type": "application/json",
+      "x-proxypool-client": "codex"
+    },
+    "body": {
+      "model": "gpt-5.2",
+      "instructions": "You are a precise assistant. Follow the user exactly.",
+      "store": false,
+      "stream": true,
+      "input": [
+        {
+          "type": "message",
+          "role": "user",
+          "content": "Reply with exactly OK_CODEX_RESPONSES"
+        }
+      ]
+    }
+  },
+  "assertions": [
+    { "type": "status", "expected": 200 },
+    { "type": "content-type", "contains": "text/event-stream" },
+    { "type": "body-text-contains", "contains": "OK_CODEX_RESPONSES" },
+    {
+      "type": "routing-decision",
+        "expected": {
+        "appId": "codex",
+        "protocol": "openai-responses"
+      }
+    },
+    {
+      "type": "request-log",
+      "expected": {
+        "route": "/responses",
+        "success": true
+      }
+    }
+  ]
+}

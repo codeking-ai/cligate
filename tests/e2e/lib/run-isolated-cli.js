@@ -1,0 +1,42 @@
+import { runCliScenarios } from './cli-runner.js';
+import {
+  parseIsolatedArgs,
+  prepareIsolatedConfig,
+  resolvePort,
+  startIsolatedServer,
+  stopIsolatedServer,
+  waitForHealth
+} from './isolated-server.js';
+
+async function main() {
+  const options = parseIsolatedArgs(process.argv.slice(2));
+  options.basePort = await resolvePort(options.basePort);
+  const authFiles = prepareIsolatedConfig(options);
+  const child = startIsolatedServer(options, authFiles);
+  const baseUrl = `http://127.0.0.1:${options.basePort}`;
+
+  try {
+    console.log(`Using isolated base URL: ${baseUrl}`);
+    await waitForHealth(baseUrl, options.startupTimeoutMs);
+    const { report, files } = await runCliScenarios({
+      baseUrl,
+      scenarioId: options.scenarioId,
+      variables: {
+        isolatedConfigDir: options.isolatedConfigDir,
+        isolatedClaudeConfigDir: authFiles.claudeCliConfigDir
+      }
+    });
+    console.log(`\nSummary: ${report.passed}/${report.total} passed`);
+    if (files?.latestPath) {
+      console.log(`Report: ${files.latestPath}`);
+    }
+    process.exitCode = report.failed > 0 ? 1 : 0;
+  } finally {
+    await stopIsolatedServer(child);
+  }
+}
+
+main().catch((error) => {
+  console.error(error.stack || error.message);
+  process.exitCode = 1;
+});

@@ -1,0 +1,67 @@
+{
+  "id": "codex-cli-text-basic",
+  "name": "Codex CLI Text Basic",
+  "client": "codex",
+  "setup": {
+    "requests": [
+      {
+        "method": "POST",
+        "path": "/settings/routing-mode",
+        "body": {
+          "routingMode": "automatic"
+        }
+      },
+      {
+        "method": "POST",
+        "path": "/settings/routing-priority",
+        "body": {
+          "routingPriority": "account-first"
+        }
+      },
+      {
+        "method": "POST",
+        "path": "/settings/account-strategy",
+        "body": {
+          "accountStrategy": "sequential"
+        }
+      }
+    ]
+  },
+  "command": {
+    "executable": "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+    "args": [
+      "-NoProfile",
+      "-ExecutionPolicy",
+      "Bypass",
+      "-File",
+      "C:\\Users\\gdf_l\\AppData\\Roaming\\npm\\codex.ps1",
+      "--dangerously-bypass-approvals-and-sandbox",
+      "exec",
+      "--skip-git-repo-check",
+      "--json",
+      "--color",
+      "never",
+      "-C",
+      "{{projectRoot}}",
+      "-c",
+      "openai_base_url=\"{{baseUrl}}\"",
+      "-c",
+      "chatgpt_base_url=\"{{baseUrl}}/backend-api/\"",
+      "-m",
+      "gpt-5.2",
+      "Reply with exactly OK_CODEX_CLI"
+    ]
+  },
+  "timeoutMs": 180000,
+  "assertions": [
+    { "type": "exit-code", "expected": 0 },
+    { "type": "stdout-contains", "contains": "OK_CODEX_CLI" },
+    {
+      "type": "request-log",
+      "expected": {
+        "route": "/responses",
+        "success": true
+      }
+    }
+  ]
+}

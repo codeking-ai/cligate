@@ -48,7 +48,14 @@
     "test:api": "node --test tests/api.test.js",
     "test:routing": "node --test tests/routing.test.js",
     "test:cors": "node --test tests/cors_security.test.js",
-    "test:ui": "node --test tests/ui.test.js"
+    "test:ui": "node --test tests/ui.test.js",
+    "test:e2e:protocol:list": "node tests/e2e/lib/scenario-runner.js --list",
+    "test:e2e:protocol": "node tests/e2e/lib/scenario-runner.js",
+    "test:e2e:protocol:isolated": "node tests/e2e/lib/run-isolated-protocol.js",
+    "test:e2e:cli:list": "node tests/e2e/lib/cli-runner.js --list",
+    "test:e2e:cli": "node tests/e2e/lib/cli-runner.js",
+    "test:e2e:cli:isolated": "node tests/e2e/lib/run-isolated-cli.js",
+    "test:e2e:isolated": "npm run test:e2e:protocol:isolated && npm run test:e2e:cli:isolated"
   },
   "dependencies": {
     "cors": "^2.8.5",

@@ -1,0 +1,64 @@
+{
+  "id": "codex-backend-basic",
+  "name": "Codex Backend Basic",
+  "client": "codex",
+  "entry": "/backend-api/codex/responses",
+  "setup": {
+    "requests": [
+      {
+        "method": "POST",
+        "path": "/settings/routing-mode",
+        "body": {
+          "routingMode": "automatic"
+        }
+      },
+      {
+        "method": "POST",
+        "path": "/settings/routing-priority",
+        "body": {
+          "routingPriority": "account-first"
+        }
+      },
+      {
+        "method": "POST",
+        "path": "/settings/account-strategy",
+        "body": {
+          "accountStrategy": "sequential"
+        }
+      }
+    ]
+  },
+  "request": {
+    "method": "POST",
+    "path": "/backend-api/codex/responses",
+    "headers": {
+      "content-type": "application/json",
+      "x-proxypool-client": "codex"
+    },
+    "body": {
+      "model": "gpt-5.2",
+      "instructions": "You are a precise assistant. Follow the user exactly.",
+      "store": false,
+      "stream": true,
+      "input": [
+        {
+          "type": "message",
+          "role": "user",
+          "content": "Reply with exactly OK_CODEX_BACKEND"
+        }
+      ]
+    }
+  },
+  "assertions": [
+    { "type": "status", "expected": 200 },
+    { "type": "content-type", "contains": "text/event-stream" },
+    { "type": "body-text-contains", "contains": "OK_CODEX_BACKEND" },
+    {
+      "type": "request-log",
+      "expected": {
+        "route": "/backend-api/codex/responses",
+        "success": true
+      }
+    }
+  ]
+}
