@@ -26,6 +26,7 @@ const DEFAULT_ACCOUNTS = {
 let autoRefreshIntervalId = null;
 const tokenCache = new Map();
 let accountsData = null;
+let usableAccountsRotationCursor = 0;
 
 function normalizeScopes(scopes) {
     if (Array.isArray(scopes)) return scopes.filter(Boolean);
@@ -178,6 +179,42 @@ function listAccounts() {
         activeAccount: data.activeAccount,
         total: accounts.length
     };
+}
+
+function _getUsableAccountsRaw() {
+    const data = loadAccounts();
+    return data.accounts.filter(a =>
+        a.enabled !== false &&
+        a.accessToken &&
+        !(a.expiresAt && a.expiresAt < Date.now())
+    );
+}
+
+function getUsableAccounts() {
+    const accounts = _getUsableAccountsRaw();
+    if (accounts.length === 0) return [];
+
+    if (usableAccountsRotationCursor >= accounts.length) {
+        usableAccountsRotationCursor = 0;
+    }
+
+    return [
+        ...accounts.slice(usableAccountsRotationCursor),
+        ...accounts.slice(0, usableAccountsRotationCursor)
+    ];
+}
+
+function advanceUsableAccountsRotation(email) {
+    const accounts = _getUsableAccountsRaw();
+    if (accounts.length === 0) {
+        usableAccountsRotationCursor = 0;
+        return;
+    }
+
+    const index = accounts.findIndex((account) => account.email === email);
+    if (index >= 0) {
+        usableAccountsRotationCursor = (index + 1) % accounts.length;
+    }
 }
 
 function isTokenExpiredOrExpiringSoon(account) {
@@ -466,6 +503,11 @@ function ensureAccountsPersist() {
     }
 }
 
+export const _testExports = {
+    getUsableAccounts,
+    advanceUsableAccountsRotation
+};
+
 export {
     loadAccounts,
     saveAccounts,
@@ -480,6 +522,8 @@ export {
     refreshAllAccounts,
     importFromClaudeCode,
     enrichWithProfile,
+    getUsableAccounts,
+    advanceUsableAccountsRotation,
     getStatus,
     ensureAccountsPersist,
     startAutoRefresh,
@@ -502,6 +546,8 @@ export default {
     refreshAllAccounts,
     importFromClaudeCode,
     enrichWithProfile,
+    getUsableAccounts,
+    advanceUsableAccountsRotation,
     getStatus,
     ensureAccountsPersist,
     startAutoRefresh,

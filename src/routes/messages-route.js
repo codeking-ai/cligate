@@ -7,10 +7,10 @@ import { initSSEResponse, pipeSSEStream, handleStreamError } from '../middleware
 import { logger } from '../utils/logger.js';
 import { AccountRotator } from '../account-rotation/index.js';
 import { listAccounts, getActiveAccount, save } from '../account-manager.js';
-import { loadAccounts as loadClaudeAccounts, refreshAccountToken, getAccount as getClaudeAccount } from '../claude-account-manager.js';
+import { getUsableAccounts as getUsableClaudeAccounts, advanceUsableAccountsRotation, refreshAccountToken, getAccount as getClaudeAccount } from '../claude-account-manager.js';
 import { recordClaudeRuntimeObservation } from '../claude-usage.js';
 import { sendClaudeMessageWithMeta, sendClaudeStream, extractClaudeRateLimitHeaders } from '../claude-api.js';
-import { listAccounts as listAntigravityAccounts, getAvailableAccountForModel as getAntigravityAccountForModel } from '../antigravity-account-manager.js';
+import { listAccounts as listAntigravityAccounts, getAvailableAccountsForModel as getAntigravityAccountsForModel, advanceAvailableAccountsRotation as advanceAntigravityAccountsRotation } from '../antigravity-account-manager.js';
 import { sendAntigravityMessage, writeAnthropicSSEFromMessage, isAntigravityModel, toPublicAntigravityModel } from '../antigravity-api.js';
 import { getServerSettings } from '../server-settings.js';
 import { selectKey, getAllProviders, recordUsage, recordError, recordRateLimit } from '../api-key-manager.js';
@@ -1064,12 +1064,7 @@ async function _handleViaCompatibleKeys(res, body, requestedModel, isStreaming, 
 // ─── Claude Account Pool ──────────────────────────────────────────────────────
 
 function _getUsableClaudeAccounts() {
-    const data = loadClaudeAccounts();
-    return data.accounts.filter(a =>
-        a.enabled !== false &&
-        a.accessToken &&
-        !(a.expiresAt && a.expiresAt < Date.now())
-    );
+    return getUsableClaudeAccounts();
 }
 
 /**
@@ -1110,6 +1105,7 @@ async function _handleViaClaudeAccount(req, res, body, requestedModel, isStreami
 
     for (const account of accounts) {
         if (_isModelCooledDown(account.email, model)) continue;
+        advanceUsableAccountsRotation(account.email);
 
         const abortController = new AbortController();
         const onClientClose = () => {
@@ -1258,57 +1254,60 @@ async function _handleViaClaudeAccount(req, res, body, requestedModel, isStreami
 }
 
 async function _handleViaAntigravityAccount(res, body, requestedModel, isStreaming, startTime, preferredEmail = null) {
-    const account = getAntigravityAccountForModel(requestedModel, preferredEmail);
-    if (!account?.accessToken || !account?.projectId) {
+    const accounts = getAntigravityAccountsForModel(requestedModel, preferredEmail)
+        .filter((account) => account?.accessToken && account?.projectId);
+    if (accounts.length === 0) {
         return false;
     }
 
-    try {
-        const result = await sendAntigravityMessage(body, account, { modelOverride: requestedModel });
-        const durationMs = Date.now() - startTime;
-        const mappedModel = result.model || toPublicAntigravityModel(body.model || requestedModel);
-        recordRequest({
-            provider: 'antigravity',
-            keyId: account.email,
-            model: mappedModel,
-            inputTokens: result.usage?.input_tokens || 0,
-            outputTokens: result.usage?.output_tokens || 0,
-            durationMs,
-            success: true
-        });
-        logRequest({
-            route: '/v1/messages',
-            method: 'POST',
-            provider: 'antigravity',
-            keyId: account.email,
-            model: requestedModel,
-            mappedModel,
-            requestBody: body,
-            inputTokens: result.usage?.input_tokens || 0,
-            outputTokens: result.usage?.output_tokens || 0,
-            durationMs,
-            status: 200,
-            success: true
-        });
-        markCredentialSuccess(buildCredentialId('antigravity-account', account.email), {
-            model: mappedModel,
-            latencyMs: durationMs
-        });
-        if (isStreaming) {
-            writeAnthropicSSEFromMessage(res, result);
-        } else {
-            res.json(result);
-        }
-        return true;
-    } catch (error) {
-        if (account?.email) {
+    for (const account of accounts) {
+        advanceAntigravityAccountsRotation(requestedModel, account.email, preferredEmail);
+        try {
+            const result = await sendAntigravityMessage(body, account, { modelOverride: requestedModel });
+            const durationMs = Date.now() - startTime;
+            const mappedModel = result.model || toPublicAntigravityModel(body.model || requestedModel);
+            recordRequest({
+                provider: 'antigravity',
+                keyId: account.email,
+                model: mappedModel,
+                inputTokens: result.usage?.input_tokens || 0,
+                outputTokens: result.usage?.output_tokens || 0,
+                durationMs,
+                success: true
+            });
+            logRequest({
+                route: '/v1/messages',
+                method: 'POST',
+                provider: 'antigravity',
+                keyId: account.email,
+                model: requestedModel,
+                mappedModel,
+                requestBody: body,
+                inputTokens: result.usage?.input_tokens || 0,
+                outputTokens: result.usage?.output_tokens || 0,
+                durationMs,
+                status: 200,
+                success: true
+            });
+            markCredentialSuccess(buildCredentialId('antigravity-account', account.email), {
+                model: mappedModel,
+                latencyMs: durationMs
+            });
+            if (isStreaming) {
+                writeAnthropicSSEFromMessage(res, result);
+            } else {
+                res.json(result);
+            }
+            return true;
+        } catch (error) {
             markCredentialError(buildCredentialId('antigravity-account', account.email), error, {
                 model: requestedModel
             });
+            logger.error(`[Messages] Antigravity error: ${account.email} - ${error.message}`);
         }
-        logger.error(`[Messages] Antigravity error: ${account.email} - ${error.message}`);
-        return false;
     }
+
+    return false;
 }
 
 function sleep(ms) {

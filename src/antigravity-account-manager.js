@@ -22,6 +22,7 @@ let cache = null;
 let autoRefreshIntervalId = null;
 const TOKEN_CHECK_INTERVAL_MS = 10 * 60 * 1000;
 const TOKEN_EXPIRY_BUFFER_MS = 5 * 60 * 1000;
+let availableAccountsRotationCursor = 0;
 
 function ensureConfigDir() {
     if (!existsSync(CONFIG_DIR)) {
@@ -414,24 +415,56 @@ export async function refreshQuotaSummary(email) {
     return buildQuotaSummary(account);
 }
 
-export function getAvailableAccountForModel(modelId, preferredEmail = null) {
+function _getAvailableAccountsForModelRaw(modelId) {
     const normalized = modelId?.startsWith('antigravity/') ? modelId.slice('antigravity/'.length) : modelId;
     const mapped = mapAntigravityUpstreamModel(normalized);
-    const accounts = loadAccounts().accounts.filter((account) =>
+    return loadAccounts().accounts.filter((account) =>
         account.enabled !== false &&
         account.accessToken &&
-        (!account.expiresAt || account.expiresAt > Date.now())
+        (!account.expiresAt || account.expiresAt > Date.now()) &&
+        (account.models || []).some((model) => model.id === normalized || model.id === mapped)
     );
+}
 
-    const ordered = preferredEmail
-        ? [
+export function getAvailableAccountsForModel(modelId, preferredEmail = null) {
+    const accounts = _getAvailableAccountsForModelRaw(modelId);
+    if (accounts.length === 0) return [];
+
+    if (preferredEmail) {
+        return [
             ...accounts.filter((account) => account.email === preferredEmail),
             ...accounts.filter((account) => account.email !== preferredEmail)
-        ]
-        : accounts;
+        ];
+    }
 
-    const match = ordered.find((account) => (account.models || []).some((model) => model.id === normalized || model.id === mapped));
-    return match || ordered[0] || null;
+    if (availableAccountsRotationCursor >= accounts.length) {
+        availableAccountsRotationCursor = 0;
+    }
+
+    return [
+        ...accounts.slice(availableAccountsRotationCursor),
+        ...accounts.slice(0, availableAccountsRotationCursor)
+    ];
+}
+
+export function getAvailableAccountForModel(modelId, preferredEmail = null) {
+    const matches = getAvailableAccountsForModel(modelId, preferredEmail);
+    return matches[0] || null;
+}
+
+export function advanceAvailableAccountsRotation(modelId, email, preferredEmail = null) {
+    if (preferredEmail) return;
+
+    const accounts = _getAvailableAccountsForModelRaw(modelId);
+    if (accounts.length === 0) {
+        availableAccountsRotationCursor = 0;
+        return;
+    }
+
+    const index = accounts.findIndex((account) => account.email === email);
+    if (index >= 0) {
+        availableAccountsRotationCursor = (index + 1) % accounts.length;
+    }
 }
 
 export function accountSupportsAntigravityModel(account, modelId) {
@@ -439,6 +472,11 @@ export function accountSupportsAntigravityModel(account, modelId) {
     const mapped = mapAntigravityUpstreamModel(normalized);
     return (account?.models || []).some((model) => model.id === normalized || model.id === mapped);
 }
+
+export const _testExports = {
+    getAvailableAccountsForModel,
+    advanceAvailableAccountsRotation
+};
 
 export { ACCOUNTS_FILE };
 
@@ -460,7 +498,9 @@ export default {
     getAllModels,
     listQuotaSummaries,
     refreshQuotaSummary,
+    getAvailableAccountsForModel,
     getAvailableAccountForModel,
+    advanceAvailableAccountsRotation,
     startAutoRefresh,
     stopAutoRefresh,
     ensureAccountsPersist,
