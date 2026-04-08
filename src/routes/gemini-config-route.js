@@ -44,7 +44,7 @@ export function handleGetGeminiCliConfig(req, res) {
     if (corePath) {
         try {
             const content = readFileSync(corePath, 'utf8');
-            const match = content.match(/\/\/ PROXYPOOL-HUB: baseUrl override\s*\n\s*httpOptions\.baseUrl\s*=\s*'([^']+)'/);
+            const match = content.match(/\/\/ CLIGATE: baseUrl override\s*\n\s*httpOptions\.baseUrl\s*=\s*'([^']+)'/);
             if (match) {
                 patched = true;
                 patchedUrl = match[1];
@@ -80,7 +80,7 @@ export function handleSetGeminiCliProxy(req, res, { port }) {
         let content = readFileSync(corePath, 'utf8');
 
         // Remove any existing patch
-        content = content.replace(/\s*\/\/ PROXYPOOL-HUB: baseUrl override\s*\n\s*httpOptions\.baseUrl\s*=\s*'[^']*';\s*/g, '');
+        content = content.replace(/\s*\/\/ CLIGATE: baseUrl override\s*\n\s*httpOptions\.baseUrl\s*=\s*'[^']*';\s*/g, '');
 
         // Find the insertion point: after httpOptions object is built, before GoogleGenAI constructor
         // We inject right before: `const googleGenAI = new GoogleGenAI({`
@@ -93,7 +93,7 @@ export function handleSetGeminiCliProxy(req, res, { port }) {
             });
         }
 
-        const patch = `\n            // PROXYPOOL-HUB: baseUrl override\n            httpOptions.baseUrl = 'http://localhost:${port}/';\n            `;
+        const patch = `\n            // CLIGATE: baseUrl override\n            httpOptions.baseUrl = 'http://localhost:${port}/';\n            `;
         content = content.slice(0, insertIdx) + patch + content.slice(insertIdx);
 
         writeFileSync(corePath, content);
@@ -135,7 +135,7 @@ export function handleSetGeminiCliDirect(req, res) {
 
     try {
         let content = readFileSync(corePath, 'utf8');
-        content = content.replace(/\s*\/\/ PROXYPOOL-HUB: baseUrl override\s*\n\s*httpOptions\.baseUrl\s*=\s*'[^']*';\s*/g, '');
+        content = content.replace(/\s*\/\/ CLIGATE: baseUrl override\s*\n\s*httpOptions\.baseUrl\s*=\s*'[^']*';\s*/g, '');
         writeFileSync(corePath, content);
         logger.info('[GeminiCliConfig] Removed proxy patch from contentGenerator.js');
 

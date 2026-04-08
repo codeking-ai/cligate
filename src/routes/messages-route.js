@@ -31,6 +31,7 @@ const SHORT_RATE_LIMIT_THRESHOLD_MS = 5000;
 
 let accountRotator = null;
 let currentStrategy = null;
+const RESPONSE_COMMITTED = Symbol('response_committed');
 
 function _getAnthropicProxyHeaders(req) {
     const headers = {};
@@ -391,6 +392,7 @@ async function _handleMessagesAssignment(req, res, body, requestedModel, upstrea
         }
         if (candidate.credentialType === 'claude-account') {
             const result = await _handleViaAssignedClaudeAccount(req, res, body, requestedModel, isStreaming, startTime, clientBeta, candidate.credential.email);
+            if (result === RESPONSE_COMMITTED) return true;
             if (result !== false) return result;
             continue;
         }
@@ -627,6 +629,20 @@ async function _handleViaAssignedClaudeAccount(req, res, body, requestedModel, i
         recordClaudeRuntimeObservation(account.email, error.rateLimitHeaders, {
             model: body.model || requestedModel
         });
+        if (res.headersSent || res.writableEnded || res.destroyed) {
+            const durationMs = Date.now() - startTime;
+            markCredentialError(buildCredentialId('claude-account', account.email), error, {
+                model: body.model || requestedModel,
+                invalid: error.message.includes('AUTH_EXPIRED')
+            });
+            recordRequest({ provider: 'claude-pool', keyId: account.email, model: body.model, durationMs, success: false, error: error.message });
+            logRequest({ route: '/v1/messages', method: 'POST', provider: 'claude-pool', keyId: account.email, model: requestedModel, mappedModel: body.model, requestBody: body, durationMs, status: 500, success: false, error: error.message });
+            logger.error(`[Messages] Assigned Claude account error (stream committed): ${account.email} - ${error.message}`);
+            if (!res.writableEnded) {
+                try { res.end(); } catch { /* ignore */ }
+            }
+            return RESPONSE_COMMITTED;
+        }
         markCredentialError(buildCredentialId('claude-account', account.email), error, {
             model: body.model || requestedModel,
             invalid: error.message.includes('AUTH_EXPIRED')
@@ -1338,6 +1354,7 @@ export default { handleMessages };
 export const _testExports = {
     _buildTranslatorDowngradeError,
     _readTranslatorDowngradeHeaders,
+    RESPONSE_COMMITTED,
     _summarizeCompatibleProviderRanking,
     _shouldRejectTranslatorDowngrade,
     _streamDirectWithRotation

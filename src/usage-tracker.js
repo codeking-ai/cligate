@@ -2,7 +2,7 @@
  * Usage Tracker
  * Tracks per-request usage data for cost monitoring and analytics.
  *
- * Storage (all under ~/.proxypool-hub/):
+ * Storage (all under ~/.cligate/):
  *   - usage-stats.json:   Aggregated stats (daily, monthly, allTime, byProvider, byModel)
  *   - usage-history.json: Recent request history (persisted, max 2000 entries)
  *

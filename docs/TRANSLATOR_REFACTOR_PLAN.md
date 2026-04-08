@@ -4,8 +4,8 @@
 
 配套文档：
 
-- [协议转换能力矩阵](D:/proxypool-hub/docs/TRANSLATOR_CAPABILITY_MATRIX.md)
-- [Phase 1 实施清单](D:/proxypool-hub/docs/TRANSLATOR_PHASE1_CHECKLIST.md)
+- [协议转换能力矩阵](D:/cligate/docs/TRANSLATOR_CAPABILITY_MATRIX.md)
+- [Phase 1 实施清单](D:/cligate/docs/TRANSLATOR_PHASE1_CHECKLIST.md)
 
 当前项目已经具备 Claude Code、Codex CLI、Gemini CLI、OpenClaw 等多协议接入能力，但协议转换逻辑逐步分散到了多个路由、provider、streamer 和格式转换文件中。随着兼容 provider 数量增加，底层模型返回格式差异扩大，现有实现开始暴露以下问题：
 

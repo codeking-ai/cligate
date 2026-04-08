@@ -1,11 +1,11 @@
 {
-  "name": "proxypool-hub",
+  "name": "cligate",
   "version": "1.1.0",
   "description": "Multi-protocol AI API proxy server with account pooling, API key management, and visual dashboard. Supports Claude Code, Codex CLI, Gemini CLI, and OpenClaw.",
   "type": "module",
   "main": "electron-main.cjs",
   "bin": {
-    "proxypool-hub": "./bin/cli.js"
+    "cligate": "./bin/cli.js"
   },
   "files": [
     "src",
@@ -22,12 +22,12 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/yiyao-ai/proxypool-hub.git"
+    "url": "git+https://github.com/codeking-ai/cligate.git"
   },
   "bugs": {
-    "url": "https://github.com/yiyao-ai/proxypool-hub/issues"
+    "url": "https://github.com/codeking-ai/cligate/issues"
   },
-  "homepage": "https://github.com/yiyao-ai/proxypool-hub#readme",
+  "homepage": "https://github.com/codeking-ai/cligate#readme",
   "scripts": {
     "start": "node src/index.js",
     "electron": "electron .",
@@ -67,8 +67,8 @@
     "electron-builder": "^26.8.1"
   },
   "build": {
-    "appId": "com.proxypool-hub.app",
-    "productName": "ProxyPool Hub",
+    "appId": "com.cligate.app",
+    "productName": "CliGate",
     "directories": {
       "output": "dist-electron"
     },
@@ -98,7 +98,7 @@
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "ProxyPool Hub"
+      "shortcutName": "CliGate"
     },
     "mac": {
       "target": [

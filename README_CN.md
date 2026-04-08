@@ -1,11 +1,11 @@
-# ProxyPool Hub
+# CliGate
 
-![ProxyPool Hub Dashboard](./images/dashboard.png)
+![CliGate Dashboard](./images/dashboard.png)
 
 [![AGPL-3.0 License](https://img.shields.io/badge/License-AGPL--3.0-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
 [![Node.js Version](https://img.shields.io/badge/Node.js-24%2B-blue.svg)](https://nodejs.org/)
-[![npm Version](https://img.shields.io/npm/v/proxypool-hub)](https://www.npmjs.com/package/proxypool-hub)
-[![GitHub stars](https://img.shields.io/github/stars/yiyao-ai/proxypool-hub?style=social)](https://github.com/yiyao-ai/proxypool-hub)
+[![npm Version](https://img.shields.io/npm/v/cligate)](https://www.npmjs.com/package/cligate)
+[![GitHub stars](https://img.shields.io/github/stars/codeking-ai/cligate?style=social)](https://github.com/codeking-ai/cligate)
 
 **[English](./README.md) | 中文**
 
@@ -94,7 +94,7 @@
        └───────────────┼───────────────┼──────────────┘
                        ▼
             ┌─────────────────────┐
-            │   ProxyPool Hub     │
+            │   CliGate     │
             │   localhost:8081    │
             │                     │
             │  ┌───────────────┐  │
@@ -122,19 +122,19 @@
 ### 方式 1：npx 直接运行（无需安装）
 
 ```bash
-npx proxypool-hub@latest start
+npx cligate@latest start
 ```
 
 ### 方式 2：全局安装
 
 ```bash
-npm install -g proxypool-hub
-proxypool-hub start
+npm install -g cligate
+cligate start
 ```
 
 ### 方式 3：桌面应用（Electron）
 
-从 [Releases](https://github.com/yiyao-ai/proxypool-hub/releases) 下载最新安装包。
+从 [Releases](https://github.com/codeking-ai/cligate/releases) 下载最新安装包。
 
 ---
 
@@ -143,7 +143,7 @@ proxypool-hub start
 ### 1. 启动服务
 
 ```bash
-proxypool-hub start
+cligate start
 ```
 
 仪表盘地址：**http://localhost:8081**
@@ -158,8 +158,8 @@ proxypool-hub start
 
 **命令行**：
 ```bash
-proxypool-hub accounts add              # 打开浏览器登录
-proxypool-hub accounts add --no-browser  # 无浏览器环境（VM/服务器）
+cligate accounts add              # 打开浏览器登录
+cligate accounts add --no-browser  # 无浏览器环境（VM/服务器）
 ```
 
 ### 3. 配置 CLI 工具
@@ -246,9 +246,9 @@ openai_base_url = "http://localhost:8081"
 
 ## 社区
 
-- [GitHub Discussions](https://github.com/yiyao-ai/proxypool-hub/discussions) — 提问、交流、反馈
+- [GitHub Discussions](https://github.com/codeking-ai/cligate/discussions) — 提问、交流、反馈
 - [Discord](https://discord.gg/GgxZSehxqG) — 实时聊天
-- **微信** — 扫码添加作者微信，备注「ProxyPool Hub」拉你进群
+- **微信** — 扫码添加作者微信，备注「CliGate」拉你进群
 
   <img src="./images/wechat.jpg" alt="微信" width="200">
 
@@ -275,7 +275,7 @@ openai_base_url = "http://localhost:8081"
 <div align="center">
   <sub>为同时使用多种 AI 编程助手的开发者而构建。</sub>
   <br>
-  <a href="https://github.com/yiyao-ai/proxypool-hub">
-    <img src="https://img.shields.io/github/stars/yiyao-ai/proxypool-hub?style=social" alt="Star on GitHub">
+  <a href="https://github.com/codeking-ai/cligate">
+    <img src="https://img.shields.io/github/stars/codeking-ai/cligate?style=social" alt="Star on GitHub">
   </a>
 </div>

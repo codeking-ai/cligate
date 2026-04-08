@@ -8,6 +8,7 @@ import { rankAnthropicProvidersForRequest, resolveAnthropicProviderCapabilities 
 const {
   _buildTranslatorDowngradeError,
   _readTranslatorDowngradeHeaders,
+  RESPONSE_COMMITTED,
   _summarizeCompatibleProviderRanking,
   _shouldRejectTranslatorDowngrade,
   _streamDirectWithRotation
@@ -214,4 +215,8 @@ test('_summarizeCompatibleProviderRanking prints capability summary for logs', (
   assert.match(summary, /vertex-ai\/vertex-test:145/);
   assert.match(summary, /hosted=y/);
   assert.match(summary, /tool_result=y/);
+});
+
+test('RESPONSE_COMMITTED sentinel is exported for committed stream handling', () => {
+  assert.equal(typeof RESPONSE_COMMITTED, 'symbol');
 });

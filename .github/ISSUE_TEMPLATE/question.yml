@@ -7,7 +7,7 @@ body:
     attributes:
       value: |
         Have a question? We're happy to help!
-        For general discussions, consider using [GitHub Discussions](https://github.com/yiyao-ai/proxypool-hub/discussions) instead.
+        For general discussions, consider using [GitHub Discussions](https://github.com/codeking-ai/cligate/discussions) instead.
 
   - type: textarea
     id: question
@@ -26,7 +26,7 @@ body:
   - type: input
     id: version
     attributes:
-      label: ProxyPool Hub Version
+      label: CliGate Version
       placeholder: "e.g. 1.0.5"
 
   - type: dropdown

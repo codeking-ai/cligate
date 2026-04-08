@@ -4,7 +4,7 @@
 
 Related design docs:
 
-- [协议转换层重构计划](D:/proxypool-hub/docs/TRANSLATOR_REFACTOR_PLAN.md)
+- [协议转换层重构计划](D:/cligate/docs/TRANSLATOR_REFACTOR_PLAN.md)
 
 ```
 ┌─────────────┐  ┌───────────┐  ┌────────────┐  ┌──────────┐
@@ -14,7 +14,7 @@ Related design docs:
        └───────────────┼───────────────┼──────────────┘
                        ▼
             ┌─────────────────────┐
-            │   ProxyPool Hub     │
+            │   CliGate     │
             │   localhost:8081    │
             │                     │
             │  ┌───────────────┐  │
@@ -49,7 +49,7 @@ Related design docs:
 ## Project Structure
 
 ```
-proxypool-hub/
+cligate/
 ├── bin/cli.js                  # CLI entry point
 ├── electron-main.cjs           # Electron desktop app entry
 ├── package.json
@@ -176,9 +176,9 @@ Haiku routing target is configurable from the dashboard Settings page.
 
 | Data | Location |
 |------|----------|
-| ChatGPT accounts | `~/.proxypool-hub/accounts.json` |
-| Claude accounts | `~/.proxypool-hub/claude-accounts.json` |
-| API keys | `~/.proxypool-hub/api-keys.json` |
-| Server settings | `~/.proxypool-hub/settings.json` |
-| Usage data | `~/.proxypool-hub/usage/` |
-| Request logs | `~/.proxypool-hub/request-logs/` |
+| ChatGPT accounts | `~/.cligate/accounts.json` |
+| Claude accounts | `~/.cligate/claude-accounts.json` |
+| API keys | `~/.cligate/api-keys.json` |
+| Server settings | `~/.cligate/settings.json` |
+| Usage data | `~/.cligate/usage/` |
+| Request logs | `~/.cligate/request-logs/` |

@@ -1,6 +1,6 @@
 const I18N = {
     en: {
-        brandEyebrow: 'ProxyPool Hub',
+        brandEyebrow: 'CliGate',
         brandTitle: 'Resources Catalog',
         pageEyebrow: 'Curated Directory',
         pageTitle: 'Resources Catalog',
@@ -40,10 +40,10 @@ const I18N = {
         noMatch: 'No resources match the current filters.',
         requestFailed: 'Request failed',
         reviewed: 'reviewed',
-        proxyPoolSupportedSuffix: 'supported by ProxyPool Hub'
+        proxyPoolSupportedSuffix: 'supported by CliGate'
     },
     zh: {
-        brandEyebrow: 'ProxyPool Hub',
+        brandEyebrow: 'CliGate',
         brandTitle: '资源目录',
         pageEyebrow: '精选目录',
         pageTitle: '资源目录',
@@ -83,7 +83,7 @@ const I18N = {
         noMatch: '当前筛选条件下没有匹配资源。',
         requestFailed: '请求失败',
         reviewed: '校验时间',
-        proxyPoolSupportedSuffix: '已被 ProxyPool Hub 支持'
+        proxyPoolSupportedSuffix: '已被 CliGate 支持'
     }
 };
 

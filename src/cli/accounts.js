@@ -10,7 +10,7 @@ import { homedir } from 'os';
 import { join } from 'path';
 import crypto from 'crypto';
 
-const CONFIG_DIR = join(homedir(), '.proxypool-hub');
+const CONFIG_DIR = join(homedir(), '.cligate');
 const ACCOUNTS_FILE = join(CONFIG_DIR, 'accounts.json');
 const DEFAULT_PORT = 8081;
 
@@ -493,7 +493,7 @@ async function main() {
     const port = parseInt(args.find(a => a.startsWith('--port='))?.split('=')[1]) || DEFAULT_PORT;
 
     console.log('╔════════════════════════════════════════╗');
-    console.log('║   ProxyPool Hub Account Manager       ║');
+    console.log('║   CliGate Account Manager             ║');
     console.log('║   Use --no-browser for headless mode   ║');
     console.log('╚════════════════════════════════════════╝');
 
@@ -526,18 +526,18 @@ async function main() {
             case 'help':
             default:
                 console.log('\nUsage:');
-                console.log('  proxypool-hub accounts add           Add account (opens browser)');
-                console.log('  proxypool-hub accounts add --no-browser  Add account (manual code)');
-                console.log('  proxypool-hub accounts list         List all accounts');
-                console.log('  proxypool-hub accounts remove       Remove accounts interactively');
-                console.log('  proxypool-hub accounts verify       Verify account tokens');
-                console.log('  proxypool-hub accounts clear        Remove all accounts');
-                console.log('  proxypool-hub accounts help         Show this help');
+                console.log('  cligate accounts add           Add account (opens browser)');
+                console.log('  cligate accounts add --no-browser  Add account (manual code)');
+                console.log('  cligate accounts list         List all accounts');
+                console.log('  cligate accounts remove       Remove accounts interactively');
+                console.log('  cligate accounts verify       Verify account tokens');
+                console.log('  cligate accounts clear        Remove all accounts');
+                console.log('  cligate accounts help         Show this help');
                 console.log('\nOptions:');
                 console.log('  --no-browser    Manual authorization code input (for headless/VM servers)');
                 console.log('  --port=<port>   Server port (default: 8081)');
                 console.log('\nHeadless/VM Usage:');
-                console.log('  1. Run: proxypool-hub accounts add --no-browser');
+                console.log('  1. Run: cligate accounts add --no-browser');
                 console.log('  2. Copy the URL shown and open in browser on another device');
                 console.log('  3. After login, paste the callback URL back in terminal');
                 break;

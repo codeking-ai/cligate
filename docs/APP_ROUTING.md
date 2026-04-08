@@ -33,7 +33,7 @@ Examples:
 
 ## Settings Shape
 
-Stored in `~/.proxypool-hub/settings.json`.
+Stored in `~/.cligate/settings.json`.
 
 ```json
 {

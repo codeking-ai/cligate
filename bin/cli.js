@@ -16,13 +16,13 @@ const command = args[0];
 
 function showHelp() {
   console.log(`
-proxypool-hub v${packageJson.version}
+cligate v${packageJson.version}
 
 Multi-protocol AI API proxy server with account pooling and visual dashboard.
 Supports Claude Code, Codex CLI, Gemini CLI, and OpenClaw.
 
 USAGE:
-  proxypool-hub <command> [options]
+  cligate <command> [options]
 
 COMMANDS:
   start                 Start the proxy server (default port: 8081)
@@ -42,10 +42,10 @@ ENVIRONMENT:
   PORT                  Server port (default: 8081)
 
 EXAMPLES:
-  proxypool-hub start
-  PORT=3000 proxypool-hub start
-  proxypool-hub accounts add
-  proxypool-hub accounts add --no-browser
+  cligate start
+  PORT=3000 cligate start
+  cligate accounts add
+  cligate accounts add --no-browser
 
 DASHBOARD:
   Open http://localhost:8081 to:
@@ -94,7 +94,7 @@ async function main() {
 
     default:
       console.error(`Unknown command: ${command}`);
-      console.error('Run "proxypool-hub --help" for usage information.');
+      console.error('Run "cligate --help" for usage information.');
       process.exit(1);
   }
 }

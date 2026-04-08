@@ -1,5 +1,5 @@
 /**
- * ProxyPool Hub
+ * CliGate
  * Entry point
  */
 
@@ -13,7 +13,7 @@ startServer({ port: PORT });
 
 console.log(`
 ╔══════════════════════════════════════════════════════════════╗
-║                  ProxyPool Hub v1.0.6                         ║
+║                      CliGate v1.0.6                             ║
 ║                   (Direct API Mode)                          ║
 ╠══════════════════════════════════════════════════════════════╣
 ║  Server:   http://localhost:${PORT}                          ║
@@ -30,7 +30,7 @@ console.log(`
 ╠══════════════════════════════════════════════════════════════╣
 ║  Support:                                                    ║
 ║    ★ Give it a star on GitHub!                               ║
-║    https://github.com/yiyao-ai/proxypool-hub                 ║
+║    https://github.com/codeking-ai/cligate║
 ╚══════════════════════════════════════════════════════════════╝
 `);
 

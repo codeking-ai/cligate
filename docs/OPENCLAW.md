@@ -1,6 +1,6 @@
 # OpenClaw Integration
 
-[OpenClaw](https://docs.openclaw.ai/) is an open-source AI assistant that supports multiple model providers. ProxyPool Hub can be added as a custom provider.
+[OpenClaw](https://docs.openclaw.ai/) is an open-source AI assistant that supports multiple model providers. CliGate can be added as a custom provider.
 
 ## One-click Setup
 
@@ -71,8 +71,8 @@ openclaw
 
 ## How It Works
 
-- OpenClaw sends Anthropic Messages API requests to ProxyPool Hub's `/v1/messages` endpoint
-- ProxyPool Hub routes the request through your account pool (ChatGPT, Claude, or API keys)
+- OpenClaw sends Anthropic Messages API requests to CliGate's `/v1/messages` endpoint
+- CliGate routes the request through your account pool (ChatGPT, Claude, or API keys)
 - Responses are streamed back in Anthropic SSE format
 
 ## Available Models

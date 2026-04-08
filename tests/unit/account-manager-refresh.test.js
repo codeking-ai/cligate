@@ -46,7 +46,7 @@ async function importFreshAccountManager() {
 }
 
 function writeAccountsFile(homeDir, accounts) {
-  const configDir = join(homeDir, '.proxypool-hub');
+  const configDir = join(homeDir, '.cligate');
   mkdirSync(configDir, { recursive: true });
   writeFileSync(join(configDir, 'accounts.json'), JSON.stringify({
     accounts,
@@ -56,7 +56,7 @@ function writeAccountsFile(homeDir, accounts) {
 }
 
 test('refreshAccountToken deduplicates concurrent refreshes per account', async () => {
-  const homeDir = mkdtempSync(join(tmpdir(), 'proxypool-hub-refresh-'));
+  const homeDir = mkdtempSync(join(tmpdir(), 'cligate-refresh-'));
   process.env.HOME = homeDir;
   process.env.USERPROFILE = homeDir;
 
@@ -135,7 +135,7 @@ test('refreshAccountToken deduplicates concurrent refreshes per account', async 
 });
 
 test('refreshAccountToken treats refresh_token_reused as success when another refresh already persisted new token', async () => {
-  const homeDir = mkdtempSync(join(tmpdir(), 'proxypool-hub-refresh-'));
+  const homeDir = mkdtempSync(join(tmpdir(), 'cligate-refresh-'));
   process.env.HOME = homeDir;
   process.env.USERPROFILE = homeDir;
 
@@ -181,7 +181,7 @@ test('refreshAccountToken treats refresh_token_reused as success when another re
 });
 
 test('refreshAccountStatus refreshes quota without rotating token when access token is still valid', async () => {
-  const homeDir = mkdtempSync(join(tmpdir(), 'proxypool-hub-refresh-'));
+  const homeDir = mkdtempSync(join(tmpdir(), 'cligate-refresh-'));
   process.env.HOME = homeDir;
   process.env.USERPROFILE = homeDir;
 
@@ -240,7 +240,7 @@ test('refreshAccountStatus refreshes quota without rotating token when access to
 });
 
 test('refreshAccountToken caches permanent refresh token failure for the same stored token', async () => {
-  const homeDir = mkdtempSync(join(tmpdir(), 'proxypool-hub-refresh-'));
+  const homeDir = mkdtempSync(join(tmpdir(), 'cligate-refresh-'));
   process.env.HOME = homeDir;
   process.env.USERPROFILE = homeDir;
 

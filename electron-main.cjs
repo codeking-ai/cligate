@@ -53,7 +53,7 @@ function createWindow() {
         height: 860,
         minWidth: 900,
         minHeight: 600,
-        title: 'ProxyPool Hub',
+        title: 'CliGate',
         icon: getIconPath(),
         autoHideMenuBar: true,
         webPreferences: {
@@ -90,7 +90,7 @@ function createTray() {
     try {
         tray = new Tray(iconPath);
         const contextMenu = Menu.buildFromTemplate([
-            { label: 'Open ProxyPool Hub', click: () => { if (mainWindow) mainWindow.show(); } },
+            { label: 'Open CliGate', click: () => { if (mainWindow) mainWindow.show(); } },
             { type: 'separator' },
             { label: `Port: ${actualPort}`, enabled: false },
             { type: 'separator' },
@@ -101,7 +101,7 @@ function createTray() {
                 }
             },
         ]);
-        tray.setToolTip('ProxyPool Hub');
+        tray.setToolTip('CliGate');
         tray.setContextMenu(contextMenu);
         tray.on('double-click', () => { if (mainWindow) mainWindow.show(); });
     } catch {
@@ -146,14 +146,14 @@ app.whenReady().then(async () => {
         const expressApp = createServer({ port: actualPort });
 
         serverInstance = expressApp.listen(actualPort, '127.0.0.1', () => {
-            console.log(`ProxyPool Hub running on http://127.0.0.1:${actualPort}`);
+            console.log(`CliGate running on http://127.0.0.1:${actualPort}`);
             console.log(`fetch implementation: ${globalThis.fetch?.name || 'unknown'}`);
         });
 
         createWindow();
         createTray();
     } catch (err) {
-        dialog.showErrorBox('Startup Error', `Failed to start ProxyPool Hub:\n\n${err.message}`);
+        dialog.showErrorBox('Startup Error', `Failed to start CliGate:\n\n${err.message}`);
         app.quit();
     }
 });

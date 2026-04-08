@@ -4,7 +4,7 @@
 
 ### Main Registry
 
-**Location:** `~/.proxypool-hub/accounts.json`
+**Location:** `~/.cligate/accounts.json`
 
 ```json
 {
@@ -33,7 +33,7 @@
 
 ### Per-Account Tokens
 
-**Location:** `~/.proxypool-hub/accounts/<email>/auth.json`
+**Location:** `~/.cligate/accounts/<email>/auth.json`
 
 ```json
 {
@@ -196,7 +196,7 @@ On server startup:
 
 ## Security
 
-- Tokens stored locally in `~/.proxypool-hub/`
+- Tokens stored locally in `~/.cligate/`
 - Directory permissions: user read/write only
 - Never logged or exposed in API responses
 - Per-account isolation via separate directories

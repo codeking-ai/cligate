@@ -180,14 +180,14 @@
 
 现有基线主要分布在：
 
-- [anthropic-to-openai-responses.js](D:/proxypool-hub/src/translators/request/anthropic-to-openai-responses.js)
-- [openai-responses-to-anthropic.js](D:/proxypool-hub/src/translators/response/openai-responses-to-anthropic.js)
-- [openai-responses-sse-to-anthropic-sse.js](D:/proxypool-hub/src/translators/response/openai-responses-sse-to-anthropic-sse.js)
-- [responses-request.js](D:/proxypool-hub/src/translators/normalizers/responses-request.js)
-- [responses-events.js](D:/proxypool-hub/src/translators/normalizers/responses-events.js)
-- [format-converter.test.js](D:/proxypool-hub/tests/unit/format-converter.test.js)
-- [translator-normalizers.test.js](D:/proxypool-hub/tests/unit/translator-normalizers.test.js)
-- [translator-sse.test.js](D:/proxypool-hub/tests/unit/translator-sse.test.js)
+- [anthropic-to-openai-responses.js](D:/cligate/src/translators/request/anthropic-to-openai-responses.js)
+- [openai-responses-to-anthropic.js](D:/cligate/src/translators/response/openai-responses-to-anthropic.js)
+- [openai-responses-sse-to-anthropic-sse.js](D:/cligate/src/translators/response/openai-responses-sse-to-anthropic-sse.js)
+- [responses-request.js](D:/cligate/src/translators/normalizers/responses-request.js)
+- [responses-events.js](D:/cligate/src/translators/normalizers/responses-events.js)
+- [format-converter.test.js](D:/cligate/tests/unit/format-converter.test.js)
+- [translator-normalizers.test.js](D:/cligate/tests/unit/translator-normalizers.test.js)
+- [translator-sse.test.js](D:/cligate/tests/unit/translator-sse.test.js)
 
 ## 5.2 Azure OpenAI Anthropic bridge 已覆盖工具和多模态
 
@@ -201,8 +201,8 @@
 
 现有基线主要分布在：
 
-- [azure-openai.js](D:/proxypool-hub/src/providers/azure-openai.js)
-- [azure-openai-provider.test.js](D:/proxypool-hub/tests/unit/azure-openai-provider.test.js)
+- [azure-openai.js](D:/cligate/src/providers/azure-openai.js)
+- [azure-openai-provider.test.js](D:/cligate/tests/unit/azure-openai-provider.test.js)
 
 ## 5.3 Gemini 与 Vertex 已支持多模态，但有明确降级
 
@@ -214,10 +214,10 @@
 
 现有基线主要分布在：
 
-- [gemini.js](D:/proxypool-hub/src/providers/gemini.js)
-- [vertex-ai.js](D:/proxypool-hub/src/providers/vertex-ai.js)
-- [gemini-provider.test.js](D:/proxypool-hub/tests/unit/gemini-provider.test.js)
-- [vertex-ai-provider.test.js](D:/proxypool-hub/tests/unit/vertex-ai-provider.test.js)
+- [gemini.js](D:/cligate/src/providers/gemini.js)
+- [vertex-ai.js](D:/cligate/src/providers/vertex-ai.js)
+- [gemini-provider.test.js](D:/cligate/tests/unit/gemini-provider.test.js)
+- [vertex-ai-provider.test.js](D:/cligate/tests/unit/vertex-ai-provider.test.js)
 
 ## 5.4 Kilo / OpenAI Chat bridge 以文本工具链为主
 
@@ -233,9 +233,9 @@
 
 现有基线主要分布在：
 
-- [kilo-format-converter.js](D:/proxypool-hub/src/kilo-format-converter.js)
-- [kilo-format-converter.test.js](D:/proxypool-hub/tests/unit/kilo-format-converter.test.js)
-- [format-bridge.js](D:/proxypool-hub/src/providers/format-bridge.js)
+- [kilo-format-converter.js](D:/cligate/src/kilo-format-converter.js)
+- [kilo-format-converter.test.js](D:/cligate/tests/unit/kilo-format-converter.test.js)
+- [format-bridge.js](D:/cligate/src/providers/format-bridge.js)
 
 ---
 

@@ -40,7 +40,7 @@ jobs:
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: proxypool-hub-${{ matrix.platform }}
+          name: cligate-${{ matrix.platform }}
           path: |
             dist-electron/*.exe
             dist-electron/*.dmg

@@ -5,7 +5,7 @@
  * Design:
  *   - Zero latency impact: logging happens via setImmediate after response is sent
  *   - JSONL format: one JSON object per line, append-only (no need to parse whole file)
- *   - Daily rotation: ~/.proxypool-hub/request-logs/YYYY-MM-DD.jsonl
+ *   - Daily rotation: ~/.cligate/request-logs/YYYY-MM-DD.jsonl
  *   - Auto-cleanup: deletes files older than configured retention days
  *   - Content truncation: request/response bodies capped at MAX_BODY_SIZE
  *   - Debounced flush: batches writes every 3 seconds to reduce I/O

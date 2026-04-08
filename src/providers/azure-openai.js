@@ -216,13 +216,22 @@ function normalizeInputImagePartForAzure(part) {
 }
 
 function normalizeResponsesPayloadForAzure(body) {
-    if (!Array.isArray(body?.input)) {
-        return body;
+    const normalizedBody = { ...body };
+    if (
+        Number.isFinite(normalizedBody.max_completion_tokens)
+        && normalizedBody.max_output_tokens === undefined
+    ) {
+        normalizedBody.max_output_tokens = normalizedBody.max_completion_tokens;
+        delete normalizedBody.max_completion_tokens;
+    }
+
+    if (!Array.isArray(normalizedBody?.input)) {
+        return normalizedBody;
     }
 
     return {
-        ...body,
-        input: body.input.map(item => {
+        ...normalizedBody,
+        input: normalizedBody.input.map(item => {
             if (item?.type === 'message' && Array.isArray(item.content)) {
                 return {
                     ...item,

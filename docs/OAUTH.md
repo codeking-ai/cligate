@@ -6,12 +6,12 @@ This proxy uses **OAuth 2.0 with PKCE** for secure authentication with ChatGPT.
 
 ### Desktop (Browser)
 ```bash
-proxypool-hub accounts add
+cligate accounts add
 ```
 
 ### Headless/VM (No Browser)
 ```bash
-proxypool-hub accounts add --no-browser
+cligate accounts add --no-browser
 ```
 
 ## Headless/VM Workflow
@@ -20,7 +20,7 @@ When running on a server without a browser (VM, Docker, SSH):
 
 1. Run the command with `--no-browser`:
    ```bash
-   proxypool-hub accounts add --no-browser
+   cligate accounts add --no-browser
    ```
 
 2. It prints a URL like:
@@ -59,16 +59,16 @@ When running on a server without a browser (VM, Docker, SSH):
 
 ```bash
 # List accounts
-proxypool-hub accounts list
+cligate accounts list
 
 # Add account (browser)
-proxypool-hub accounts add
+cligate accounts add
 
 # Add account (headless)
-proxypool-hub accounts add --no-browser
+cligate accounts add --no-browser
 
 # Clear all accounts
-proxypool-hub accounts clear
+cligate accounts clear
 ```
 
 ## Troubleshooting

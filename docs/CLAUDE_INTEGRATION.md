@@ -40,7 +40,7 @@ claude
 ```
 Claude Code (Anthropic format)
          ↓
-    ProxyPool Hub
+    CliGate
          ↓
   Format Conversion (Anthropic → OpenAI Responses API)
          ↓
@@ -109,4 +109,4 @@ curl -X POST http://localhost:8081/claude/config/direct \
 
 - **Claude Code hangs**: Check `curl http://localhost:8081/health`, re-configure with the one-click button
 - **"No active account" error**: Add an account in the Dashboard → Accounts tab
-- **Token expired after refresh**: ProxyPool Hub uses smart refresh (only when < 5 min remaining) and writes back to `~/.claude/.credentials.json` for imported accounts
+- **Token expired after refresh**: CliGate uses smart refresh (only when < 5 min remaining) and writes back to `~/.claude/.credentials.json` for imported accounts

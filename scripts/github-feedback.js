@@ -16,7 +16,7 @@
  *   GITHUB_TOKEN — optional, increases rate limit from 60 to 5000 req/hr
  */
 
-const REPO = 'yiyao-ai/proxypool-hub';
+const REPO = 'codeking-ai/cligate';
 const API = 'https://api.github.com';
 
 async function ghFetch(path, params = {}) {
@@ -27,7 +27,7 @@ async function ghFetch(path, params = {}) {
 
     const headers = {
         'Accept': 'application/vnd.github+json',
-        'User-Agent': 'proxypool-hub-feedback'
+        'User-Agent': 'cligate-feedback'
     };
     if (process.env.GITHUB_TOKEN) {
         headers['Authorization'] = `Bearer ${process.env.GITHUB_TOKEN}`;
@@ -54,7 +54,7 @@ async function overview() {
     const questions = issues.filter(i => i.labels.some(l => l.name === 'question'));
 
     console.log('');
-    console.log('=== ProxyPool Hub - Feedback Overview ===');
+    console.log('=== CliGate - Feedback Overview ===');
     console.log('');
     console.log(`  Stars:           ${repo.stargazers_count}`);
     console.log(`  Forks:           ${repo.forks_count}`);
@@ -140,7 +140,7 @@ async function summary() {
     const questions = filtered.filter(i => i.labels.some(l => l.name === 'question'));
 
     const lines = [
-        `# ProxyPool Hub Feedback Summary`,
+        `# CliGate Feedback Summary`,
         ``,
         `Stars: ${repo.stargazers_count} | Forks: ${repo.forks_count} | Open: ${filtered.length}`,
         `Bugs: ${bugs.length} | Features: ${features.length} | Questions: ${questions.length}`,

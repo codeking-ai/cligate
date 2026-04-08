@@ -14,7 +14,7 @@ test('Web UI loads and includes core navigation', async () => {
   const html = await res.text();
 
   // Basic smoke checks that are resilient to styling changes.
-  assert.ok(html.includes('<title>ProxyPool Hub</title>'));
+  assert.ok(html.includes('<title>CliGate</title>'));
   assert.ok(html.includes('dashboard'));
   assert.ok(html.includes('accounts'));
   assert.ok(html.includes('logs'));
@@ -93,7 +93,7 @@ test('Resources page loads its standalone assets', async () => {
   assert.equal(res.status, 200);
   const html = await res.text();
 
-  assert.ok(html.includes('<title>ProxyPool Hub Resources</title>'));
+  assert.ok(html.includes('<title>CliGate Resources</title>'));
   assert.ok(html.includes('id="resource-list"'));
   assert.ok(html.includes('id="topbar-note"'));
   assert.ok(html.includes('<script src="/resources/app.js"></script>'));

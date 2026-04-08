@@ -116,7 +116,7 @@ document.addEventListener('alpine:init', () => {
         chatMessages: [],
         chatSessions: [],
         activeChatSessionId: '',
-        chatStorageKey: 'proxypool-hub-chat-sessions-v1',
+        chatStorageKey: 'cligate-chat-sessions-v1',
         chatHistoryOpen: false,
         chatSystemPromptOpen: false,
         chatLoading: false,
@@ -151,7 +151,7 @@ document.addEventListener('alpine:init', () => {
             }
         },
         
-        configPath: '~/.proxypool-hub/accounts.json',
+        configPath: '~/.cligate/accounts.json',
         
         logs: [],
         logSearchQuery: '',

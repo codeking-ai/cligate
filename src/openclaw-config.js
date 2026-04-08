@@ -1,7 +1,7 @@
 /**
  * OpenClaw Configuration Utility
  * Reads and writes ~/.openclaw/openclaw.json to configure OpenClaw
- * to use ProxyPool Hub as a custom model provider.
+ * to use CliGate as a custom model provider.
  *
  * Model list is built dynamically from the proxy's model discovery system
  * rather than hardcoded, so OpenClaw always reflects what the proxy can serve.
@@ -15,8 +15,8 @@ import { listAccounts as listClaudeAccounts } from './claude-account-manager.js'
 
 const OPENCLAW_DIR = join(homedir(), '.openclaw');
 const OPENCLAW_CONFIG_FILE = join(OPENCLAW_DIR, 'openclaw.json');
-const PROXYPOOL_DIR = join(homedir(), '.proxypool-hub');
-const BACKUP_FILE = join(PROXYPOOL_DIR, 'openclaw-backup.json');
+const CLIGATE_DIR = join(homedir(), '.cligate');
+const BACKUP_FILE = join(CLIGATE_DIR, 'openclaw-backup.json');
 
 const PROVIDER_ID = 'proxypool';
 
@@ -190,7 +190,7 @@ export function setProxyMode(port) {
 
     // Backup original config to our own file for restoration in setDirectMode
     if (!existsSync(BACKUP_FILE)) {
-        if (!existsSync(PROXYPOOL_DIR)) mkdirSync(PROXYPOOL_DIR, { recursive: true });
+        if (!existsSync(CLIGATE_DIR)) mkdirSync(CLIGATE_DIR, { recursive: true });
         writeFileSync(BACKUP_FILE, JSON.stringify({
             primaryModel: previousModel,
             models: config.agents.defaults.models || null

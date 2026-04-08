@@ -1,10 +1,10 @@
-# ProxyPool Hub 与 CLIProxyAPI 对比分析报告
+# CliGate 与 CLIProxyAPI 对比分析报告
 
 ## 1. 报告目的
 
 本文档用于对比分析以下两个项目：
 
-- 当前项目：`D:\proxypool-hub`
+- 当前项目：`D:\cligate`
 - 参考项目：`D:\localagentdemo\proxy\CLIProxyAPI`
 
 分析重点包括：
@@ -18,11 +18,11 @@
 
 ## 2. 项目概述
 
-### 2.1 ProxyPool Hub
+### 2.1 CliGate
 
-`ProxyPool Hub` 是一个基于 Node.js / Express 构建的本地 AI API 代理工具，带有完整的 Web 仪表盘，并支持 Electron 打包为桌面应用。它的核心目标是为开发者提供一个开箱即用的本地代理入口，使 Claude Code、Codex CLI、Gemini CLI、OpenClaw 等工具能够通过统一代理访问不同账户池与 API Key 池。
+`CliGate` 是一个基于 Node.js / Express 构建的本地 AI API 代理工具，带有完整的 Web 仪表盘，并支持 Electron 打包为桌面应用。它的核心目标是为开发者提供一个开箱即用的本地代理入口，使 Claude Code、Codex CLI、Gemini CLI、OpenClaw 等工具能够通过统一代理访问不同账户池与 API Key 池。
 
-从产品形态上看，`ProxyPool Hub` 更偏向“本地一体化管理产品”，强调：
+从产品形态上看，`CliGate` 更偏向“本地一体化管理产品”，强调：
 
 - 本地开箱即用
 - 可视化操作
@@ -32,11 +32,11 @@
 
 核心入口与实现位置：
 
-- 服务入口：[src/index.js](D:/proxypool-hub/src/index.js)
-- 服务启动：[src/server.js](D:/proxypool-hub/src/server.js)
-- 路由注册：[src/routes/api-routes.js](D:/proxypool-hub/src/routes/api-routes.js)
-- 账户管理：[src/account-manager.js](D:/proxypool-hub/src/account-manager.js)
-- API Key 管理：[src/api-key-manager.js](D:/proxypool-hub/src/api-key-manager.js)
+- 服务入口：[src/index.js](D:/cligate/src/index.js)
+- 服务启动：[src/server.js](D:/cligate/src/server.js)
+- 路由注册：[src/routes/api-routes.js](D:/cligate/src/routes/api-routes.js)
+- 账户管理：[src/account-manager.js](D:/cligate/src/account-manager.js)
+- API Key 管理：[src/api-key-manager.js](D:/cligate/src/api-key-manager.js)
 
 ### 2.2 CLIProxyAPI
 
@@ -61,7 +61,7 @@
 
 ---
 
-## 3. 当前项目 ProxyPool Hub 的主要功能梳理
+## 3. 当前项目 CliGate 的主要功能梳理
 
 结合 `README_CN.md`、`package.json` 和源码结构，当前项目主要能力可归纳为以下几类。
 
@@ -77,11 +77,11 @@
 
 对应实现：
 
-- [src/routes/api-routes.js](D:/proxypool-hub/src/routes/api-routes.js)
-- [src/routes/chat-route.js](D:/proxypool-hub/src/routes/chat-route.js)
-- [src/routes/messages-route.js](D:/proxypool-hub/src/routes/messages-route.js)
-- [src/routes/codex-route.js](D:/proxypool-hub/src/routes/codex-route.js)
-- [src/routes/gemini-api-route.js](D:/proxypool-hub/src/routes/gemini-api-route.js)
+- [src/routes/api-routes.js](D:/cligate/src/routes/api-routes.js)
+- [src/routes/chat-route.js](D:/cligate/src/routes/chat-route.js)
+- [src/routes/messages-route.js](D:/cligate/src/routes/messages-route.js)
+- [src/routes/codex-route.js](D:/cligate/src/routes/codex-route.js)
+- [src/routes/gemini-api-route.js](D:/cligate/src/routes/gemini-api-route.js)
 
 ### 3.2 多账户池管理
 
@@ -101,9 +101,9 @@
 
 对应实现：
 
-- [src/account-manager.js](D:/proxypool-hub/src/account-manager.js)
-- [src/claude-account-manager.js](D:/proxypool-hub/src/claude-account-manager.js)
-- [src/antigravity-account-manager.js](D:/proxypool-hub/src/antigravity-account-manager.js)
+- [src/account-manager.js](D:/cligate/src/account-manager.js)
+- [src/claude-account-manager.js](D:/cligate/src/claude-account-manager.js)
+- [src/antigravity-account-manager.js](D:/cligate/src/antigravity-account-manager.js)
 
 ### 3.3 API Key 池管理
 
@@ -129,8 +129,8 @@
 
 对应实现：
 
-- [src/api-key-manager.js](D:/proxypool-hub/src/api-key-manager.js)
-- [src/providers](D:/proxypool-hub/src/providers)
+- [src/api-key-manager.js](D:/cligate/src/api-key-manager.js)
+- [src/providers](D:/cligate/src/providers)
 
 ### 3.4 智能路由与模型映射
 
@@ -153,10 +153,10 @@
 
 对应实现：
 
-- [src/app-routing.js](D:/proxypool-hub/src/app-routing.js)
-- [src/model-mapping.js](D:/proxypool-hub/src/model-mapping.js)
-- [src/model-mapper.js](D:/proxypool-hub/src/model-mapper.js)
-- [src/routes/settings-route.js](D:/proxypool-hub/src/routes/settings-route.js)
+- [src/app-routing.js](D:/cligate/src/app-routing.js)
+- [src/model-mapping.js](D:/cligate/src/model-mapping.js)
+- [src/model-mapper.js](D:/cligate/src/model-mapper.js)
+- [src/routes/settings-route.js](D:/cligate/src/routes/settings-route.js)
 
 ### 3.5 协议转换与上游调用
 
@@ -169,12 +169,12 @@
 
 对应实现：
 
-- [src/translators](D:/proxypool-hub/src/translators)
-- [src/direct-api.js](D:/proxypool-hub/src/direct-api.js)
+- [src/translators](D:/cligate/src/translators)
+- [src/direct-api.js](D:/cligate/src/direct-api.js)
 
 ### 3.6 Web 仪表盘与产品化能力
 
-`ProxyPool Hub` 除了代理能力，还提供完整产品层功能：
+`CliGate` 除了代理能力，还提供完整产品层功能：
 
 - 仪表盘
 - Chat 聊天页
@@ -196,11 +196,11 @@
 
 对应实现：
 
-- [src/routes/usage-route.js](D:/proxypool-hub/src/routes/usage-route.js)
-- [src/routes/request-logs-route.js](D:/proxypool-hub/src/routes/request-logs-route.js)
-- [src/routes/pricing-route.js](D:/proxypool-hub/src/routes/pricing-route.js)
-- [src/routes/resources-route.js](D:/proxypool-hub/src/routes/resources-route.js)
-- [src/routes/chat-ui-route.js](D:/proxypool-hub/src/routes/chat-ui-route.js)
+- [src/routes/usage-route.js](D:/cligate/src/routes/usage-route.js)
+- [src/routes/request-logs-route.js](D:/cligate/src/routes/request-logs-route.js)
+- [src/routes/pricing-route.js](D:/cligate/src/routes/pricing-route.js)
+- [src/routes/resources-route.js](D:/cligate/src/routes/resources-route.js)
+- [src/routes/chat-ui-route.js](D:/cligate/src/routes/chat-ui-route.js)
 
 ### 3.7 工具安装与一键配置
 
@@ -213,13 +213,13 @@
 
 对应实现：
 
-- [src/tool-installer.js](D:/proxypool-hub/src/tool-installer.js)
-- [src/tool-launcher.js](D:/proxypool-hub/src/tool-launcher.js)
-- [src/routes/tools-route.js](D:/proxypool-hub/src/routes/tools-route.js)
-- [src/routes/claude-config-route.js](D:/proxypool-hub/src/routes/claude-config-route.js)
-- [src/routes/codex-config-route.js](D:/proxypool-hub/src/routes/codex-config-route.js)
-- [src/routes/gemini-config-route.js](D:/proxypool-hub/src/routes/gemini-config-route.js)
-- [src/routes/openclaw-config-route.js](D:/proxypool-hub/src/routes/openclaw-config-route.js)
+- [src/tool-installer.js](D:/cligate/src/tool-installer.js)
+- [src/tool-launcher.js](D:/cligate/src/tool-launcher.js)
+- [src/routes/tools-route.js](D:/cligate/src/routes/tools-route.js)
+- [src/routes/claude-config-route.js](D:/cligate/src/routes/claude-config-route.js)
+- [src/routes/codex-config-route.js](D:/cligate/src/routes/codex-config-route.js)
+- [src/routes/gemini-config-route.js](D:/cligate/src/routes/gemini-config-route.js)
+- [src/routes/openclaw-config-route.js](D:/cligate/src/routes/openclaw-config-route.js)
 
 ---
 
@@ -227,21 +227,21 @@
 
 ### 4.1 总体定位差异
 
-| 维度 | ProxyPool Hub | CLIProxyAPI |
+| 维度 | CliGate | CLIProxyAPI |
 |---|---|---|
 | 项目定位 | 本地一体化代理产品 | 通用代理内核 / 服务平台 |
 | 面向对象 | 终端用户、个人开发者、小团队 | 开发者、集成方、二次开发者 |
 | 核心价值 | 易用、可视化、开箱即用 | 可扩展、可嵌入、配置化 |
 | 产品形态 | Web UI + Electron + CLI | HTTP Server + TUI + 管理 API + SDK |
 
-`ProxyPool Hub` 更像是一个成品工具。  
+`CliGate` 更像是一个成品工具。  
 `CLIProxyAPI` 更像一个平台底座，很多上层产品可以建立在它上面。
 
 ### 4.2 协议支持能力对比
 
 两者都支持 OpenAI / Claude / Gemini / Codex 相关兼容协议，但侧重点不同。
 
-`ProxyPool Hub` 支持的协议面向当前已集成的工具和场景，强调对 Claude Code、Codex CLI、Gemini CLI、OpenClaw 的直接接入。
+`CliGate` 支持的协议面向当前已集成的工具和场景，强调对 Claude Code、Codex CLI、Gemini CLI、OpenClaw 的直接接入。
 
 `CLIProxyAPI` 不仅支持这些协议，还通过更系统的 translator / executor 体系扩展到：
 
@@ -255,7 +255,7 @@
 
 ### 4.3 账户与凭证管理能力对比
 
-| 对比项 | ProxyPool Hub | CLIProxyAPI |
+| 对比项 | CliGate | CLIProxyAPI |
 |---|---|---|
 | ChatGPT / Codex OAuth | 支持 | 支持 |
 | Claude OAuth | 支持 | 支持 |
@@ -271,7 +271,7 @@
 
 ### 4.4 可视化与运维能力对比
 
-| 对比项 | ProxyPool Hub | CLIProxyAPI |
+| 对比项 | CliGate | CLIProxyAPI |
 |---|---|---|
 | Web 仪表盘 | 内置完整 | 主要依赖管理面板或外部项目 |
 | TUI | 无 | 有 |
@@ -279,14 +279,14 @@
 | 管理 API | 有，但偏产品服务内部使用 | 很完整，面向平台管理 |
 | 第三方管理面板生态 | 较少 | 明确存在多个衍生项目 |
 
-在最终用户体验上，`ProxyPool Hub` 更强。  
+在最终用户体验上，`CliGate` 更强。  
 在平台运维与二次开发接入上，`CLIProxyAPI` 更强。
 
 ### 4.5 工具链集成能力对比
 
 这一点是当前项目的明显优势。
 
-`ProxyPool Hub` 内置：
+`CliGate` 内置：
 
 - 工具检测
 - 工具安装
@@ -298,7 +298,7 @@
 
 因此：
 
-- 如果目标是降低最终用户的接入门槛，`ProxyPool Hub` 更完整
+- 如果目标是降低最终用户的接入门槛，`CliGate` 更完整
 - 如果目标是构建可复用代理服务，`CLIProxyAPI` 更聚焦
 
 ---
@@ -309,12 +309,12 @@
 
 | 项目 | 技术栈 |
 |---|---|
-| ProxyPool Hub | Node.js + Express + Electron |
+| CliGate | Node.js + Express + Electron |
 | CLIProxyAPI | Go + Gin + Bubble Tea TUI + SDK 模块体系 |
 
 这直接影响了两个项目的实现风格。
 
-`ProxyPool Hub`：
+`CliGate`：
 
 - 更适合快速迭代产品功能
 - UI 与本地系统能力结合方便
@@ -328,9 +328,9 @@
 
 ## 5.2 架构风格差异
 
-### ProxyPool Hub：应用式单体架构
+### CliGate：应用式单体架构
 
-`ProxyPool Hub` 的结构是典型的产品型单体后端：
+`CliGate` 的结构是典型的产品型单体后端：
 
 - `server.js` 负责初始化
 - `api-routes.js` 统一挂载所有模块路由
@@ -373,9 +373,9 @@
 
 ## 5.3 协议转换实现方式差异
 
-### ProxyPool Hub：定制转换逻辑
+### CliGate：定制转换逻辑
 
-`ProxyPool Hub` 在协议转换上更偏“围绕当前支持的工具做深度兼容”：
+`CliGate` 在协议转换上更偏“围绕当前支持的工具做深度兼容”：
 
 - 明确处理 Anthropic 与 OpenAI Responses 之间的转换
 - 明确处理工具调用 ID 的正反映射
@@ -384,8 +384,8 @@
 
 典型实现：
 
-- [src/translators](D:/proxypool-hub/src/translators)
-- [src/direct-api.js](D:/proxypool-hub/src/direct-api.js)
+- [src/translators](D:/cligate/src/translators)
+- [src/direct-api.js](D:/cligate/src/direct-api.js)
 
 优点：
 
@@ -426,9 +426,9 @@
 
 ## 5.4 路由与认证调度差异
 
-### ProxyPool Hub：应用导向的路由
+### CliGate：应用导向的路由
 
-`ProxyPool Hub` 的路由逻辑核心是：
+`CliGate` 的路由逻辑核心是：
 
 - 判断请求来自哪个应用
 - 判断优先使用账户池还是 API Key 池
@@ -443,8 +443,8 @@
 
 典型实现：
 
-- [src/app-routing.js](D:/proxypool-hub/src/app-routing.js)
-- [src/routes/chat-route.js](D:/proxypool-hub/src/routes/chat-route.js)
+- [src/app-routing.js](D:/cligate/src/app-routing.js)
+- [src/routes/chat-route.js](D:/cligate/src/routes/chat-route.js)
 
 ### CLIProxyAPI：运行时调度导向
 
@@ -462,11 +462,11 @@
 - [sdk/cliproxy/auth/selector.go](D:/localagentdemo/proxy/CLIProxyAPI/sdk/cliproxy/auth/selector.go)
 - [sdk/cliproxy/service.go](D:/localagentdemo/proxy/CLIProxyAPI/sdk/cliproxy/service.go)
 
-优点是调度精细；缺点是实现复杂，产品层表达不如 `ProxyPool Hub` 直接。
+优点是调度精细；缺点是实现复杂，产品层表达不如 `CliGate` 直接。
 
 ## 5.5 配置、持久化与热更新差异
 
-### ProxyPool Hub：本地状态型持久化
+### CliGate：本地状态型持久化
 
 当前项目主要通过本地文件保存状态，例如：
 
@@ -504,7 +504,7 @@
 
 ## 5.6 管理界面与交互形态差异
 
-### ProxyPool Hub
+### CliGate
 
 强调图形化和桌面化：
 
@@ -527,7 +527,7 @@
 
 这说明两个项目虽然都具备“管理能力”，但交互哲学不同：
 
-- `ProxyPool Hub` 偏产品体验
+- `CliGate` 偏产品体验
 - `CLIProxyAPI` 偏平台治理
 
 ---
@@ -573,12 +573,12 @@
 
 用一句话概括：
 
-- `ProxyPool Hub`：更像“面向用户的完整代理产品”
+- `CliGate`：更像“面向用户的完整代理产品”
 - `CLIProxyAPI`：更像“面向平台和集成的代理运行时内核”
 
 ### 7.2 差异矩阵
 
-| 维度 | ProxyPool Hub | CLIProxyAPI |
+| 维度 | CliGate | CLIProxyAPI |
 |---|---|---|
 | 目标用户 | 直接使用的开发者 | 集成方 / 平台开发者 |
 | 产品完成度 | 高 | 中，偏底层 |
@@ -595,7 +595,7 @@
 
 ## 8. 各自优劣势分析
 
-## 8.1 ProxyPool Hub 优势
+## 8.1 CliGate 优势
 
 - 产品形态完整，适合直接交付给用户
 - Web 仪表盘丰富，学习成本低
@@ -603,7 +603,7 @@
 - 应用绑定路由更贴近终端用户使用习惯
 - Electron 打包提升桌面场景可用性
 
-## 8.2 ProxyPool Hub 局限
+## 8.2 CliGate 局限
 
 - 架构更偏产品单体，内核可复用性较弱
 - Provider 扩展深度和配置能力不如 CLIProxyAPI
@@ -629,7 +629,7 @@
 
 ## 9. 适用场景与选型建议
 
-### 9.1 适合选择 ProxyPool Hub 的场景
+### 9.1 适合选择 CliGate 的场景
 
 如果你的目标是：
 
@@ -638,7 +638,7 @@
 - 强调 Web 可视化、配置便利、环境准备便利
 - 需要把工具安装、CLI 配置、代理管理整合到一起
 
-那么 `ProxyPool Hub` 更合适。
+那么 `CliGate` 更合适。
 
 ### 9.2 适合选择 CLIProxyAPI 的场景
 
@@ -656,7 +656,7 @@
 
 ## 10. 对当前项目的演进建议
 
-结合对比结果，如果 `ProxyPool Hub` 希望进一步增强内核能力，可以重点借鉴 `CLIProxyAPI` 的以下方向：
+结合对比结果，如果 `CliGate` 希望进一步增强内核能力，可以重点借鉴 `CLIProxyAPI` 的以下方向：
 
 ### 10.1 抽象更清晰的协议转换层
 
@@ -703,9 +703,9 @@
 
 本次对比分析的核心结论如下：
 
-`ProxyPool Hub` 和 `CLIProxyAPI` 都属于“为 AI CLI 工具提供统一代理能力”的项目，但两者的定位明显不同。
+`CliGate` 和 `CLIProxyAPI` 都属于“为 AI CLI 工具提供统一代理能力”的项目，但两者的定位明显不同。
 
-`ProxyPool Hub` 偏向产品化、一体化、本地用户体验优先。它在 Web 仪表盘、账户管理、API Key 管理、工具安装与一键配置方面明显更强，更适合直接给终端用户使用。
+`CliGate` 偏向产品化、一体化、本地用户体验优先。它在 Web 仪表盘、账户管理、API Key 管理、工具安装与一键配置方面明显更强，更适合直接给终端用户使用。
 
 `CLIProxyAPI` 偏向平台化、内核化、可扩展性优先。它在 provider 覆盖、运行时调度、热更新、管理 API、SDK 能力和架构抽象方面更强，更适合作为底层服务或二次开发基础设施。
 
@@ -716,25 +716,25 @@
 
 如果从工程演进角度看，二者也存在明显互补关系：
 
-- `ProxyPool Hub` 可以借鉴 `CLIProxyAPI` 的内核抽象与调度能力
-- `CLIProxyAPI` 可以借鉴 `ProxyPool Hub` 的产品体验与用户交互方式
+- `CliGate` 可以借鉴 `CLIProxyAPI` 的内核抽象与调度能力
+- `CLIProxyAPI` 可以借鉴 `CliGate` 的产品体验与用户交互方式
 
 ---
 
 ## 12. 参考文件
 
-### ProxyPool Hub
+### CliGate
 
-- [README_CN.md](D:/proxypool-hub/README_CN.md)
-- [package.json](D:/proxypool-hub/package.json)
-- [src/server.js](D:/proxypool-hub/src/server.js)
-- [src/routes/api-routes.js](D:/proxypool-hub/src/routes/api-routes.js)
-- [src/account-manager.js](D:/proxypool-hub/src/account-manager.js)
-- [src/api-key-manager.js](D:/proxypool-hub/src/api-key-manager.js)
-- [src/app-routing.js](D:/proxypool-hub/src/app-routing.js)
-- [src/translators](D:/proxypool-hub/src/translators)
-- [src/direct-api.js](D:/proxypool-hub/src/direct-api.js)
-- [src/tool-installer.js](D:/proxypool-hub/src/tool-installer.js)
+- [README_CN.md](D:/cligate/README_CN.md)
+- [package.json](D:/cligate/package.json)
+- [src/server.js](D:/cligate/src/server.js)
+- [src/routes/api-routes.js](D:/cligate/src/routes/api-routes.js)
+- [src/account-manager.js](D:/cligate/src/account-manager.js)
+- [src/api-key-manager.js](D:/cligate/src/api-key-manager.js)
+- [src/app-routing.js](D:/cligate/src/app-routing.js)
+- [src/translators](D:/cligate/src/translators)
+- [src/direct-api.js](D:/cligate/src/direct-api.js)
+- [src/tool-installer.js](D:/cligate/src/tool-installer.js)
 
 ### CLIProxyAPI
 

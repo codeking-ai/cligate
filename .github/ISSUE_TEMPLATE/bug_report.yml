@@ -11,8 +11,8 @@ body:
   - type: input
     id: version
     attributes:
-      label: ProxyPool Hub Version
-      description: Run `proxypool-hub --version` or check the dashboard header
+      label: CliGate Version
+      description: Run `cligate --version` or check the dashboard header
       placeholder: "e.g. 1.0.5"
     validations:
       required: true

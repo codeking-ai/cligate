@@ -55,7 +55,7 @@
   "timeoutMs": 180000,
   "assertions": [
     { "type": "exit-code", "expected": 0 },
-    { "type": "stdout-contains", "contains": "proxypool-hub" },
+    { "type": "stdout-contains", "contains": "cligate" },
     {
       "type": "request-log",
       "expected": {

@@ -8,7 +8,7 @@ export function parseIsolatedArgs(argv) {
   const options = {
     scenarioId: null,
     basePort: 8082,
-    sourceConfigDir: join(homedir(), '.proxypool-hub'),
+    sourceConfigDir: join(homedir(), '.cligate'),
     isolatedConfigDir: join(process.cwd(), '.test-config'),
     allowLiveMutations: true,
     startupTimeoutMs: 30000

@@ -1,11 +1,11 @@
-# ProxyPool Hub
+# CliGate
 
-![ProxyPool Hub Dashboard](./images/dashboard.png)
+![CliGate Dashboard](./images/dashboard.png)
 
 [![AGPL-3.0 License](https://img.shields.io/badge/License-AGPL--3.0-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
 [![Node.js Version](https://img.shields.io/badge/Node.js-24%2B-blue.svg)](https://nodejs.org/)
-[![npm Version](https://img.shields.io/npm/v/proxypool-hub)](https://www.npmjs.com/package/proxypool-hub)
-[![GitHub stars](https://img.shields.io/github/stars/yiyao-ai/proxypool-hub?style=social)](https://github.com/yiyao-ai/proxypool-hub)
+[![npm Version](https://img.shields.io/npm/v/cligate)](https://www.npmjs.com/package/cligate)
+[![GitHub stars](https://img.shields.io/github/stars/codeking-ai/cligate?style=social)](https://github.com/codeking-ai/cligate)
 
 **[English](#features) | [中文](./README_CN.md)**
 
@@ -94,7 +94,7 @@
        └───────────────┼───────────────┼──────────────┘
                        ▼
             ┌─────────────────────┐
-            │   ProxyPool Hub     │
+            │   CliGate     │
             │   localhost:8081    │
             │                     │
             │  ┌───────────────┐  │
@@ -123,19 +123,19 @@
 ### Option 1: npx (No install)
 
 ```bash
-npx proxypool-hub@latest start
+npx cligate@latest start
 ```
 
 ### Option 2: Global install
 
 ```bash
-npm install -g proxypool-hub
-proxypool-hub start
+npm install -g cligate
+cligate start
 ```
 
 ### Option 3: Desktop App (Electron)
 
-Download the latest release from [Releases](https://github.com/yiyao-ai/proxypool-hub/releases).
+Download the latest release from [Releases](https://github.com/codeking-ai/cligate/releases).
 
 ---
 
@@ -144,7 +144,7 @@ Download the latest release from [Releases](https://github.com/yiyao-ai/proxypoo
 ### 1. Start the server
 
 ```bash
-proxypool-hub start
+cligate start
 ```
 
 Dashboard opens at **http://localhost:8081**
@@ -159,8 +159,8 @@ Dashboard opens at **http://localhost:8081**
 
 **CLI**:
 ```bash
-proxypool-hub accounts add            # Opens browser
-proxypool-hub accounts add --no-browser  # Headless/VM
+cligate accounts add            # Opens browser
+cligate accounts add --no-browser  # Headless/VM
 ```
 
 ### 3. Configure your CLI tool
@@ -247,9 +247,9 @@ See [API Documentation](./docs/API.md) for the full reference.
 
 ## Community
 
-- [GitHub Discussions](https://github.com/yiyao-ai/proxypool-hub/discussions) — Ask questions, share ideas, report issues
+- [GitHub Discussions](https://github.com/codeking-ai/cligate/discussions) — Ask questions, share ideas, report issues
 - [Discord](https://discord.gg/GgxZSehxqG) — Real-time chat with the community
-- **WeChat** — Scan to add the author, note "ProxyPool Hub" to join the group
+- **WeChat** — Scan to add the author, note "CliGate" to join the group
 
   <img src="./images/wechat.jpg" alt="WeChat" width="200">
 
@@ -276,7 +276,7 @@ This project is an independent open-source tool. It is not affiliated with, endo
 <div align="center">
   <sub>Built for developers who use multiple AI coding assistants.</sub>
   <br>
-  <a href="https://github.com/yiyao-ai/proxypool-hub">
-    <img src="https://img.shields.io/github/stars/yiyao-ai/proxypool-hub?style=social" alt="Star on GitHub">
+  <a href="https://github.com/codeking-ai/cligate">
+    <img src="https://img.shields.io/github/stars/codeking-ai/cligate?style=social" alt="Star on GitHub">
   </a>
 </div>
