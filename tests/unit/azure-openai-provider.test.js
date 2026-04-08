@@ -647,6 +647,51 @@ test('AzureOpenAIProvider.sendAnthropicRequest rewrites max_completion_tokens to
   }
 });
 
+test('AzureOpenAIProvider.sendAnthropicRequest rewrites reasoning effort auto to medium for Azure responses API', async () => {
+  const provider = new AzureOpenAIProvider({
+    id: 'azure_4c',
+    name: 'azure-test',
+    apiKey: 'test-key',
+    baseUrl: 'https://example-resource.openai.azure.com/',
+    deploymentName: 'deployment-gpt54'
+  });
+
+  const originalFetch = global.fetch;
+  let capturedOptions = null;
+
+  global.fetch = async (_url, options) => {
+    capturedOptions = options;
+    return new Response(JSON.stringify({
+      id: 'resp_123c',
+      object: 'response',
+      model: 'deployment-gpt54',
+      status: 'completed',
+      output: [],
+      usage: {
+        input_tokens: 4,
+        output_tokens: 2,
+        total_tokens: 6
+      }
+    }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' }
+    });
+  };
+
+  try {
+    await provider.sendAnthropicRequest({
+      model: 'claude-opus-4-6',
+      thinking: { type: 'adaptive' },
+      messages: [{ role: 'user', content: 'hello' }]
+    });
+
+    const payload = JSON.parse(capturedOptions.body);
+    assert.deepEqual(payload.reasoning, { effort: 'medium' });
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
 test('AzureOpenAIProvider.sendAnthropicRequest preserves anthropic document blocks as responses input_file content', async () => {
   const provider = new AzureOpenAIProvider({
     id: 'azure_8',

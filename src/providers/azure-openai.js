@@ -225,6 +225,13 @@ function normalizeResponsesPayloadForAzure(body) {
         delete normalizedBody.max_completion_tokens;
     }
 
+    if (normalizedBody.reasoning?.effort === 'auto') {
+        normalizedBody.reasoning = {
+            ...normalizedBody.reasoning,
+            effort: 'medium'
+        };
+    }
+
     if (!Array.isArray(normalizedBody?.input)) {
         return normalizedBody;
     }
