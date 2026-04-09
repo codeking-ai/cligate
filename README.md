@@ -188,7 +188,7 @@ openai_base_url = "http://localhost:8081"
 {
   "models": {
     "providers": {
-      "proxypool": {
+      "cligate": {
         "baseUrl": "http://localhost:8081",
         "apiKey": "sk-ant-proxy",
         "api": "anthropic-messages"

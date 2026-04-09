@@ -6,7 +6,7 @@
 
 Open http://localhost:8081 → Settings tab → Click **"One-click configure OpenClaw"**.
 
-This automatically adds a `proxypool` provider to your `~/.openclaw/openclaw.json` and sets it as the default model. It works whether or not the config file already exists.
+This automatically adds a `cligate` provider to your `~/.openclaw/openclaw.json` and sets it as the default model. It works whether or not the config file already exists.
 
 ## Manual Setup
 
@@ -17,7 +17,7 @@ Add the following to `~/.openclaw/openclaw.json`:
   "models": {
     "mode": "merge",
     "providers": {
-      "proxypool": {
+      "cligate": {
         "baseUrl": "http://localhost:8081",
         "apiKey": "sk-ant-proxy",
         "api": "anthropic-messages",
@@ -56,7 +56,7 @@ Add the following to `~/.openclaw/openclaw.json`:
   "agents": {
     "defaults": {
       "model": {
-        "primary": "proxypool/claude-sonnet-4-6"
+        "primary": "cligate/claude-sonnet-4-6"
       }
     }
   }
@@ -79,9 +79,9 @@ openclaw
 
 | Model ID | Description |
 |----------|-------------|
-| `proxypool/claude-opus-4-6` | Maximum capability (routed to GPT-5.3 Codex or Anthropic API) |
-| `proxypool/claude-sonnet-4-6` | Balanced performance (routed to GPT-5.2 Codex or Anthropic API) |
-| `proxypool/claude-haiku-4-5` | Free model via Kilo AI (no auth needed) |
+| `cligate/claude-opus-4-6` | Maximum capability (routed to GPT-5.3 Codex or Anthropic API) |
+| `cligate/claude-sonnet-4-6` | Balanced performance (routed to GPT-5.2 Codex or Anthropic API) |
+| `cligate/claude-haiku-4-5` | Free model via Kilo AI (no auth needed) |
 
 ## Revert to Direct Connection
 

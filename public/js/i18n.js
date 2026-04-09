@@ -1,7 +1,7 @@
 const i18n = {
   en: {
     // Header
-    codexProxy: 'PROXYPOOL HUB',
+    codexProxy: 'CLIGATE',
     claudeProxySystem: 'AI PROXY SYSTEM',
     starOnGithub: 'Star on GitHub',
     online: 'Online',
@@ -20,7 +20,7 @@ const i18n = {
     resources: 'Resources',
 
     // Dashboard
-    chatgptProxySystem: 'PROXYPOOLHUB PROXY SYSTEM',
+    chatgptProxySystem: 'CLIGATE PROXY SYSTEM',
     live: 'Live',
     totalAccounts: 'Total Accounts',
     linkedAccounts: 'Linked accounts',
@@ -574,7 +574,7 @@ const i18n = {
     historyPanel: '历史侧栏',
     showPrompt: '系统提示词',
     hidePrompt: '收起提示词',
-    codexProxy: 'PROXYPOOL HUB',
+    codexProxy: 'CLIGATE',
     claudeProxySystem: 'AI 代理系统',
     starOnGithub: '在 GitHub 上加星',
     online: '在线',
@@ -588,7 +588,7 @@ const i18n = {
     settings: '设置',
     localModels: '本地模型',
     resources: '资源目录',
-    chatgptProxySystem: 'PROXYPOOLHUB 代理系统',
+    chatgptProxySystem: 'CLIGATE 代理系统',
     live: '实时',
     totalAccounts: '账户总数',
     linkedAccounts: '已关联账户',

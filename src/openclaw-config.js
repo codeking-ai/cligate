@@ -18,7 +18,7 @@ const OPENCLAW_CONFIG_FILE = join(OPENCLAW_DIR, 'openclaw.json');
 const CLIGATE_DIR = join(homedir(), '.cligate');
 const BACKUP_FILE = join(CLIGATE_DIR, 'openclaw-backup.json');
 
-const PROVIDER_ID = 'proxypool';
+const PROVIDER_ID = 'cligate';
 
 // ─── Model metadata for OpenClaw display ────────────────────────────────────
 // Provides contextWindow, maxTokens, reasoning, input types, and cost info
@@ -164,7 +164,7 @@ function _pickDefaultModel(models) {
 }
 
 /**
- * Set proxy mode: add proxypool provider and set it as default model.
+ * Set proxy mode: add cligate provider and set it as default model.
  * Model list is built dynamically from discovery data and Claude accounts.
  */
 export function setProxyMode(port) {
