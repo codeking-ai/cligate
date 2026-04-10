@@ -1342,7 +1342,8 @@ document.addEventListener('alpine:init', () => {
                 mappedModel: null,
                 sourceLabel: this.chatSourceLabel(this.chatSourceId),
                 citations: [],
-                pendingAction: null
+                pendingAction: null,
+                _confirming: false
             };
             this.chatMessages.push(assistantMessage);
             this.syncActiveChatSession();
@@ -1436,6 +1437,7 @@ document.addEventListener('alpine:init', () => {
                         needsUpdate = true;
                     } else if (payload.type === 'action_confirmation') {
                         assistantMessage.pendingAction = payload.pendingAction || null;
+                        assistantMessage._confirming = false;
                         needsUpdate = true;
                     } else if (payload.type === 'error') {
                         assistantMessage.content = payload.error || this.t('requestFailed');
@@ -1476,6 +1478,7 @@ document.addEventListener('alpine:init', () => {
                 assistantMessage.sourceLabel = data.source?.label || assistantMessage.sourceLabel;
                 assistantMessage.citations = Array.isArray(data.reply.citations) ? data.reply.citations : [];
                 assistantMessage.pendingAction = data.reply.pendingAction || null;
+                assistantMessage._confirming = false;
                 assistantMessage.isError = false;
                 this.chatMessages = [...this.chatMessages];
                 this.scrollChatToBottom(true);
