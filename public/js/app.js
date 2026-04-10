@@ -121,6 +121,7 @@ document.addEventListener('alpine:init', () => {
         chatStorageKey: 'cligate-chat-sessions-v1',
         chatHistoryOpen: false,
         chatSystemPromptOpen: false,
+        chatAssistantMode: true,
         chatLoading: false,
         chatSourceLoading: false,
         chatStreamController: null,
@@ -1235,6 +1236,7 @@ document.addEventListener('alpine:init', () => {
                 title: this.t('newChat'),
                 sourceId: this.chatSourceId || this.chatSources[0]?.id || '',
                 model: this.chatModel || 'gpt-5.2',
+                assistantMode: this.chatAssistantMode === true,
                 systemPrompt: '',
                 messages: [],
                 updatedAt: new Date().toISOString()
@@ -1253,12 +1255,30 @@ document.addEventListener('alpine:init', () => {
             this.activeChatSessionId = session.id;
             this.chatSourceId = session.sourceId || this.chatSources[0]?.id || '';
             this.chatModel = session.model || 'gpt-5.2';
+            this.chatAssistantMode = session.assistantMode !== false;
             this.chatSystemPrompt = session.systemPrompt || '';
             this.chatMessages = Array.isArray(session.messages) ? session.messages : [];
             this.chatInput = '';
             if (window.innerWidth < 1280) {
                 this.chatHistoryOpen = false;
             }
+            this.scrollChatToBottom();
+        },
+
+        shouldStickChatToBottom(threshold = 96) {
+            const container = this.$refs?.chatMessagesContainer;
+            if (!container) return true;
+            const distanceToBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
+            return distanceToBottom <= threshold;
+        },
+
+        scrollChatToBottom(force = false) {
+            const container = this.$refs?.chatMessagesContainer;
+            if (!container) return;
+            if (!force && !this.shouldStickChatToBottom()) return;
+            requestAnimationFrame(() => {
+                container.scrollTop = container.scrollHeight;
+            });
         },
 
         syncActiveChatSession() {
@@ -1267,6 +1287,7 @@ document.addEventListener('alpine:init', () => {
 
             session.sourceId = this.chatSourceId || '';
             session.model = this.chatModel || 'gpt-5.2';
+            session.assistantMode = this.chatAssistantMode === true;
             session.systemPrompt = this.chatSystemPrompt || '';
             session.messages = [...this.chatMessages];
             session.title = this.buildChatSessionTitle(session.messages);
@@ -1300,6 +1321,8 @@ document.addEventListener('alpine:init', () => {
         async sendChatMessage() {
             if (this.chatLoading || !this.chatInput.trim() || !this.chatSourceId) return;
 
+            const shouldAutoScroll = this.shouldStickChatToBottom();
+
             const userMessage = {
                 role: 'user',
                 content: this.chatInput.trim()
@@ -1309,6 +1332,7 @@ document.addEventListener('alpine:init', () => {
             this.chatInput = '';
             this.syncActiveChatSession();
             this.chatLoading = true;
+            this.scrollChatToBottom(shouldAutoScroll);
 
             const assistantMessage = {
                 role: 'assistant',
@@ -1316,10 +1340,13 @@ document.addEventListener('alpine:init', () => {
                 usage: null,
                 model: this.chatModel.trim() || 'gpt-5.2',
                 mappedModel: null,
-                sourceLabel: this.chatSourceLabel(this.chatSourceId)
+                sourceLabel: this.chatSourceLabel(this.chatSourceId),
+                citations: [],
+                pendingAction: null
             };
             this.chatMessages.push(assistantMessage);
             this.syncActiveChatSession();
+            this.scrollChatToBottom(true);
 
             const requestMessages = [];
             if (this.chatSystemPrompt.trim()) {
@@ -1339,7 +1366,9 @@ document.addEventListener('alpine:init', () => {
                     body: JSON.stringify({
                         sourceId: this.chatSourceId,
                         model: this.chatModel.trim() || 'gpt-5.2',
-                        messages: requestMessages
+                        messages: requestMessages,
+                        assistantMode: this.chatAssistantMode === true,
+                        uiLang: this.lang
                     }),
                     signal: this.chatStreamController.signal
                 });
@@ -1374,6 +1403,7 @@ document.addEventListener('alpine:init', () => {
             let seenDelta = false;
             let seenDone = false;
             const msgIndex = this.chatMessages.indexOf(assistantMessage);
+            let stickToBottom = true;
 
             while (true) {
                 const { done, value } = await reader.read();
@@ -1391,6 +1421,7 @@ document.addEventListener('alpine:init', () => {
                     if (payload.type === 'start') {
                         assistantMessage.mappedModel = payload.mappedModel || null;
                         assistantMessage.sourceLabel = payload.source?.label || assistantMessage.sourceLabel;
+                        assistantMessage.citations = Array.isArray(payload.assistant?.citations) ? payload.assistant.citations : [];
                         needsUpdate = true;
                     } else if (payload.type === 'delta') {
                         seenDelta = true;
@@ -1401,6 +1432,10 @@ document.addEventListener('alpine:init', () => {
                         assistantMessage.usage = payload.usage || null;
                         assistantMessage.model = payload.model || assistantMessage.model;
                         assistantMessage.mappedModel = payload.mappedModel || assistantMessage.mappedModel;
+                        assistantMessage.citations = Array.isArray(payload.citations) ? payload.citations : assistantMessage.citations;
+                        needsUpdate = true;
+                    } else if (payload.type === 'action_confirmation') {
+                        assistantMessage.pendingAction = payload.pendingAction || null;
                         needsUpdate = true;
                     } else if (payload.type === 'error') {
                         assistantMessage.content = payload.error || this.t('requestFailed');
@@ -1410,9 +1445,11 @@ document.addEventListener('alpine:init', () => {
                 }
 
                 if (needsUpdate && msgIndex >= 0) {
+                    stickToBottom = this.shouldStickChatToBottom();
                     // Replace the message object to trigger Alpine.js reactivity
                     this.chatMessages[msgIndex] = { ...assistantMessage };
                     this.chatMessages = [...this.chatMessages];
+                    this.scrollChatToBottom(stickToBottom);
                 }
             }
 
@@ -1425,7 +1462,9 @@ document.addEventListener('alpine:init', () => {
                 body: JSON.stringify({
                     sourceId: this.chatSourceId,
                     model: this.chatModel.trim() || 'gpt-5.2',
-                    messages: requestMessages
+                    messages: requestMessages,
+                    assistantMode: this.chatAssistantMode === true,
+                    uiLang: this.lang
                 })
             });
 
@@ -1435,8 +1474,11 @@ document.addEventListener('alpine:init', () => {
                 assistantMessage.model = data.model || assistantMessage.model;
                 assistantMessage.mappedModel = data.mappedModel || null;
                 assistantMessage.sourceLabel = data.source?.label || assistantMessage.sourceLabel;
+                assistantMessage.citations = Array.isArray(data.reply.citations) ? data.reply.citations : [];
+                assistantMessage.pendingAction = data.reply.pendingAction || null;
                 assistantMessage.isError = false;
                 this.chatMessages = [...this.chatMessages];
+                this.scrollChatToBottom(true);
                 return;
             }
 
@@ -1464,6 +1506,52 @@ document.addEventListener('alpine:init', () => {
 
         chatSourceLabel(sourceId) {
             return this.chatSources.find((source) => source.id === sourceId)?.label || sourceId;
+        },
+
+        formatChatCitation(citation) {
+            if (!citation) return '';
+            if (Array.isArray(citation.titlePath) && citation.titlePath.length > 0) {
+                return citation.titlePath.join(' / ');
+            }
+            return citation.title || '';
+        },
+
+        async confirmChatPendingAction(message) {
+            if (!message?.pendingAction?.confirmToken || message._confirming) return;
+
+            message._confirming = true;
+            this.chatMessages = [...this.chatMessages];
+
+            const { ok, data, error } = await this.api('/api/chat/tool-confirm', {
+                method: 'POST',
+                body: JSON.stringify({
+                    confirmToken: message.pendingAction.confirmToken
+                })
+            });
+
+            message._confirming = false;
+
+            if (ok && data?.success) {
+                const suffix = data.configPath ? `\n${data.configPath}` : '';
+                message.content = `${message.content}\n\n${data.result || ''}${suffix}`.trim();
+                message.pendingAction = null;
+                this.chatMessages = [...this.chatMessages];
+                this.syncActiveChatSession();
+                this.scrollChatToBottom(true);
+                return;
+            }
+
+            const errorMessage = data?.error || error || this.t('requestFailed');
+            this.showToast(errorMessage, 'error');
+            this.chatMessages = [...this.chatMessages];
+        },
+
+        dismissChatPendingAction(message) {
+            if (!message) return;
+            message.pendingAction = null;
+            this.chatMessages = [...this.chatMessages];
+            this.syncActiveChatSession();
+            this.scrollChatToBottom(true);
         },
 
         toggleChatHistory() {

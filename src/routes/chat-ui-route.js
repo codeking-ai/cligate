@@ -11,6 +11,8 @@ import { sendClaudeMessageWithMeta, sendClaudeStream, mapToClaudeModel, extractC
 import { listApiKeys, getProviderById, recordUsage, recordError, recordRateLimit } from '../api-key-manager.js';
 import { resolveModel } from '../model-mapping.js';
 import { logger } from '../utils/logger.js';
+import { prepareAssistantRequest } from '../assistant/assistant-chat-service.js';
+import { createPendingAssistantAction, executePendingAssistantAction } from '../assistant/tool-executor.js';
 
 export async function handleListChatSources(_req, res) {
   const chatgptSources = listAccounts().accounts
@@ -62,7 +64,7 @@ export async function handleListChatSources(_req, res) {
 }
 
 export async function handleChatWithSource(req, res) {
-  const { sourceId, model, messages, temperature } = req.body || {};
+  const { sourceId, model, messages, temperature, assistantMode, uiLang } = req.body || {};
 
   if (!sourceId || typeof sourceId !== 'string') {
     return res.status(400).json({ success: false, error: 'sourceId is required' });
@@ -73,6 +75,45 @@ export async function handleChatWithSource(req, res) {
   }
 
   const requestedModel = typeof model === 'string' && model.trim() ? model.trim() : 'gpt-5.2';
+  const assistantRequest = assistantMode === true ? prepareAssistantRequest({ messages, uiLang }) : null;
+  const outboundMessages = assistantRequest?.messages || messages;
+  const citations = assistantRequest?.citations || [];
+  const assistantMeta = assistantRequest
+    ? {
+        enabled: true,
+        language: assistantRequest.language,
+        intent: assistantRequest.intent?.type || 'general',
+        citations
+      }
+    : null;
+
+  if (assistantMode === true && assistantRequest?.intent?.type === 'tool_request' && assistantRequest.intent.actionName) {
+    const pendingAction = createPendingAssistantAction(assistantRequest.intent.actionName, {
+      language: assistantRequest.language,
+      port: req.app?.locals?.port || req.socket?.localPort || 8081
+    });
+
+    return res.json({
+      success: true,
+      source: {
+        id: sourceId,
+        kind: sourceId.split(':')[0],
+        label: sourceId
+      },
+      model: requestedModel,
+      assistant: assistantMeta,
+      reply: {
+        role: 'assistant',
+        content: assistantRequest.language === 'zh-CN'
+          ? '我可以帮你执行这个操作，请先确认下面的动作。'
+          : 'I can perform that action. Please confirm the pending action below first.',
+        model: requestedModel,
+        citations,
+        pendingAction,
+        usage: null
+      }
+    });
+  }
 
   try {
     if (sourceId.startsWith('chatgpt:')) {
@@ -84,7 +125,7 @@ export async function handleChatWithSource(req, res) {
 
       const anthropicRequest = buildAnthropicRequest({
         model: requestedModel,
-        messages,
+        messages: outboundMessages,
         temperature
       });
 
@@ -97,7 +138,8 @@ export async function handleChatWithSource(req, res) {
           label: email
         },
         model: requestedModel,
-        reply: normalizeAnthropicResponse(response, requestedModel)
+        assistant: assistantMeta,
+        reply: normalizeAnthropicResponse(response, requestedModel, { citations })
       });
     }
 
@@ -115,7 +157,7 @@ export async function handleChatWithSource(req, res) {
       try {
         const result = await sendClaudeMessageWithMeta(buildAnthropicRequest({
           model: upstreamModel,
-          messages,
+          messages: outboundMessages,
           temperature
         }), account.accessToken);
         response = result.data;
@@ -134,7 +176,7 @@ export async function handleChatWithSource(req, res) {
         account = getClaudeAccount(email) || account;
         const result = await sendClaudeMessageWithMeta(buildAnthropicRequest({
           model: upstreamModel,
-          messages,
+          messages: outboundMessages,
           temperature
         }), account.accessToken);
         response = result.data;
@@ -150,7 +192,8 @@ export async function handleChatWithSource(req, res) {
         },
         model: requestedModel,
         mappedModel: upstreamModel,
-        reply: normalizeAnthropicResponse(response, requestedModel)
+        assistant: assistantMeta,
+        reply: normalizeAnthropicResponse(response, requestedModel, { citations })
       });
     }
 
@@ -167,8 +210,8 @@ export async function handleChatWithSource(req, res) {
         ? (resolveModel('anthropic', requestedModel) || mapToClaudeModel(requestedModel))
         : (resolveModel(provider.type, requestedModel) || requestedModel);
       const requestBody = isAnthropic
-        ? buildAnthropicRequest({ model: mappedModel, messages, temperature })
-        : buildOpenAIChatRequest({ model: mappedModel, messages, temperature });
+        ? buildAnthropicRequest({ model: mappedModel, messages: outboundMessages, temperature })
+        : buildOpenAIChatRequest({ model: mappedModel, messages: outboundMessages, temperature });
 
       const response = await provider.sendRequest(requestBody);
       const durationMs = Date.now() - startTime;
@@ -210,9 +253,10 @@ export async function handleChatWithSource(req, res) {
         },
         model: requestedModel,
         mappedModel,
+        assistant: assistantMeta,
         reply: isAnthropic
-          ? normalizeAnthropicResponse(parsed, requestedModel)
-          : normalizeOpenAIResponse(parsed, requestedModel)
+          ? normalizeAnthropicResponse(parsed, requestedModel, { citations })
+          : normalizeOpenAIResponse(parsed, requestedModel, { citations })
       });
     }
 
@@ -224,7 +268,7 @@ export async function handleChatWithSource(req, res) {
 }
 
 export async function handleStreamChatWithSource(req, res) {
-  const { sourceId, model, messages, temperature } = req.body || {};
+  const { sourceId, model, messages, temperature, assistantMode, uiLang } = req.body || {};
 
   if (!sourceId || typeof sourceId !== 'string') {
     return res.status(400).json({ success: false, error: 'sourceId is required' });
@@ -235,8 +279,51 @@ export async function handleStreamChatWithSource(req, res) {
   }
 
   const requestedModel = typeof model === 'string' && model.trim() ? model.trim() : 'gpt-5.2';
+  const assistantRequest = assistantMode === true ? prepareAssistantRequest({ messages, uiLang }) : null;
+  const outboundMessages = assistantRequest?.messages || messages;
+  const citations = assistantRequest?.citations || [];
+  const assistantMeta = assistantRequest
+    ? {
+        enabled: true,
+        language: assistantRequest.language,
+        intent: assistantRequest.intent?.type || 'general',
+        citations
+      }
+    : null;
 
   prepareSseResponse(res);
+
+  if (assistantMode === true && assistantRequest?.intent?.type === 'tool_request' && assistantRequest.intent.actionName) {
+    const pendingAction = createPendingAssistantAction(assistantRequest.intent.actionName, {
+      language: assistantRequest.language,
+      port: req.app?.locals?.port || req.socket?.localPort || 8081
+    });
+
+    writeSse(res, {
+      type: 'start',
+      source: { id: sourceId, kind: sourceId.split(':')[0], label: sourceId },
+      model: requestedModel,
+      assistant: assistantMeta
+    });
+    writeSse(res, {
+      type: 'delta',
+      text: assistantRequest.language === 'zh-CN'
+        ? '我可以帮你执行这个操作，请先确认下面的动作。'
+        : 'I can perform that action. Please confirm the pending action below first.'
+    });
+    writeSse(res, {
+      type: 'action_confirmation',
+      pendingAction
+    });
+    writeSse(res, {
+      type: 'done',
+      model: requestedModel,
+      mappedModel: null,
+      usage: null,
+      citations
+    });
+    return res.end();
+  }
 
   try {
     if (sourceId.startsWith('chatgpt:')) {
@@ -250,12 +337,13 @@ export async function handleStreamChatWithSource(req, res) {
       writeSse(res, {
         type: 'start',
         source: { id: sourceId, kind: 'chatgpt-account', label: email },
-        model: requestedModel
+        model: requestedModel,
+        assistant: assistantMeta
       });
 
       const anthropicRequest = buildAnthropicRequest({
         model: requestedModel,
-        messages,
+        messages: outboundMessages,
         temperature,
         stream: true
       });
@@ -263,7 +351,7 @@ export async function handleStreamChatWithSource(req, res) {
       return await streamAnthropicEvents(
         sendMessageStream(anthropicRequest, creds.accessToken, creds.accountId),
         res,
-        { requestedModel }
+        { requestedModel, citations }
       );
     }
 
@@ -281,18 +369,23 @@ export async function handleStreamChatWithSource(req, res) {
         type: 'start',
         source: { id: sourceId, kind: 'claude-account', label: account.displayName || email },
         model: requestedModel,
-        mappedModel: upstreamModel
+        mappedModel: upstreamModel,
+        assistant: assistantMeta
       });
 
       try {
         const response = await sendClaudeStream(buildAnthropicRequest({
           model: upstreamModel,
-          messages,
+          messages: outboundMessages,
           temperature,
           stream: true
         }), account.accessToken);
         recordClaudeRuntimeObservation(account.email, extractClaudeRateLimitHeaders(response.headers), { model: upstreamModel });
-        return await streamAnthropicResponse(response, res, { requestedModel, mappedModel: upstreamModel });
+        return await streamAnthropicResponse(response, res, {
+          requestedModel,
+          mappedModel: upstreamModel,
+          citations
+        });
       } catch (error) {
         recordClaudeRuntimeObservation(account.email, error.rateLimitHeaders, { model: upstreamModel });
         if (!error.message?.startsWith('AUTH_EXPIRED')) {
@@ -307,12 +400,16 @@ export async function handleStreamChatWithSource(req, res) {
         account = getClaudeAccount(email) || account;
         const retryResponse = await sendClaudeStream(buildAnthropicRequest({
           model: upstreamModel,
-          messages,
+          messages: outboundMessages,
           temperature,
           stream: true
         }), account.accessToken);
         recordClaudeRuntimeObservation(account.email, extractClaudeRateLimitHeaders(retryResponse.headers), { model: upstreamModel });
-        return await streamAnthropicResponse(retryResponse, res, { requestedModel, mappedModel: upstreamModel });
+        return await streamAnthropicResponse(retryResponse, res, {
+          requestedModel,
+          mappedModel: upstreamModel,
+          citations
+        });
       }
     }
 
@@ -333,14 +430,15 @@ export async function handleStreamChatWithSource(req, res) {
         type: 'start',
         source: { id: sourceId, kind: 'api-key', label: provider.name },
         model: requestedModel,
-        mappedModel
+        mappedModel,
+        assistant: assistantMeta
       });
 
       const startTime = Date.now();
       if (isAnthropic) {
         const response = await provider.sendRequest(buildAnthropicRequest({
           model: mappedModel,
-          messages,
+          messages: outboundMessages,
           temperature,
           stream: true
         }), { stream: true });
@@ -360,13 +458,14 @@ export async function handleStreamChatWithSource(req, res) {
           requestedModel,
           mappedModel,
           provider,
-          startedAt: startTime
+          startedAt: startTime,
+          citations
         });
       }
 
       const response = await provider.sendRequest(buildOpenAIChatRequest({
         model: mappedModel,
-        messages,
+        messages: outboundMessages,
         temperature,
         stream: true
       }), { stream: true });
@@ -388,7 +487,8 @@ export async function handleStreamChatWithSource(req, res) {
           requestedModel,
           mappedModel,
           provider,
-          startedAt: startTime
+          startedAt: startTime,
+          citations
         });
       }
 
@@ -402,11 +502,17 @@ export async function handleStreamChatWithSource(req, res) {
       recordUsage(provider.id, { ...usage, model: mappedModel });
       logger.info(`[ChatUI] stream fallback via ${provider.type}/${provider.name} | ${requestedModel} -> ${mappedModel} | ${Date.now() - startTime}ms`);
 
-      const reply = normalizeOpenAIResponse(parsed, requestedModel);
+      const reply = normalizeOpenAIResponse(parsed, requestedModel, { citations });
       if (reply.content) {
         writeSse(res, { type: 'delta', text: reply.content });
       }
-      writeSse(res, { type: 'done', model: requestedModel, mappedModel, usage: reply.usage || null });
+      writeSse(res, {
+        type: 'done',
+        model: requestedModel,
+        mappedModel,
+        usage: reply.usage || null,
+        citations: reply.citations || []
+      });
       return res.end();
     }
 
@@ -497,7 +603,7 @@ function coerceTextContent(content) {
   return '';
 }
 
-function normalizeAnthropicResponse(response, requestedModel) {
+function normalizeAnthropicResponse(response, requestedModel, { citations = [] } = {}) {
   const text = (response.content || [])
     .filter((block) => block?.type === 'text')
     .map((block) => block.text || '')
@@ -507,6 +613,7 @@ function normalizeAnthropicResponse(response, requestedModel) {
     role: 'assistant',
     content: text,
     model: requestedModel,
+    citations,
     usage: {
       prompt_tokens: response.usage?.input_tokens || 0,
       completion_tokens: response.usage?.output_tokens || 0,
@@ -515,12 +622,13 @@ function normalizeAnthropicResponse(response, requestedModel) {
   };
 }
 
-function normalizeOpenAIResponse(response, requestedModel) {
+function normalizeOpenAIResponse(response, requestedModel, { citations = [] } = {}) {
   const choice = response.choices?.[0];
   return {
     role: 'assistant',
     content: choice?.message?.content || '',
     model: requestedModel,
+    citations,
     usage: {
       prompt_tokens: response.usage?.prompt_tokens || 0,
       completion_tokens: response.usage?.completion_tokens || 0,
@@ -541,7 +649,7 @@ function writeSse(res, payload) {
   res.write(`data: ${JSON.stringify(payload)}\n\n`);
 }
 
-async function streamAnthropicEvents(eventIterator, res, { requestedModel, mappedModel = null, provider = null, startedAt = Date.now() }) {
+async function streamAnthropicEvents(eventIterator, res, { requestedModel, mappedModel = null, provider = null, startedAt = Date.now(), citations = [] }) {
   let usage = null;
   let streamedText = false;
 
@@ -576,8 +684,26 @@ async function streamAnthropicEvents(eventIterator, res, { requestedModel, mappe
   if (!streamedText) {
     writeSse(res, { type: 'delta', text: '' });
   }
-  writeSse(res, { type: 'done', model: requestedModel, mappedModel, usage });
+  writeSse(res, { type: 'done', model: requestedModel, mappedModel, usage, citations });
   res.end();
+}
+
+export async function handleConfirmAssistantToolAction(req, res) {
+  const { confirmToken } = req.body || {};
+
+  if (typeof confirmToken !== 'string' || !confirmToken.trim()) {
+    return res.status(400).json({
+      success: false,
+      error: 'confirmToken is required'
+    });
+  }
+
+  const result = await executePendingAssistantAction(confirmToken.trim());
+  if (!result.success) {
+    return res.status(400).json(result);
+  }
+
+  return res.json(result);
 }
 
 async function streamAnthropicResponse(response, res, options) {
@@ -633,7 +759,7 @@ async function* parseAnthropicStream(response) {
   }
 }
 
-async function streamOpenAIResponse(response, res, { requestedModel, mappedModel = null, provider = null, startedAt = Date.now() }) {
+async function streamOpenAIResponse(response, res, { requestedModel, mappedModel = null, provider = null, startedAt = Date.now(), citations = [] }) {
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let buffer = '';
@@ -690,8 +816,8 @@ async function streamOpenAIResponse(response, res, { requestedModel, mappedModel
   if (!streamedText) {
     writeSse(res, { type: 'delta', text: '' });
   }
-  writeSse(res, { type: 'done', model: requestedModel, mappedModel, usage });
+  writeSse(res, { type: 'done', model: requestedModel, mappedModel, usage, citations });
   res.end();
 }
 
-export default { handleListChatSources, handleChatWithSource, handleStreamChatWithSource };
+export default { handleListChatSources, handleChatWithSource, handleStreamChatWithSource, handleConfirmAssistantToolAction };

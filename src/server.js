@@ -34,6 +34,7 @@ export function createServer({ port }) {
   startModelDiscovery();
 
   const app = express();
+  app.locals.port = port;
   app.disable('x-powered-by');
 
   // High-level request logging

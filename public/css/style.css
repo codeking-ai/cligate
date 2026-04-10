@@ -661,12 +661,17 @@ table .btn-outline:hover {
 
 .chat-layout {
     min-width: 0;
+    height: 100%;
 }
 
 .chat-control-fixed,
 .chat-control-flex,
 .chat-history-panel {
     min-width: 0;
+}
+
+.main-panel > .view-container[x-show="activeTab === 'chat'"] {
+    height: 100%;
 }
 
 @media (max-width: 1023px) {
