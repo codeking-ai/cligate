@@ -27,6 +27,11 @@ export class AgentRuntimeEventBus {
     return () => this.emitter.off(sessionId, listener);
   }
 
+  subscribeAll(listener) {
+    this.emitter.on('*', listener);
+    return () => this.emitter.off('*', listener);
+  }
+
   getRecentEvents(sessionId, limit = this.recentLimit) {
     const events = this.recentBySession.get(sessionId) || [];
     return events.slice(-Math.max(0, limit));
@@ -34,4 +39,3 @@ export class AgentRuntimeEventBus {
 }
 
 export default AgentRuntimeEventBus;
-

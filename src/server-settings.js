@@ -18,8 +18,45 @@ const DEFAULT_SETTINGS = {
     antigravityEnabled: true,
     enableFreeModels: true,              // Allow routing to system free models (Kilo)
     enableRequestLogging: true,          // Log full request/response content
-    requestLogRetentionDays: 7           // Days to keep request logs
+    requestLogRetentionDays: 7,          // Days to keep request logs
+    channels: {
+        telegram: {
+            enabled: false,
+            mode: 'polling',
+            botToken: '',
+            pollingIntervalMs: 2000,
+            defaultRuntimeProvider: 'codex',
+            model: '',
+            cwd: '',
+            requirePairing: false
+        },
+        feishu: {
+            enabled: false,
+            mode: 'webhook',
+            appId: '',
+            appSecret: '',
+            encryptKey: '',
+            verificationToken: '',
+            defaultRuntimeProvider: 'codex',
+            model: '',
+            cwd: '',
+            requirePairing: false
+        }
+    }
 };
+
+function normalizeChannelsConfig(channels = {}) {
+    return {
+        telegram: {
+            ...DEFAULT_SETTINGS.channels.telegram,
+            ...(channels.telegram || {})
+        },
+        feishu: {
+            ...DEFAULT_SETTINGS.channels.feishu,
+            ...(channels.feishu || {})
+        }
+    };
+}
 
 function ensureConfigDir() {
     if (!existsSync(CONFIG_DIR)) {
@@ -40,7 +77,8 @@ export function getServerSettings() {
             ...DEFAULT_SETTINGS,
             ...data,
             accountStrategy: normalizeStrategyName(data.accountStrategy),
-            appRouting: normalizeAppRoutingConfig(data.appRouting)
+            appRouting: normalizeAppRoutingConfig(data.appRouting),
+            channels: normalizeChannelsConfig(data.channels)
         };
     } catch (error) {
         console.error('[ServerSettings] Failed to read settings:', error.message);
@@ -54,7 +92,8 @@ export function setServerSettings(patch = {}) {
         ...current,
         ...patch,
         accountStrategy: normalizeStrategyName(patch.accountStrategy ?? current.accountStrategy),
-        appRouting: normalizeAppRoutingConfig(patch.appRouting || current.appRouting)
+        appRouting: normalizeAppRoutingConfig(patch.appRouting || current.appRouting),
+        channels: normalizeChannelsConfig(patch.channels || current.channels)
     };
 
     ensureConfigDir();

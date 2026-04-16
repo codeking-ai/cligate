@@ -1,0 +1,185 @@
+import agentChannelConversationStore from '../agent-channels/conversation-store.js';
+import agentChannelManager from '../agent-channels/manager.js';
+import agentChannelPairingStore from '../agent-channels/pairing-store.js';
+import agentChannelRegistry from '../agent-channels/registry.js';
+import { getServerSettings } from '../server-settings.js';
+
+function parseLimit(value, fallback = 50) {
+  const parsed = Number.parseInt(String(value || ''), 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
+  return parsed;
+}
+
+function decorateConversation(conversation) {
+  if (!conversation) return null;
+  const pairing = agentChannelPairingStore.get(
+    conversation.channel,
+    conversation.accountId,
+    conversation.externalUserId,
+    conversation.externalConversationId
+  );
+  return {
+    ...conversation,
+    pairingStatus: pairing?.status || null,
+    pairingCode: pairing?.code || '',
+    pairingApprovedAt: pairing?.approvedAt || null
+  };
+}
+
+export function handleListAgentChannelProviders(_req, res) {
+  res.json({
+    success: true,
+    providers: agentChannelManager.getProviderStatuses()
+  });
+}
+
+export function handleGetAgentChannelSettings(_req, res) {
+  res.json({
+    success: true,
+    channels: getServerSettings().channels || {}
+  });
+}
+
+export async function handleUpdateAgentChannelSettings(req, res) {
+  try {
+    const channelId = String(req.params.channel || '');
+    if (!channelId) {
+      return res.status(400).json({ success: false, error: 'channel is required' });
+    }
+
+    const patch = req.body || {};
+    const channel = agentChannelManager.updateChannelSettings(channelId, patch);
+    await agentChannelManager.refresh();
+
+    return res.json({
+      success: true,
+      channel
+    });
+  } catch (error) {
+    return res.status(400).json({ success: false, error: error.message });
+  }
+}
+
+export async function handleRefreshAgentChannels(_req, res) {
+  const providers = await agentChannelManager.refresh();
+  res.json({
+    success: true,
+    providers
+  });
+}
+
+export async function handleFeishuChannelWebhook(req, res) {
+  try {
+    const provider = agentChannelRegistry.get('feishu');
+    if (!provider) {
+      return res.status(404).json({ success: false, error: 'feishu provider unavailable' });
+    }
+
+    const settings = getServerSettings().channels?.feishu || {};
+    provider.settings = settings;
+    provider.router = agentChannelManager.router;
+
+    const result = await provider.handleWebhook(req.body || {}, {
+      cwd: settings.cwd || '',
+      model: settings.model || ''
+    });
+
+    return res.status(result?.status || 200).json(result?.body || { success: true });
+  } catch (error) {
+    return res.status(500).json({ success: false, error: error.message });
+  }
+}
+
+export function handleListAgentChannelConversations(req, res) {
+  res.json({
+    success: true,
+    conversations: agentChannelConversationStore.list({
+      limit: parseLimit(req.query.limit, 50)
+    }).map(decorateConversation)
+  });
+}
+
+export function handleGetAgentChannelConversation(req, res) {
+  const conversation = agentChannelConversationStore.get(String(req.params.id || ''));
+  if (!conversation) {
+    return res.status(404).json({ success: false, error: 'conversation not found' });
+  }
+
+  return res.json({
+    success: true,
+    conversation: decorateConversation(conversation)
+  });
+}
+
+export function handleResetAgentChannelConversation(req, res) {
+  const conversation = agentChannelConversationStore.clearActiveRuntimeSession(String(req.params.id || ''));
+  if (!conversation) {
+    return res.status(404).json({ success: false, error: 'conversation not found' });
+  }
+
+  return res.json({
+    success: true,
+    conversation: decorateConversation(conversation)
+  });
+}
+
+function resolveConversation(req) {
+  const conversation = agentChannelConversationStore.get(String(req.params.conversationId || ''));
+  if (!conversation) {
+    throw new Error('conversation not found');
+  }
+  return conversation;
+}
+
+export function handleApproveAgentChannelPairing(req, res) {
+  try {
+    const conversation = resolveConversation(req);
+    const pairing = agentChannelPairingStore.approve({
+      channel: conversation.channel,
+      accountId: conversation.accountId,
+      externalUserId: conversation.externalUserId,
+      externalConversationId: conversation.externalConversationId,
+      approvedBy: req.body?.approvedBy || 'dashboard'
+    });
+    if (!pairing) {
+      return res.status(404).json({ success: false, error: 'pairing not found' });
+    }
+    return res.json({ success: true, pairing });
+  } catch (error) {
+    const status = /not found/i.test(error.message) ? 404 : 400;
+    return res.status(status).json({ success: false, error: error.message });
+  }
+}
+
+export function handleDenyAgentChannelPairing(req, res) {
+  try {
+    const conversation = resolveConversation(req);
+    const pairing = agentChannelPairingStore.deny({
+      channel: conversation.channel,
+      accountId: conversation.accountId,
+      externalUserId: conversation.externalUserId,
+      externalConversationId: conversation.externalConversationId,
+      approvedBy: req.body?.approvedBy || 'dashboard'
+    });
+    if (!pairing) {
+      return res.status(404).json({ success: false, error: 'pairing not found' });
+    }
+    return res.json({ success: true, pairing });
+  } catch (error) {
+    const status = /not found/i.test(error.message) ? 404 : 400;
+    return res.status(status).json({ success: false, error: error.message });
+  }
+}
+
+export default {
+  handleListAgentChannelProviders,
+  handleGetAgentChannelSettings,
+  handleUpdateAgentChannelSettings,
+  handleRefreshAgentChannels,
+  handleFeishuChannelWebhook,
+  handleListAgentChannelConversations,
+  handleGetAgentChannelConversation,
+  handleResetAgentChannelConversation,
+  handleApproveAgentChannelPairing,
+  handleDenyAgentChannelPairing
+};

@@ -1,0 +1,294 @@
+import { createNormalizedChannelMessage } from '../models.js';
+
+function buildDisplayName(from = {}) {
+  return from.username || [from.first_name, from.last_name].filter(Boolean).join(' ') || String(from.id || '');
+}
+
+function mapCallbackDataToText(data) {
+  const raw = String(data || '');
+  if (raw.startsWith('cligate:approve')) {
+    return '/approve';
+  }
+  if (raw.startsWith('cligate:deny')) {
+    return '/deny';
+  }
+  return raw;
+}
+
+function buildRouterResultText(result) {
+  switch (result?.type) {
+    case 'pairing_required':
+      return `Pairing required. Code: ${result?.pairing?.code || ''}`.trim();
+    case 'command_error':
+      return result.message || 'Command error';
+    case 'runtime_started':
+      return `Task accepted. Session ${result?.session?.id || ''} started with ${result?.session?.provider || result?.provider || 'agent'}.`.trim();
+    case 'runtime_continued':
+      return `Sent follow-up to session ${result?.session?.id || ''}.`.trim();
+    case 'runtime_cancelled':
+      return `Session ${result?.session?.id || ''} cancelled.`.trim();
+    case 'runtime_status':
+      return `Session ${result?.session?.id || ''}: ${result?.session?.status || 'unknown'}${result?.session?.summary ? `\n${result.session.summary}` : ''}`.trim();
+    case 'approval_resolved':
+      return `Approval ${result?.approval?.status || 'resolved'}.`;
+    case 'question_answered':
+      return 'Answer sent to the active task.';
+    default:
+      return '';
+  }
+}
+
+export class TelegramChannelProvider {
+  constructor({ fetchImpl = globalThis.fetch } = {}) {
+    this.id = 'telegram';
+    this.fetchImpl = fetchImpl;
+    this.capabilities = {
+      mode: 'polling',
+      supportsWebhook: true,
+      supportsPolling: true,
+      supportsInteractiveApproval: true,
+      supportsRichCard: false,
+      supportsThreading: false,
+      supportsEditMessage: true
+    };
+    this.running = false;
+    this.timer = null;
+    this.pollInFlight = false;
+    this.offset = 0;
+    this.router = null;
+    this.settings = null;
+    this.logger = console;
+  }
+
+  getStatus() {
+    return {
+      running: this.running,
+      mode: this.settings?.mode || this.capabilities.mode,
+      offset: this.offset
+    };
+  }
+
+  async start({ settings, router, logger } = {}) {
+    this.settings = settings || {};
+    this.router = router || null;
+    this.logger = logger || console;
+
+    if (!this.fetchImpl) {
+      return { started: false, reason: 'fetch is unavailable' };
+    }
+    if (!this.settings?.botToken) {
+      return { started: false, reason: 'telegram botToken is not configured' };
+    }
+    if ((this.settings.mode || 'polling') !== 'polling') {
+      return { started: false, reason: `unsupported telegram mode: ${this.settings.mode}` };
+    }
+
+    this.running = true;
+    this._scheduleNextPoll(0);
+    return { started: true };
+  }
+
+  async stop() {
+    this.running = false;
+    if (this.timer) {
+      clearTimeout(this.timer);
+      this.timer = null;
+    }
+    return { stopped: true };
+  }
+
+  async callApi(method, payload = {}) {
+    if (!this.settings?.botToken) {
+      throw new Error('telegram botToken is not configured');
+    }
+    const response = await this.fetchImpl(
+      `https://api.telegram.org/bot${this.settings.botToken}/${method}`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(payload)
+      }
+    );
+
+    const data = await response.json();
+    if (!response.ok || data?.ok === false) {
+      throw new Error(data?.description || `Telegram API ${method} failed`);
+    }
+    return data.result;
+  }
+
+  _scheduleNextPoll(delayMs = null) {
+    if (!this.running) {
+      return;
+    }
+    const waitMs = Number.isFinite(Number(delayMs))
+      ? Number(delayMs)
+      : Number(this.settings?.pollingIntervalMs || 2000);
+    this.timer = setTimeout(() => {
+      this.pollOnce().catch((error) => {
+        this.logger?.warn?.(`[TelegramChannel] Poll failed: ${error.message}`);
+      });
+    }, Math.max(0, waitMs));
+  }
+
+  normalizeInbound(update) {
+    if (update?.message?.text) {
+      const message = update.message;
+      return createNormalizedChannelMessage({
+        channel: 'telegram',
+        accountId: 'default',
+        deliveryMode: 'polling',
+        externalMessageId: String(message.message_id || ''),
+        externalConversationId: String(message.chat?.id || ''),
+        externalUserId: String(message.from?.id || ''),
+        externalUserName: buildDisplayName(message.from),
+        text: String(message.text || ''),
+        messageType: 'text',
+        raw: update
+      });
+    }
+
+    if (update?.callback_query?.data) {
+      const callback = update.callback_query;
+      return createNormalizedChannelMessage({
+        channel: 'telegram',
+        accountId: 'default',
+        deliveryMode: 'polling',
+        externalMessageId: String(callback.id || ''),
+        externalConversationId: String(callback.message?.chat?.id || ''),
+        externalUserId: String(callback.from?.id || ''),
+        externalUserName: buildDisplayName(callback.from),
+        text: mapCallbackDataToText(callback.data),
+        messageType: 'action',
+        action: {
+          type: 'callback_query',
+          callbackQueryId: String(callback.id || ''),
+          data: String(callback.data || '')
+        },
+        raw: update
+      });
+    }
+
+    return null;
+  }
+
+  async pollOnce() {
+    if (!this.running || this.pollInFlight) {
+      return 0;
+    }
+
+    this.pollInFlight = true;
+    try {
+      const updates = await this.callApi('getUpdates', {
+        offset: this.offset > 0 ? this.offset : undefined,
+        timeout: 0,
+        allowed_updates: ['message', 'callback_query']
+      });
+
+      let processed = 0;
+      for (const update of updates || []) {
+        if (Number.isFinite(Number(update?.update_id))) {
+          this.offset = Number(update.update_id) + 1;
+        }
+
+        const inbound = this.normalizeInbound(update);
+        if (!inbound) {
+          continue;
+        }
+
+        const result = await this.router.routeInboundMessage(inbound, {
+          defaultRuntimeProvider: this.settings?.defaultRuntimeProvider || 'codex',
+          cwd: this.settings?.cwd || '',
+          model: this.settings?.model || ''
+        });
+
+        await this.handleRouterResult(inbound, result);
+        if (inbound.action?.type === 'callback_query') {
+          await this.answerCallback({
+            callbackQueryId: inbound.action.callbackQueryId,
+            text: 'Processed'
+          });
+        }
+        processed += 1;
+      }
+
+      return processed;
+    } finally {
+      this.pollInFlight = false;
+      if (this.running) {
+        this._scheduleNextPoll();
+      }
+    }
+  }
+
+  async handleRouterResult(inbound, result) {
+    const text = buildRouterResultText(result);
+    if (!text || result?.type === 'duplicate') {
+      return null;
+    }
+
+    return this.sendMessage({
+      conversation: {
+        externalConversationId: inbound.externalConversationId
+      },
+      text
+    });
+  }
+
+  async sendMessage({ conversation, text, buttons = [] } = {}) {
+    const payload = {
+      chat_id: conversation?.externalConversationId,
+      text: String(text || '')
+    };
+
+    if (buttons.length > 0) {
+      payload.reply_markup = {
+        inline_keyboard: [
+          buttons.map((button) => ({
+            text: button.text,
+            callback_data: `cligate:${button.action || button.id || 'action'}:${button.approvalId || ''}`
+          }))
+        ]
+      };
+    }
+
+    const result = await this.callApi('sendMessage', payload);
+    return {
+      messageId: String(result?.message_id || '')
+    };
+  }
+
+  async editMessage({ conversation, messageId, text, buttons = [] } = {}) {
+    const payload = {
+      chat_id: conversation?.externalConversationId,
+      message_id: Number(messageId),
+      text: String(text || '')
+    };
+
+    if (buttons.length > 0) {
+      payload.reply_markup = {
+        inline_keyboard: [
+          buttons.map((button) => ({
+            text: button.text,
+            callback_data: `cligate:${button.action || button.id || 'action'}:${button.approvalId || ''}`
+          }))
+        ]
+      };
+    }
+
+    await this.callApi('editMessageText', payload);
+    return { messageId: String(messageId || '') };
+  }
+
+  async answerCallback({ callbackQueryId, text = '' } = {}) {
+    await this.callApi('answerCallbackQuery', {
+      callback_query_id: callbackQueryId,
+      text
+    });
+    return { ok: true };
+  }
+}
+
+export default TelegramChannelProvider;

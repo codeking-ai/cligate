@@ -46,6 +46,18 @@ import {
   handleStreamAgentRuntimeSession
 } from './agent-runtimes-route.js';
 import {
+  handleListAgentChannelProviders,
+  handleGetAgentChannelSettings,
+  handleUpdateAgentChannelSettings,
+  handleRefreshAgentChannels,
+  handleFeishuChannelWebhook,
+  handleListAgentChannelConversations,
+  handleGetAgentChannelConversation,
+  handleResetAgentChannelConversation,
+  handleApproveAgentChannelPairing,
+  handleDenyAgentChannelPairing
+} from './agent-channels-route.js';
+import {
   handleListAccounts,
   handleAccountStatus,
   handleOAuthCleanup,
@@ -303,6 +315,18 @@ export function registerApiRoutes(app, { port }) {
   app.post('/api/agent-runtimes/sessions/:id/approval', handleResolveAgentRuntimeApproval);
   app.post('/api/agent-runtimes/sessions/:id/question', handleAnswerAgentRuntimeQuestion);
   app.post('/api/agent-runtimes/sessions/:id/cancel', handleCancelAgentRuntimeSession);
+
+  // ─── Agent Channel Gateway ──────────────────────────────────────────────
+  app.get('/api/agent-channels/providers', handleListAgentChannelProviders);
+  app.get('/api/agent-channels/settings', handleGetAgentChannelSettings);
+  app.put('/api/agent-channels/settings/:channel', handleUpdateAgentChannelSettings);
+  app.post('/api/agent-channels/refresh', handleRefreshAgentChannels);
+  app.post('/api/agent-channels/feishu/webhook', handleFeishuChannelWebhook);
+  app.get('/api/agent-channels/conversations', handleListAgentChannelConversations);
+  app.get('/api/agent-channels/conversations/:id', handleGetAgentChannelConversation);
+  app.post('/api/agent-channels/conversations/:id/reset', handleResetAgentChannelConversation);
+  app.post('/api/agent-channels/pairing/:channel/:conversationId/approve', handleApproveAgentChannelPairing);
+  app.post('/api/agent-channels/pairing/:channel/:conversationId/deny', handleDenyAgentChannelPairing);
 
   // ─── Tool Installer ────────────────────────────────────────────────────
   app.get('/api/tools/status', handleGetToolsStatus);

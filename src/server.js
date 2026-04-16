@@ -14,6 +14,7 @@ import { handleResponses } from './routes/responses-route.js';
 import { setRequestLoggingEnabled } from './request-logger.js';
 import { getServerSettings } from './server-settings.js';
 import { startModelDiscovery } from './model-discovery.js';
+import agentChannelManager from './agent-channels/manager.js';
 
 export function createServer({ port }) {
   ensureAccountsPersist();
@@ -35,6 +36,7 @@ export function createServer({ port }) {
 
   const app = express();
   app.locals.port = port;
+  app.locals.agentChannelManager = agentChannelManager;
   app.disable('x-powered-by');
 
   // High-level request logging
@@ -84,6 +86,10 @@ export function createServer({ port }) {
 
   registerApiRoutes(app, { port });
 
+  agentChannelManager.start().catch((error) => {
+    console.error('[AgentChannel] Failed to start channel manager:', error.message);
+  });
+
   // Global error handler — catches unhandled errors in route handlers
   app.use((err, req, res, _next) => {
     console.error(`[Server] Unhandled error on ${req.method} ${req.originalUrl}:`, err);
@@ -97,7 +103,11 @@ export function createServer({ port }) {
 
 export function startServer({ port }) {
   const app = createServer({ port });
-  return app.listen(port);
+  const server = app.listen(port);
+  server.on('close', () => {
+    agentChannelManager.stop().catch(() => {});
+  });
+  return server;
 }
 
 export default { createServer, startServer };

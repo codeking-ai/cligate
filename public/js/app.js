@@ -71,6 +71,15 @@ document.addEventListener('alpine:init', () => {
         localRuntimeSaving: false,
         localRuntimeChecking: false,
         localRuntimeModelsLoading: false,
+        channelProviders: [],
+        channelProvidersLoading: false,
+        channelSettings: {
+            telegram: { enabled: false, mode: 'polling', botToken: '', pollingIntervalMs: 2000, defaultRuntimeProvider: 'codex', model: '', cwd: '', requirePairing: false },
+            feishu: { enabled: false, mode: 'webhook', appId: '', appSecret: '', encryptKey: '', verificationToken: '', defaultRuntimeProvider: 'codex', model: '', cwd: '', requirePairing: false }
+        },
+        channelSettingsSaving: { telegram: false, feishu: false },
+        channelConversations: [],
+        channelConversationsLoading: false,
 
         // Proxy status
         proxyStatus: {
@@ -244,6 +253,12 @@ document.addEventListener('alpine:init', () => {
                     this.loadAgentRuntimeSessions();
                 }
             }, 15000);
+            setInterval(() => {
+                if (this.activeTab === 'channels') {
+                    this.loadChannelProviders();
+                    this.loadChannelConversations();
+                }
+            }, 15000);
             this.startLogStream();
             this.loadHaikuModelSetting();
             this.loadAccountStrategySetting();
@@ -323,6 +338,11 @@ document.addEventListener('alpine:init', () => {
                 this.loadChatModels();
                 this.loadAgentRuntimeProviders();
                 this.loadAgentRuntimeSessions();
+            }
+            if (tab === 'channels') {
+                this.loadChannelProviders();
+                this.loadChannelSettings();
+                this.loadChannelConversations();
             }
             if (tab === 'settings') {
                 if (!this.modelMappingData) this.loadModelMappings();
@@ -1261,6 +1281,28 @@ document.addEventListener('alpine:init', () => {
             if (status === 'ready') return 'bg-green-500/10 text-green-300 border-green-500/30';
             if (status === 'failed') return 'bg-red-500/10 text-red-300 border-red-500/30';
             if (status === 'cancelled') return 'bg-gray-500/10 text-gray-300 border-gray-500/30';
+            return 'bg-space-800 text-gray-300 border-space-border/40';
+        },
+
+        channelProviderStatusClass(provider) {
+            const status = provider?.status || {};
+            if (status.running) return 'bg-green-500/10 text-green-300 border-green-500/30';
+            if (status.enabled && status.lastError) return 'bg-amber-500/10 text-amber-300 border-amber-500/30';
+            if (status.enabled) return 'bg-blue-500/10 text-blue-300 border-blue-500/30';
+            return 'bg-space-800 text-gray-300 border-space-border/40';
+        },
+
+        channelProviderStatusLabel(provider) {
+            const status = provider?.status || {};
+            if (status.running) return this.t('channelStatusRunning');
+            if (status.enabled && status.lastError) return this.t('channelStatusError');
+            if (status.enabled) return this.t('channelStatusEnabled');
+            return this.t('channelStatusDisabled');
+        },
+
+        channelConversationStatusClass(conversation) {
+            if (conversation?.pairingStatus === 'pending') return 'bg-amber-500/10 text-amber-300 border-amber-500/30';
+            if (conversation?.activeRuntimeSessionId) return 'bg-cyan-500/10 text-cyan-300 border-cyan-500/30';
             return 'bg-space-800 text-gray-300 border-space-border/40';
         },
 
@@ -2668,6 +2710,117 @@ document.addEventListener('alpine:init', () => {
                 this.showToast(this.t('localRuntimeModelsRefreshed'), 'success');
             } else {
                 this.showToast(data?.error || this.t('localRuntimeModelsRefreshFailed'), 'error');
+            }
+        },
+
+        async loadChannelProviders() {
+            this.channelProvidersLoading = true;
+            const { ok, data } = await this.api('/api/agent-channels/providers');
+            if (ok && Array.isArray(data?.providers)) {
+                this.channelProviders = data.providers;
+            }
+            this.channelProvidersLoading = false;
+        },
+
+        async loadChannelSettings() {
+            const { ok, data } = await this.api('/api/agent-channels/settings');
+            if (!ok || !data?.channels) return;
+
+            this.channelSettings = {
+                telegram: {
+                    ...this.channelSettings.telegram,
+                    ...(data.channels.telegram || {})
+                },
+                feishu: {
+                    ...this.channelSettings.feishu,
+                    ...(data.channels.feishu || {})
+                }
+            };
+        },
+
+        async loadChannelConversations() {
+            this.channelConversationsLoading = true;
+            const { ok, data } = await this.api('/api/agent-channels/conversations?limit=80');
+            if (ok && Array.isArray(data?.conversations)) {
+                this.channelConversations = data.conversations;
+            }
+            this.channelConversationsLoading = false;
+        },
+
+        async refreshChannels() {
+            this.channelProvidersLoading = true;
+            const { ok, data } = await this.api('/api/agent-channels/refresh', {
+                method: 'POST'
+            });
+            if (ok && Array.isArray(data?.providers)) {
+                this.channelProviders = data.providers;
+                this.showToast(this.t('channelRefreshSuccess'), 'success');
+            } else {
+                this.showToast(data?.error || this.t('channelRefreshFailed'), 'error');
+            }
+            this.channelProvidersLoading = false;
+        },
+
+        async saveChannelSettings(channelId) {
+            if (!channelId || !this.channelSettings[channelId]) return;
+            this.channelSettingsSaving[channelId] = true;
+            const payload = { ...this.channelSettings[channelId] };
+            const { ok, data } = await this.api(`/api/agent-channels/settings/${encodeURIComponent(channelId)}`, {
+                method: 'PUT',
+                body: JSON.stringify(payload)
+            });
+
+            if (ok && data?.channel) {
+                this.channelSettings[channelId] = {
+                    ...this.channelSettings[channelId],
+                    ...data.channel
+                };
+                await this.loadChannelProviders();
+                this.showToast(this.t('channelSettingsSaved', channelId), 'success');
+            } else {
+                this.showToast(data?.error || this.t('channelSettingsSaveFailed', channelId), 'error');
+            }
+            this.channelSettingsSaving[channelId] = false;
+        },
+
+        async approveChannelPairing(conversation) {
+            if (!conversation?.id) return;
+            const { ok, data } = await this.api(`/api/agent-channels/pairing/${encodeURIComponent(conversation.channel)}/${encodeURIComponent(conversation.id)}/approve`, {
+                method: 'POST',
+                body: JSON.stringify({ approvedBy: 'dashboard' })
+            });
+            if (ok && data?.success) {
+                this.showToast(this.t('channelPairingApproved'), 'success');
+                this.loadChannelConversations();
+            } else {
+                this.showToast(data?.error || this.t('requestFailed'), 'error');
+            }
+        },
+
+        async denyChannelPairing(conversation) {
+            if (!conversation?.id) return;
+            const { ok, data } = await this.api(`/api/agent-channels/pairing/${encodeURIComponent(conversation.channel)}/${encodeURIComponent(conversation.id)}/deny`, {
+                method: 'POST',
+                body: JSON.stringify({ approvedBy: 'dashboard' })
+            });
+            if (ok && data?.success) {
+                this.showToast(this.t('channelPairingDenied'), 'success');
+                this.loadChannelConversations();
+            } else {
+                this.showToast(data?.error || this.t('requestFailed'), 'error');
+            }
+        },
+
+        async resetChannelConversation(conversation) {
+            if (!conversation?.id) return;
+            const { ok, data } = await this.api(`/api/agent-channels/conversations/${encodeURIComponent(conversation.id)}/reset`, {
+                method: 'POST'
+            });
+            if (ok && data?.success) {
+                this.showToast(this.t('channelConversationReset'), 'success');
+                this.loadChannelConversations();
+            } else {
+                this.showToast(data?.error || this.t('requestFailed'), 'error');
             }
         },
 
