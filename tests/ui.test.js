@@ -21,6 +21,18 @@ test('Web UI loads and includes core navigation', async () => {
   assert.ok(html.includes('settings'));
 });
 
+test('Web UI chat view includes agent runtime controls', async () => {
+  const res = await fetch(UI_URL);
+  assert.equal(res.status, 200);
+  const html = await res.text();
+
+  assert.ok(html.includes("t('chatMode')"));
+  assert.ok(html.includes("t('chatModeAgent')"));
+  assert.ok(html.includes('x-model="chatRuntimeProvider"'));
+  assert.ok(html.includes("t('agentRuntimeUsing')"));
+  assert.ok(html.includes("t('agentRuntimeMonitor')"));
+});
+
 test('Web UI loads app bundle and has a logs container', async () => {
   const res = await fetch(UI_URL);
   assert.equal(res.status, 200);
@@ -61,7 +73,14 @@ test('app.js defines expected Alpine state keys (smoke)', async () => {
     'openConfigViewer(tool',
     'setHaikuModel(model)',
     'testChat()',
-    'testHaikuChat()'
+    'testHaikuChat()',
+    'loadAgentRuntimeProviders()',
+    'loadAgentRuntimeSessions()',
+    'connectAgentRuntimeStream(session)',
+    'sendAgentRuntimeMessage()',
+    'respondAgentRuntimeApproval(message, decision)',
+    'openAgentRuntimeMonitorSession(runtimeSession)',
+    'cancelAgentRuntimeTask(runtimeSessionId)'
   ]) {
     assert.ok(js.includes(needle), `Expected app.js to include ${needle}`);
   }

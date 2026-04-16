@@ -35,6 +35,17 @@ import { handleListChatSources, handleChatWithSource, handleStreamChatWithSource
 import { handleGetRuntimeCredentials, handleGetRoutingDecisions, handleGetRoutingPreview, handleGetLocalRoutingStatus } from './runtime-route.js';
 import { handleGetLocalRuntimeStatus, handleSetLocalRuntimeEnabled, handleUpdateLocalRuntime, handleCheckLocalRuntime, handleRefreshLocalRuntimeModels } from './local-runtimes-route.js';
 import {
+  handleListAgentRuntimeProviders,
+  handleListAgentRuntimeSessions,
+  handleGetAgentRuntimeSession,
+  handleCreateAgentRuntimeSession,
+  handleSendAgentRuntimeInput,
+  handleResolveAgentRuntimeApproval,
+  handleAnswerAgentRuntimeQuestion,
+  handleCancelAgentRuntimeSession,
+  handleStreamAgentRuntimeSession
+} from './agent-runtimes-route.js';
+import {
   handleListAccounts,
   handleAccountStatus,
   handleOAuthCleanup,
@@ -281,6 +292,17 @@ export function registerApiRoutes(app, { port }) {
   app.post('/api/local-runtimes/enabled', handleSetLocalRuntimeEnabled);
   app.post('/api/local-runtimes/check', handleCheckLocalRuntime);
   app.post('/api/local-runtimes/refresh-models', handleRefreshLocalRuntimeModels);
+
+  // ─── Agent Runtime Orchestrator ──────────────────────────────────────────
+  app.get('/api/agent-runtimes/providers', handleListAgentRuntimeProviders);
+  app.get('/api/agent-runtimes/sessions', handleListAgentRuntimeSessions);
+  app.post('/api/agent-runtimes/sessions', handleCreateAgentRuntimeSession);
+  app.get('/api/agent-runtimes/sessions/:id', handleGetAgentRuntimeSession);
+  app.get('/api/agent-runtimes/sessions/:id/stream', handleStreamAgentRuntimeSession);
+  app.post('/api/agent-runtimes/sessions/:id/input', handleSendAgentRuntimeInput);
+  app.post('/api/agent-runtimes/sessions/:id/approval', handleResolveAgentRuntimeApproval);
+  app.post('/api/agent-runtimes/sessions/:id/question', handleAnswerAgentRuntimeQuestion);
+  app.post('/api/agent-runtimes/sessions/:id/cancel', handleCancelAgentRuntimeSession);
 
   // ─── Tool Installer ────────────────────────────────────────────────────
   app.get('/api/tools/status', handleGetToolsStatus);

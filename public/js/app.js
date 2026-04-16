@@ -120,8 +120,15 @@ document.addEventListener('alpine:init', () => {
         activeChatSessionId: '',
         chatStorageKey: 'cligate-chat-sessions-v1',
         chatHistoryOpen: false,
+        chatSidebarTab: 'history',
         chatSystemPromptOpen: false,
+        chatMode: 'assistant',
         chatAssistantMode: true,
+        agentRuntimeProviders: [],
+        agentRuntimeSessions: [],
+        agentRuntimeSessionsLoading: false,
+        chatRuntimeProvider: 'codex',
+        chatRuntimeEventSource: null,
         chatLoading: false,
         chatSourceLoading: false,
         chatStreamController: null,
@@ -232,6 +239,11 @@ document.addEventListener('alpine:init', () => {
             this.refreshAntigravityAccounts();
             this.checkHealth();
             setInterval(() => this.checkHealth(), 30000);
+            setInterval(() => {
+                if (this.activeTab === 'chat') {
+                    this.loadAgentRuntimeSessions();
+                }
+            }, 15000);
             this.startLogStream();
             this.loadHaikuModelSetting();
             this.loadAccountStrategySetting();
@@ -246,6 +258,8 @@ document.addEventListener('alpine:init', () => {
             this.loadChatSessions();
             this.loadChatSources();
             this.loadChatModels();
+            this.loadAgentRuntimeProviders();
+            this.loadAgentRuntimeSessions();
             this.initConfigViewerFromUrl();
 
             window.addEventListener('resize', () => {
@@ -307,6 +321,8 @@ document.addEventListener('alpine:init', () => {
             if (tab === 'chat') {
                 this.loadChatSources();
                 this.loadChatModels();
+                this.loadAgentRuntimeProviders();
+                this.loadAgentRuntimeSessions();
             }
             if (tab === 'settings') {
                 if (!this.modelMappingData) this.loadModelMappings();
@@ -1198,6 +1214,70 @@ document.addEventListener('alpine:init', () => {
             }
         },
 
+        async loadAgentRuntimeProviders() {
+            const { ok, data } = await this.api('/api/agent-runtimes/providers');
+            if (!ok || !Array.isArray(data?.providers)) return;
+
+            this.agentRuntimeProviders = data.providers;
+            if (!this.chatRuntimeProvider || !this.agentRuntimeProviders.some((provider) => provider.id === this.chatRuntimeProvider)) {
+                this.chatRuntimeProvider = this.agentRuntimeProviders[0]?.id || 'codex';
+                this.syncActiveChatSession();
+            }
+        },
+
+        async loadAgentRuntimeSessions() {
+            this.agentRuntimeSessionsLoading = true;
+            const { ok, data } = await this.api('/api/agent-runtimes/sessions?limit=40');
+            if (ok && Array.isArray(data?.sessions)) {
+                this.agentRuntimeSessions = data.sessions;
+                for (const runtimeSession of data.sessions) {
+                    const localSession = this.findLocalChatSessionByRuntimeId(runtimeSession.id);
+                    if (!localSession) continue;
+                    localSession.runtimeStatus = runtimeSession.status || localSession.runtimeStatus || '';
+                    localSession.title = runtimeSession.title || localSession.title || this.t('newChat');
+                    localSession.model = runtimeSession.model || localSession.model || '';
+                    localSession.updatedAt = runtimeSession.updatedAt || localSession.updatedAt;
+                }
+                this.persistChatSessions();
+            }
+            this.agentRuntimeSessionsLoading = false;
+        },
+
+        chatModeLabel(mode) {
+            if (mode === 'agent-runtime') return this.t('chatModeAgent');
+            return this.t('chatModeAssistant');
+        },
+
+        chatRuntimeProviderLabel(providerId) {
+            if (!providerId) return '';
+            const provider = this.agentRuntimeProviders.find((item) => item.id === providerId);
+            return provider?.label || provider?.name || providerId;
+        },
+
+        agentRuntimeStatusPillClass(status) {
+            if (status === 'running') return 'bg-cyan-500/10 text-cyan-300 border-cyan-500/30';
+            if (status === 'waiting_user') return 'bg-blue-500/10 text-blue-300 border-blue-500/30';
+            if (status === 'waiting_approval') return 'bg-amber-500/10 text-amber-300 border-amber-500/30';
+            if (status === 'ready') return 'bg-green-500/10 text-green-300 border-green-500/30';
+            if (status === 'failed') return 'bg-red-500/10 text-red-300 border-red-500/30';
+            if (status === 'cancelled') return 'bg-gray-500/10 text-gray-300 border-gray-500/30';
+            return 'bg-space-800 text-gray-300 border-space-border/40';
+        },
+
+        formatRelativeTime(value) {
+            if (!value) return '-';
+            const time = new Date(value).getTime();
+            if (!Number.isFinite(time)) return '-';
+            const diffMs = Date.now() - time;
+            const diffMin = Math.max(0, Math.floor(diffMs / 60000));
+            if (diffMin < 1) return this.t('justNow');
+            if (diffMin < 60) return this.t('minutesAgo', diffMin);
+            const diffHour = Math.floor(diffMin / 60);
+            if (diffHour < 24) return this.t('hoursAgo', diffHour);
+            const diffDay = Math.floor(diffHour / 24);
+            return this.t('daysAgo', diffDay);
+        },
+
         loadChatSessions() {
             try {
                 const raw = localStorage.getItem(this.chatStorageKey);
@@ -1234,7 +1314,15 @@ document.addEventListener('alpine:init', () => {
             const session = {
                 id: sessionId,
                 title: this.t('newChat'),
+                mode: this.chatMode || 'assistant',
                 sourceId: this.chatSourceId || this.chatSources[0]?.id || '',
+                runtimeProvider: this.chatRuntimeProvider || 'codex',
+                runtimeSessionId: '',
+                runtimeStatus: '',
+                runtimeLastEventSeq: 0,
+                runtimePendingQuestion: null,
+                runtimePendingApprovals: [],
+                runtimeUnread: false,
                 model: this.chatModel || 'gpt-5.2',
                 assistantMode: this.chatAssistantMode === true,
                 systemPrompt: '',
@@ -1252,17 +1340,28 @@ document.addEventListener('alpine:init', () => {
             const session = this.chatSessions.find((item) => item.id === sessionId);
             if (!session) return;
 
+            this.closeAgentRuntimeStream();
             this.activeChatSessionId = session.id;
+            this.chatMode = session.mode || 'assistant';
             this.chatSourceId = session.sourceId || this.chatSources[0]?.id || '';
+            this.chatRuntimeProvider = session.runtimeProvider || 'codex';
             this.chatModel = session.model || 'gpt-5.2';
             this.chatAssistantMode = session.assistantMode !== false;
             this.chatSystemPrompt = session.systemPrompt || '';
             this.chatMessages = Array.isArray(session.messages) ? session.messages : [];
             this.chatInput = '';
+            session.runtimeLastEventSeq = Number(session.runtimeLastEventSeq || 0);
+            session.runtimeUnread = false;
+            if (!Array.isArray(session.runtimePendingApprovals)) {
+                session.runtimePendingApprovals = [];
+            }
             if (window.innerWidth < 1280) {
                 this.chatHistoryOpen = false;
             }
             this.scrollChatToBottom();
+            if (this.chatMode === 'agent-runtime' && session.runtimeSessionId) {
+                this.connectAgentRuntimeStream(session);
+            }
         },
 
         shouldStickChatToBottom(threshold = 96) {
@@ -1281,11 +1380,222 @@ document.addEventListener('alpine:init', () => {
             });
         },
 
+        getActiveChatSession() {
+            return this.chatSessions.find((item) => item.id === this.activeChatSessionId) || null;
+        },
+
+        closeAgentRuntimeStream() {
+            if (this.chatRuntimeEventSource) {
+                this.chatRuntimeEventSource.close();
+                this.chatRuntimeEventSource = null;
+            }
+        },
+
+        connectAgentRuntimeStream(session) {
+            if (!session?.runtimeSessionId) return;
+
+            const isCurrentSession = session.id === this.activeChatSessionId;
+            if (!isCurrentSession) return;
+
+            this.closeAgentRuntimeStream();
+
+            const afterSeq = Number(session.runtimeLastEventSeq || 0);
+            const url = `/api/agent-runtimes/sessions/${encodeURIComponent(session.runtimeSessionId)}/stream?history=true&afterSeq=${afterSeq}`;
+            const source = new EventSource(url);
+            this.chatRuntimeEventSource = source;
+
+            source.onmessage = (event) => {
+                let payload = null;
+                try {
+                    payload = JSON.parse(event.data);
+                } catch {
+                    return;
+                }
+                this.applyAgentRuntimeEvent(session.id, payload);
+            };
+
+            source.onerror = () => {
+                const active = this.getActiveChatSession();
+                if (!active || active.id !== session.id) {
+                    this.closeAgentRuntimeStream();
+                }
+            };
+        },
+
+        ensureAgentRuntimeSessionDefaults(session) {
+            if (!session) return;
+            session.runtimeProvider = session.runtimeProvider || this.chatRuntimeProvider || 'codex';
+            session.runtimeSessionId = session.runtimeSessionId || '';
+            session.runtimeStatus = session.runtimeStatus || '';
+            session.runtimeLastEventSeq = Number(session.runtimeLastEventSeq || 0);
+            session.runtimePendingQuestion = session.runtimePendingQuestion || null;
+            session.runtimeUnread = session.runtimeUnread === true;
+            if (!Array.isArray(session.runtimePendingApprovals)) {
+                session.runtimePendingApprovals = [];
+            }
+        },
+
+        appendAgentRuntimeMessage(sessionId, message) {
+            const session = this.chatSessions.find((item) => item.id === sessionId);
+            if (!session) return;
+
+            const nextMessage = {
+                role: 'assistant',
+                kind: 'agent-message',
+                ...message
+            };
+            session.messages = [...(session.messages || []), nextMessage];
+            if (session.id === this.activeChatSessionId) {
+                this.chatMessages = [...session.messages];
+                this.scrollChatToBottom(true);
+            }
+        },
+
+        updateAgentRuntimeMessage(sessionId, predicate, updater) {
+            const session = this.chatSessions.find((item) => item.id === sessionId);
+            if (!session || !Array.isArray(session.messages)) return false;
+
+            const index = session.messages.findIndex(predicate);
+            if (index < 0) return false;
+            session.messages[index] = updater({ ...session.messages[index] });
+            if (session.id === this.activeChatSessionId) {
+                this.chatMessages = [...session.messages];
+            }
+            return true;
+        },
+
+        applyAgentRuntimeEvent(chatSessionId, event) {
+            const session = this.chatSessions.find((item) => item.id === chatSessionId);
+            if (!session || !event) return;
+
+            this.ensureAgentRuntimeSessionDefaults(session);
+            const seq = Number(event.seq || 0);
+            if (seq && seq <= Number(session.runtimeLastEventSeq || 0)) {
+                return;
+            }
+            if (seq) {
+                session.runtimeLastEventSeq = seq;
+            }
+
+            const payload = event.payload || {};
+            const isActiveSession = session.id === this.activeChatSessionId;
+            const isForegroundSession = isActiveSession && this.activeTab === 'chat';
+            if (event.type === 'worker.started') {
+                session.runtimeStatus = 'running';
+            } else if (event.type === 'worker.message') {
+                this.appendAgentRuntimeMessage(chatSessionId, {
+                    content: payload.text || '',
+                    itemType: payload.itemType || 'assistant'
+                });
+            } else if (event.type === 'worker.command') {
+                this.appendAgentRuntimeMessage(chatSessionId, {
+                    kind: 'agent-command',
+                    content: payload.command || '',
+                    commandOutput: payload.output || '',
+                    commandStatus: payload.status || '',
+                    exitCode: payload.exitCode
+                });
+            } else if (event.type === 'worker.file_change') {
+                const changes = Array.isArray(payload.changes) ? payload.changes : [];
+                this.appendAgentRuntimeMessage(chatSessionId, {
+                    kind: 'agent-file-change',
+                    content: changes.join('\n') || this.t('agentRuntimeFilesChanged'),
+                    fileChangeStatus: payload.status || ''
+                });
+            } else if (event.type === 'worker.question') {
+                session.runtimeStatus = 'waiting_user';
+                session.runtimePendingQuestion = payload;
+                if (!isForegroundSession) {
+                    session.runtimeUnread = true;
+                    this.showToast(this.t('agentRuntimeQuestionToast', this.chatSessionTitle(session)), 'warning');
+                }
+                this.appendAgentRuntimeMessage(chatSessionId, {
+                    kind: 'agent-question',
+                    content: payload.text || this.t('agentRuntimeQuestion'),
+                    questionId: payload.questionId,
+                    questionStatus: payload.status || 'pending'
+                });
+            } else if (event.type === 'worker.approval_request') {
+                session.runtimeStatus = 'waiting_approval';
+                session.runtimePendingApprovals = [...session.runtimePendingApprovals, payload];
+                if (!isForegroundSession) {
+                    session.runtimeUnread = true;
+                    this.showToast(this.t('agentRuntimeApprovalToast', this.chatSessionTitle(session)), 'warning');
+                }
+                this.appendAgentRuntimeMessage(chatSessionId, {
+                    kind: 'agent-approval',
+                    content: payload.title || this.t('agentRuntimeApproval'),
+                    approvalId: payload.approvalId,
+                    approvalSummary: payload.summary || '',
+                    approvalStatus: payload.status || 'pending'
+                });
+            } else if (event.type === 'worker.approval_resolved') {
+                const approvalId = payload.approvalId;
+                session.runtimePendingApprovals = session.runtimePendingApprovals.filter((item) => item.approvalId !== approvalId);
+                session.runtimeStatus = session.runtimePendingApprovals.length > 0
+                    ? 'waiting_approval'
+                    : (session.runtimePendingQuestion ? 'waiting_user' : 'running');
+                this.updateAgentRuntimeMessage(
+                    chatSessionId,
+                    (message) => message.kind === 'agent-approval' && message.approvalId === approvalId,
+                    (message) => ({
+                        ...message,
+                        approvalStatus: payload.decision || 'resolved'
+                    })
+                );
+            } else if (event.type === 'worker.completed') {
+                session.runtimeStatus = 'ready';
+                session.runtimePendingQuestion = null;
+                session.runtimePendingApprovals = [];
+                if (!isForegroundSession) {
+                    session.runtimeUnread = true;
+                    this.showToast(this.t('agentRuntimeCompletedToast', this.chatSessionTitle(session)), 'success');
+                }
+                if (isActiveSession) {
+                    this.closeAgentRuntimeStream();
+                }
+                this.appendAgentRuntimeMessage(chatSessionId, {
+                    kind: 'agent-status',
+                    content: this.t('agentRuntimeCompleted')
+                });
+            } else if (event.type === 'worker.failed') {
+                session.runtimeStatus = 'failed';
+                if (!isForegroundSession) {
+                    session.runtimeUnread = true;
+                    this.showToast(this.t('agentRuntimeFailedToast', this.chatSessionTitle(session)), 'error');
+                }
+                if (isActiveSession) {
+                    this.closeAgentRuntimeStream();
+                }
+                this.appendAgentRuntimeMessage(chatSessionId, {
+                    kind: 'agent-status',
+                    content: payload.message || this.t('requestFailed'),
+                    isError: true
+                });
+            }
+
+            this.syncActiveChatSession();
+        },
+
+        chatSendDisabled() {
+            if (this.chatLoading) return true;
+            if (this.chatMode === 'assistant') {
+                return !this.chatSourceId;
+            }
+            const session = this.getActiveChatSession();
+            if (session?.runtimePendingApprovals?.length) {
+                return true;
+            }
+            return !this.chatRuntimeProvider;
+        },
+
         syncActiveChatSession() {
             const session = this.chatSessions.find((item) => item.id === this.activeChatSessionId);
             if (!session) return;
 
+            session.mode = this.chatMode || 'assistant';
             session.sourceId = this.chatSourceId || '';
+            session.runtimeProvider = this.chatRuntimeProvider || 'codex';
             session.model = this.chatModel || 'gpt-5.2';
             session.assistantMode = this.chatAssistantMode === true;
             session.systemPrompt = this.chatSystemPrompt || '';
@@ -1301,6 +1611,9 @@ document.addEventListener('alpine:init', () => {
             const index = this.chatSessions.findIndex((item) => item.id === sessionId);
             if (index < 0) return;
 
+            if (this.activeChatSessionId === sessionId) {
+                this.closeAgentRuntimeStream();
+            }
             this.chatSessions.splice(index, 1);
 
             if (this.activeChatSessionId === sessionId) {
@@ -1319,7 +1632,12 @@ document.addEventListener('alpine:init', () => {
         },
 
         async sendChatMessage() {
-            if (this.chatLoading || !this.chatInput.trim() || !this.chatSourceId) return;
+            if (this.chatLoading || !this.chatInput.trim()) return;
+            if (this.chatMode === 'agent-runtime') {
+                await this.sendAgentRuntimeMessage();
+                return;
+            }
+            if (!this.chatSourceId) return;
 
             const shouldAutoScroll = this.shouldStickChatToBottom();
 
@@ -1393,6 +1711,97 @@ document.addEventListener('alpine:init', () => {
                 this.chatLoading = false;
                 this.chatStreamController = null;
                 this.chatMessages = [...this.chatMessages];
+                this.syncActiveChatSession();
+            }
+        },
+
+        async sendAgentRuntimeMessage() {
+            const input = this.chatInput.trim();
+            const session = this.getActiveChatSession();
+            if (!input || !session) return;
+
+            this.ensureAgentRuntimeSessionDefaults(session);
+            if (session.runtimePendingApprovals.length > 0) {
+                this.showToast(this.t('agentRuntimeApprovalPending'), 'warning');
+                return;
+            }
+
+            const shouldAutoScroll = this.shouldStickChatToBottom();
+            this.chatMessages.push({
+                role: 'user',
+                content: input
+            });
+            this.chatInput = '';
+            this.chatLoading = true;
+            this.syncActiveChatSession();
+            this.scrollChatToBottom(shouldAutoScroll);
+
+            try {
+                if (session.runtimePendingQuestion?.questionId && session.runtimeSessionId) {
+                    const { ok, data, error } = await this.api(`/api/agent-runtimes/sessions/${encodeURIComponent(session.runtimeSessionId)}/question`, {
+                        method: 'POST',
+                        body: JSON.stringify({
+                            questionId: session.runtimePendingQuestion.questionId,
+                            answer: input
+                        })
+                    });
+                    if (!ok) {
+                        throw new Error(data?.error || error || this.t('requestFailed'));
+                    }
+
+                    this.updateAgentRuntimeMessage(
+                        session.id,
+                        (message) => message.kind === 'agent-question' && message.questionId === session.runtimePendingQuestion?.questionId,
+                        (message) => ({
+                            ...message,
+                            questionStatus: data?.question?.status || 'answered'
+                        })
+                    );
+                    session.runtimePendingQuestion = null;
+                    session.runtimeStatus = 'running';
+                } else if (!session.runtimeSessionId) {
+                    const { ok, data, error } = await this.api('/api/agent-runtimes/sessions', {
+                        method: 'POST',
+                        body: JSON.stringify({
+                            provider: this.chatRuntimeProvider,
+                            input,
+                            model: this.chatModel.trim() || '',
+                            metadata: {
+                                origin: 'chat-ui'
+                            }
+                        })
+                    });
+                    if (!ok || !data?.session) {
+                        throw new Error(data?.error || error || this.t('requestFailed'));
+                    }
+                    session.runtimeSessionId = data.session.id;
+                    session.runtimeProvider = data.session.provider || this.chatRuntimeProvider;
+                    session.runtimeStatus = data.session.status || 'running';
+                    session.model = this.chatModel.trim() || session.model;
+                    this.connectAgentRuntimeStream(session);
+                } else {
+                    const { ok, data, error } = await this.api(`/api/agent-runtimes/sessions/${encodeURIComponent(session.runtimeSessionId)}/input`, {
+                        method: 'POST',
+                        body: JSON.stringify({
+                            input
+                        })
+                    });
+                    if (!ok || !data?.session) {
+                        throw new Error(data?.error || error || this.t('requestFailed'));
+                    }
+                    session.runtimeStatus = data.session.status || 'running';
+                    this.connectAgentRuntimeStream(session);
+                }
+            } catch (error) {
+                this.appendAgentRuntimeMessage(session.id, {
+                    kind: 'agent-status',
+                    content: error.message || this.t('requestFailed'),
+                    isError: true
+                });
+                this.showToast(error.message || this.t('requestFailed'), 'error');
+            } finally {
+                this.chatLoading = false;
+                this.loadAgentRuntimeSessions();
                 this.syncActiveChatSession();
             }
         },
@@ -1511,6 +1920,122 @@ document.addEventListener('alpine:init', () => {
             return this.chatSources.find((source) => source.id === sourceId)?.label || sourceId;
         },
 
+        agentRuntimeStatusLabel(session = this.getActiveChatSession()) {
+            const status = session?.runtimeStatus || '';
+            if (status === 'running') return this.t('agentRuntimeStatusRunning');
+            if (status === 'waiting_user') return this.t('agentRuntimeStatusWaitingUser');
+            if (status === 'waiting_approval') return this.t('agentRuntimeStatusWaitingApproval');
+            if (status === 'ready') return this.t('agentRuntimeStatusReady');
+            if (status === 'failed') return this.t('failedLabel');
+            return this.t('agentRuntimeStatusIdle');
+        },
+
+        async respondAgentRuntimeApproval(message, decision) {
+            const session = this.getActiveChatSession();
+            if (!session?.runtimeSessionId || !message?.approvalId) return;
+
+            message._approving = true;
+            this.chatMessages = [...this.chatMessages];
+
+            const { ok, data, error } = await this.api(`/api/agent-runtimes/sessions/${encodeURIComponent(session.runtimeSessionId)}/approval`, {
+                method: 'POST',
+                body: JSON.stringify({
+                    approvalId: message.approvalId,
+                    decision
+                })
+            });
+
+            message._approving = false;
+            if (ok && data?.approval) {
+                message.approvalStatus = data.approval.status || decision;
+                session.runtimePendingApprovals = session.runtimePendingApprovals.filter((item) => item.approvalId !== message.approvalId);
+                session.runtimeStatus = session.runtimePendingApprovals.length > 0
+                    ? 'waiting_approval'
+                    : (session.runtimePendingQuestion ? 'waiting_user' : 'running');
+                this.chatMessages = [...this.chatMessages];
+                this.syncActiveChatSession();
+                this.loadAgentRuntimeSessions();
+                return;
+            }
+
+            this.showToast(data?.error || error || this.t('requestFailed'), 'error');
+            this.chatMessages = [...this.chatMessages];
+        },
+
+        openChatSidebar(tab = 'history') {
+            this.chatSidebarTab = tab;
+            this.chatHistoryOpen = true;
+            if (tab === 'runtime') {
+                this.loadAgentRuntimeSessions();
+            }
+        },
+
+        findLocalChatSessionByRuntimeId(runtimeSessionId) {
+            return this.chatSessions.find((item) => item.runtimeSessionId === runtimeSessionId) || null;
+        },
+
+        ensureChatSessionForRuntime(runtimeSession) {
+            const existing = this.findLocalChatSessionByRuntimeId(runtimeSession.id);
+            if (existing) {
+                existing.mode = 'agent-runtime';
+                existing.runtimeProvider = runtimeSession.provider;
+                existing.runtimeStatus = runtimeSession.status || existing.runtimeStatus || '';
+                existing.model = runtimeSession.model || existing.model || '';
+                existing.title = runtimeSession.title || existing.title || this.chatSessionTitle(existing);
+                return existing;
+            }
+
+            const sessionId = 'chat_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+            const next = {
+                id: sessionId,
+                title: runtimeSession.title || this.t('newChat'),
+                mode: 'agent-runtime',
+                sourceId: '',
+                runtimeProvider: runtimeSession.provider || 'codex',
+                runtimeSessionId: runtimeSession.id,
+                runtimeStatus: runtimeSession.status || '',
+                runtimeLastEventSeq: 0,
+                runtimePendingQuestion: null,
+                runtimePendingApprovals: [],
+                runtimeUnread: false,
+                model: runtimeSession.model || '',
+                assistantMode: true,
+                systemPrompt: '',
+                messages: [],
+                updatedAt: runtimeSession.updatedAt || new Date().toISOString()
+            };
+            this.chatSessions.unshift(next);
+            this.persistChatSessions();
+            return next;
+        },
+
+        openAgentRuntimeMonitorSession(runtimeSession) {
+            if (!runtimeSession?.id) return;
+            const session = this.ensureChatSessionForRuntime(runtimeSession);
+            this.openChatSession(session.id);
+            this.chatHistoryOpen = false;
+        },
+
+        async cancelAgentRuntimeTask(runtimeSessionId) {
+            if (!runtimeSessionId) return;
+            const { ok, data, error } = await this.api(`/api/agent-runtimes/sessions/${encodeURIComponent(runtimeSessionId)}/cancel`, {
+                method: 'POST'
+            });
+
+            if (!ok) {
+                this.showToast(data?.error || error || this.t('requestFailed'), 'error');
+                return;
+            }
+
+            const localSession = this.findLocalChatSessionByRuntimeId(runtimeSessionId);
+            if (localSession) {
+                localSession.runtimeStatus = data?.session?.status || 'cancelled';
+                this.syncActiveChatSession();
+            }
+            await this.loadAgentRuntimeSessions();
+            this.showToast(this.t('agentRuntimeCancelled'), 'success');
+        },
+
         formatChatCitation(citation) {
             if (!citation) return '';
             if (Array.isArray(citation.titlePath) && citation.titlePath.length > 0) {
@@ -1558,7 +2083,11 @@ document.addEventListener('alpine:init', () => {
         },
 
         toggleChatHistory() {
-            this.chatHistoryOpen = !this.chatHistoryOpen;
+            if (this.chatHistoryOpen && this.chatSidebarTab === 'history') {
+                this.chatHistoryOpen = false;
+                return;
+            }
+            this.openChatSidebar('history');
         },
 
         toggleSystemPrompt() {
