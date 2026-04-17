@@ -10,7 +10,7 @@
 **[English](./README.md) | 中文**
 
 > 多协议 AI API 代理服务器，支持账户池、API Key 管理和可视化仪表盘。
-> 通过统一的本地代理使用 **Claude Code**、**Codex CLI**、**Gemini CLI** 和 **OpenClaw** —— 支持多账户轮换、智能路由、免费模型路由、用量统计和一键配置。
+> 通过统一的本地代理使用 **Claude Code**、**Codex CLI**、**Gemini CLI** 和 **OpenClaw** —— 支持多账户轮换、智能路由、本地运行时、渠道网关、用量统计和一键配置。
 
 ---
 
@@ -21,6 +21,7 @@
 - **Codex CLI** — 代理 OpenAI Responses API (`/v1/responses`)、Chat Completions (`/v1/chat/completions`) 和 Codex 内部 API (`/backend-api/codex/responses`)
 - **Gemini CLI** — 代理 Gemini API (`/v1beta/models/*`)，一键 patch
 - **OpenClaw** — 自定义 provider 注入，支持 `anthropic-messages` 和 `openai-completions` 协议
+- **Agent Runtime Provider** — 内置 Codex / Claude Code 运行时编排，可直接在 Web Chat 和渠道网关中复用
 
 ### 账户与密钥管理
 - **ChatGPT 账户池** — OAuth 登录、多账户轮换（固定/轮询/随机）、自动 token 刷新、按账户用量配额追踪
@@ -33,21 +34,34 @@
 ### 智能路由
 - **优先级模式** — 在两者都可用时，选择"账户池优先"或"API Key 优先"
 - **路由模式** — 自动路由或手动按应用绑定凭证
-- **应用路由** — 将每个应用（Claude Code、Codex、Gemini CLI、OpenClaw）绑定到指定的 ChatGPT 账户、Claude 账户或 API Key
+- **应用路由** — 将每个应用（Claude Code、Codex、Gemini CLI、OpenClaw）绑定到指定的 ChatGPT 账户、Claude 账户、Antigravity 账户、API Key 或本地模型运行时
 - **模型映射** — 自定义每个 provider 解析到哪个上游模型
 - **免费模型路由** — 将 `claude-haiku` 请求路由到免费模型（DeepSeek、Qwen、MiniMax 等），通过 Kilo AI 网关，无需 API Key
+- **本地模型路由** — 支持将请求路由到本地配置的运行时，例如 Ollama
+
+### 渠道与运行时编排
+- **渠道网关** — 接入 Telegram / 飞书，让手机端对话进入和 Web Chat 相同的编排层
+- **会话记录** — 在仪表盘里查看渠道关联的 runtime session 记录、消息记录、配对状态和执行进度
+- **Sticky Runtime Session** — Web Chat 或渠道消息可以持续挂接同一个 runtime session，直到用户显式重置
+- **审批感知执行** — 运行时问题和审批状态可以在界面中直接处理，而不是只能看日志
 
 ### 分析与监控
 - **用量与成本** — 按账户、按模型、按 provider 的使用量和成本统计，支持按日/按月分析
 - **请求日志** — 完整的请求/响应日志，支持按日期和 provider 筛选，可仅查看错误
 - **实时日志流** — SSE 实时日志流，便于调试
 - **定价管理** — 查看和自定义按 provider、按模型的定价，支持手动覆盖
+- **API Explorer** — 在仪表盘中直接向本地接口发请求并查看格式化响应
 
 ### Web 仪表盘
 - **仪表盘** — 快速状态指标（总账户/可用账户数、过期 token、默认计划）、快速测试按钮、Claude Code 使用示例
-- **Chat 聊天** — 交互式聊天界面，支持选择数据源（ChatGPT、Claude、API Key）、模型选择、系统提示词和聊天记录
+- **Chat 聊天** — 交互式聊天界面，支持选择数据源、运行时 provider、模型、系统提示词和聊天历史
 - **账户管理** — 选项卡式界面，管理 ChatGPT、Claude 和 Antigravity 账户，支持添加/删除/启用/禁用/切换
+- **渠道管理** — 配置 Telegram / 飞书 provider、默认运行时、工作目录和配对审核
+- **会话记录** — 无需翻 JSONL 日志，直接查看渠道线程和消息记录
 - **API Key 管理** — 添加、测试、编辑、禁用 API Key，支持 provider 专属字段（Azure 部署名称/API 版本、Vertex 项目 ID/区域）
+- **本地模型** — 注册本地运行时、检查健康状态、刷新发现到的模型，并接入路由
+- **API Explorer** — 内置接口调试面板
+- **请求日志** — 独立的请求/响应历史页面
 - **工具安装器** — 检测并安装/更新 Node.js、Claude Code、Codex CLI、Gemini CLI、OpenClaw —— 自动识别操作系统，显示版本状态，检查更新
 - **资源目录** — 精选的免费和试用 LLM API 资源目录，含 provider 详情、限制和兼容性信息
 - **一键 CLI 配置** — 一个按钮配置 Claude Code、Codex CLI、Gemini CLI、OpenClaw
@@ -66,13 +80,17 @@
 |:-:|:-:|
 | ![Accounts](./images/accounts.png) | ![API Keys](./images/apikeys.png) |
 
-| 设置与应用路由 | 用量与成本 |
+| 渠道管理 | 本地模型 |
 |:-:|:-:|
-| ![Settings](./images/settings.png) | ![Usage](./images/usage_costs.png) |
+| ![Channels](./images/channel.png) | ![Local Models](./images/localmodel.png) |
 
-| 请求日志 | 定价管理 |
+| 请求日志 | 设置与应用路由 |
 |:-:|:-:|
-| ![Request Logs](./images/request_logs.png) | ![Pricing](./images/pricing.png) |
+| ![Request Logs](./images/request_logs.png) | ![Settings](./images/settings.png) |
+
+| 用量与成本 | 定价管理 |
+|:-:|:-:|
+| ![Usage](./images/usage_costs.png) | ![Pricing](./images/pricing.png) |
 
 | 工具安装器 | 资源目录 |
 |:-:|:-:|
@@ -154,7 +172,8 @@ cligate start
 1. 打开 http://localhost:8081 → **账户管理** 标签
 2. 点击 **添加账户** → 使用 ChatGPT / Claude / Google（Antigravity）账号登录
 3. 或前往 **API Keys** 标签 → **添加 API Key**，填入 OpenAI、Azure、Gemini、Vertex AI 或其他 provider 密钥
-4. 账户自动保存，token 自动刷新
+4. 如有需要，再去 **渠道** 或 **本地模型** 页面配置 Telegram / 飞书或本地运行时
+5. 账户自动保存，token 自动刷新
 
 **命令行**：
 ```bash
@@ -202,7 +221,13 @@ openai_base_url = "http://localhost:8081"
 在 **设置** 页面：
 - **优先级模式** — 选择"账户池优先"或"API Key 优先"
 - **路由模式** — "自动"为智能路由，"应用绑定"为按应用指定凭证
-- **应用绑定** — 将 Claude Code、Codex、Gemini CLI 或 OpenClaw 绑定到指定账户或 API Key
+- **应用绑定** — 将 Claude Code、Codex、Gemini CLI 或 OpenClaw 绑定到指定账户、Antigravity 账户、API Key 或本地运行时
+
+### 5. 配置渠道或本地运行时（可选）
+
+- **渠道** 页面：配置 Telegram / 飞书 provider、默认运行时、工作目录和配对审核
+- **会话记录** 页面：查看移动端 session 线程和 runtime transcript
+- **本地模型** 页面：配置本地运行时地址、检查状态，并把发现到的模型接入系统路由
 
 ---
 
@@ -228,6 +253,14 @@ openai_base_url = "http://localhost:8081"
 | `POST /backend-api/codex/responses` | Codex 内部协议 | Codex CLI |
 | `POST /v1beta/models/*` | Gemini API | Gemini CLI |
 | `GET /v1/models` | OpenAI Models | 通用 |
+| `GET /api/agent-runtimes/providers` | Runtime Provider 列表 | 仪表盘、渠道网关 |
+| `GET /api/agent-runtimes/sessions` | Runtime Session 列表 | 仪表盘 |
+| `GET /api/agent-channels/providers` | 渠道状态 | 仪表盘 |
+| `GET /api/agent-channels/session-records` | 渠道运行时会话记录 | 仪表盘 |
+| `GET /api/agent-channels/conversations` | 渠道会话列表 | 仪表盘 |
+| `GET /api/local-runtimes` | 本地运行时状态 | 仪表盘 |
+| `GET /api/resources` | 资源目录 | 仪表盘 |
+| `GET /api/tools/status` | 工具安装器状态 | 仪表盘 |
 | `GET /health` | 健康检查 | 监控 |
 
 完整 API 文档见 [API Documentation](./docs/API.md)。

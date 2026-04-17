@@ -201,14 +201,13 @@ GET /health
 | `/api/usage/models` | GET | Per-model stats |
 | `/api/usage/accounts` | GET | Per-account stats |
 
-## Model Mapping
+## Pricing
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/api/model-mappings` | GET | Get all model mappings |
-| `/api/model-mappings/provider/:provider` | PUT | Set provider mapping |
-| `/api/model-mappings/reset` | POST | Reset to defaults |
-| `/api/model-mappings/resolve` | GET | Resolve a model name |
+| `/api/pricing` | GET | List pricing summary and effective pricing entries |
+| `/api/pricing` | PUT | Update a pricing override |
+| `/api/pricing/reset` | POST | Reset one pricing override to defaults |
 
 ## Request Logs
 
@@ -218,6 +217,74 @@ GET /health
 | `/api/request-logs/dates` | GET | Get available log dates |
 | `/api/request-logs/settings` | GET | Get log settings |
 | `/api/request-logs/settings` | PUT | Update log settings |
+
+## Model Mapping
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/model-mappings` | GET | Get all model mappings |
+| `/api/model-mappings/provider/:provider` | PUT | Set provider mapping |
+| `/api/model-mappings/reset` | POST | Reset to defaults |
+| `/api/model-mappings/resolve` | GET | Resolve a model name |
+
+## Resources Catalog
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/resources` | GET | List curated resource entries with filters |
+| `/api/resources/summary` | GET | Get resource catalog summary |
+| `/api/resources/:id` | GET | Get one resource entry |
+
+## Local Runtime Management
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/local-runtimes` | GET | Get local runtime status and configured runtimes |
+| `/api/local-runtimes/ollama-local` | PUT | Update the built-in Ollama runtime config |
+| `/api/local-runtimes/enabled` | POST | Enable or disable local model routing |
+| `/api/local-runtimes/check` | POST | Check local runtime health |
+| `/api/local-runtimes/refresh-models` | POST | Refresh discovered local models and routing targets |
+
+## Agent Runtime Orchestrator
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/agent-runtimes/providers` | GET | List runtime providers available to the dashboard and channels |
+| `/api/agent-runtimes/sessions` | GET | List runtime sessions |
+| `/api/agent-runtimes/sessions` | POST | Create a runtime session |
+| `/api/agent-runtimes/sessions/:id` | GET | Get runtime session detail |
+| `/api/agent-runtimes/sessions/:id/stream` | GET | Stream runtime session events |
+| `/api/agent-runtimes/sessions/:id/input` | POST | Send follow-up input to a runtime session |
+| `/api/agent-runtimes/sessions/:id/approval` | POST | Resolve an approval request |
+| `/api/agent-runtimes/sessions/:id/question` | POST | Answer a runtime question |
+| `/api/agent-runtimes/sessions/:id/cancel` | POST | Cancel a runtime session |
+
+## Agent Channel Gateway
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/agent-channels/providers` | GET | List channel provider status |
+| `/api/agent-channels/settings` | GET | Get channel settings |
+| `/api/agent-channels/settings/:channel` | PUT | Update channel settings |
+| `/api/agent-channels/refresh` | POST | Refresh channel providers |
+| `/api/agent-channels/feishu/webhook` | POST | Receive Feishu webhook events |
+| `/api/agent-channels/session-records` | GET | List channel-linked runtime session records used by Conversation Records |
+| `/api/agent-channels/session-records/:id` | GET | Get one channel-linked runtime session record |
+| `/api/agent-channels/conversations` | GET | List stored channel conversation threads |
+| `/api/agent-channels/conversations/:id` | GET | Get one stored channel conversation with deliveries |
+| `/api/agent-channels/conversations/:id/reset` | POST | Detach the active runtime session from a conversation |
+| `/api/agent-channels/pairing/:channel/:conversationId/approve` | POST | Approve channel pairing |
+| `/api/agent-channels/pairing/:channel/:conversationId/deny` | POST | Deny channel pairing |
+
+## Tool Installer
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/tools/status` | GET | Get tool installation and version status |
+| `/api/tools/node-info` | GET | Get Node.js installation info |
+| `/api/tools/install/:toolId` | POST | Install one CLI tool |
+| `/api/tools/install-node` | POST | Install Node.js for the current platform |
+| `/api/tools/launch/:toolId` | POST | Launch an installed tool |
 
 ## API Gateway
 

@@ -10,7 +10,7 @@
 **[English](#features) | [中文](./README_CN.md)**
 
 > A multi-protocol AI API proxy server with account pooling, API key management, and a visual dashboard.
-> Use **Claude Code**, **Codex CLI**, **Gemini CLI**, and **OpenClaw** through a unified local proxy — with multi-account rotation, intelligent routing, free model routing, usage analytics, and one-click configuration.
+> Use **Claude Code**, **Codex CLI**, **Gemini CLI**, and **OpenClaw** through a unified local proxy — with multi-account rotation, intelligent routing, local runtime integration, channel gateways, usage analytics, and one-click configuration.
 
 ---
 
@@ -21,6 +21,7 @@
 - **Codex CLI** — Proxies OpenAI Responses API (`/v1/responses`), Chat Completions (`/v1/chat/completions`), and Codex Internal API (`/backend-api/codex/responses`)
 - **Gemini CLI** — Proxies Gemini API (`/v1beta/models/*`) with one-click patch
 - **OpenClaw** — Custom provider injection via `anthropic-messages` or `openai-completions`
+- **Agent Runtime Providers** — Built-in runtime orchestration for Codex and Claude Code sessions through the dashboard and channel gateways
 
 ### Account & Key Management
 - **ChatGPT Account Pool** — OAuth login, multi-account rotation (sticky / round-robin / random), auto token refresh, per-account quota tracking
@@ -33,21 +34,34 @@
 ### Intelligent Routing
 - **Priority Mode** — Choose between Account Pool First or API Key First when both are available
 - **Routing Mode** — Automatic routing or manual per-app credential assignments
-- **App Routing** — Bind each app (Claude Code, Codex, Gemini CLI, OpenClaw) to a specific ChatGPT account, Claude account, or API key
+- **App Routing** — Bind each app (Claude Code, Codex, Gemini CLI, OpenClaw) to a specific ChatGPT account, Claude account, Antigravity account, API key, or local model runtime
 - **Model Mapping** — Customize which upstream model each provider resolves to
 - **Free Model Routing** — Routes `claude-haiku` requests to free models (DeepSeek, Qwen, MiniMax, etc.) via Kilo AI — no API key needed
+- **Local Model Routing** — Route supported requests to locally configured runtimes such as Ollama when you want an on-device path
+
+### Channels & Runtime Operations
+- **Channel Gateway** — Connect Telegram and Feishu to CliGate so mobile conversations can enter the same orchestration layer as the web chat
+- **Conversation Records** — Inspect channel-linked runtime session records, message transcripts, pairing state, and execution progress from the dashboard
+- **Sticky Runtime Sessions** — Continue the same runtime session across follow-up messages in web chat or channel conversations until explicitly reset
+- **Approval-aware Execution** — Surface runtime questions and approval requirements in the dashboard workflow instead of hiding them in logs
 
 ### Analytics & Monitoring
 - **Usage & Costs** — Per-account, per-model, per-provider usage and cost statistics with daily/monthly breakdown
 - **Request Logs** — Full request/response logging with date and provider filtering, error-only view
 - **Real-time Log Stream** — Live SSE log stream for debugging
 - **Pricing Registry** — View and customize per-provider, per-model pricing with manual overrides
+- **API Explorer** — Send live requests to local CliGate endpoints and inspect formatted request/response payloads in one place
 
 ### Web Dashboard
 - **Dashboard** — Quick status metrics (total/available accounts, expired tokens, default plan), quick test buttons, Claude Code usage example
-- **Chat UI** — Interactive chat interface with source selector (ChatGPT, Claude, API keys), model selection, system prompt, and chat history
+- **Chat UI** — Interactive chat interface with source selector, runtime provider selection, system prompt, session history, and direct testing for routed models
 - **Account Management** — Tabbed interface for ChatGPT, Claude, and Antigravity accounts with add/remove/enable/disable/switch
+- **Channels** — Configure Telegram / Feishu providers, default runtimes, pairing requirements, and working directories
+- **Conversation Records** — Review channel threads and message transcripts without reading raw JSONL logs
 - **API Key Management** — Add, test, edit, disable API keys with provider-specific fields (Azure deployment name/API version, Vertex project ID/location)
+- **Local Models** — Register local runtimes, check health, refresh discovered models, and enable local model routing
+- **API Explorer** — Built-in panel for live endpoint testing and debugging
+- **Request Logs** — Dedicated dashboard tab for request and response history
 - **Tool Installer** — Detect and install/update Node.js, Claude Code, Codex CLI, Gemini CLI, OpenClaw — auto-detects OS, shows version status, checks for updates
 - **Resources Catalog** — Curated directory of free and trial LLM API resources with provider details, limits, and compatibility info
 - **One-click CLI Configuration** — Configure Claude Code, Codex CLI, Gemini CLI, OpenClaw with a single button
@@ -66,13 +80,17 @@
 |:-:|:-:|
 | ![Accounts](./images/accounts.png) | ![API Keys](./images/apikeys.png) |
 
-| Settings & App Routing | Usage & Costs |
+| Channels | Local Models |
 |:-:|:-:|
-| ![Settings](./images/settings.png) | ![Usage](./images/usage_costs.png) |
+| ![Channels](./images/channel.png) | ![Local Models](./images/localmodel.png) |
 
-| Request Logs | Pricing Registry |
+| Request Logs | Settings & App Routing |
 |:-:|:-:|
-| ![Request Logs](./images/request_logs.png) | ![Pricing](./images/pricing.png) |
+| ![Request Logs](./images/request_logs.png) | ![Settings](./images/settings.png) |
+
+| Usage & Costs | Pricing Registry |
+|:-:|:-:|
+| ![Usage](./images/usage_costs.png) | ![Pricing](./images/pricing.png) |
 
 | Tool Installer | Resources Catalog |
 |:-:|:-:|
@@ -155,7 +173,8 @@ Dashboard opens at **http://localhost:8081**
 1. Open http://localhost:8081 → **Accounts** tab
 2. Click **Add Account** → Login with ChatGPT / Claude / Google (Antigravity)
 3. Or go to **API Keys** tab → **Add API Key** with your OpenAI, Azure, Gemini, Vertex AI, or other provider keys
-4. Accounts are automatically saved and tokens are auto-refreshed
+4. Optionally configure **Channels** (Telegram / Feishu) or **Local Models** for local runtime routing
+5. Accounts are automatically saved and tokens are auto-refreshed
 
 **CLI**:
 ```bash
@@ -203,7 +222,13 @@ openai_base_url = "http://localhost:8081"
 In the **Settings** tab:
 - **Priority Mode** — Choose "Account Pool First" or "API Key First"
 - **Routing Mode** — "Automatic" for smart routing, or "App Assigned" to bind each app to a specific credential
-- **App Assignments** — Bind Claude Code, Codex, Gemini CLI, or OpenClaw to a specific account or API key
+- **App Assignments** — Bind Claude Code, Codex, Gemini CLI, or OpenClaw to a specific account, Antigravity account, API key, or local runtime
+
+### 5. Configure channels or local runtimes (optional)
+
+- **Channels** tab — Configure Telegram / Feishu provider settings, default runtime provider, working directory, and pairing requirements
+- **Conversation Records** tab — Inspect mobile session threads and runtime transcripts
+- **Local Models** tab — Register a local runtime endpoint, check availability, and import discovered models into routing
 
 ---
 
@@ -229,6 +254,14 @@ The haiku model can be changed to any free model (DeepSeek R1, Qwen3, MiniMax, e
 | `POST /backend-api/codex/responses` | Codex Internal | Codex CLI |
 | `POST /v1beta/models/*` | Gemini API | Gemini CLI |
 | `GET /v1/models` | OpenAI Models | All |
+| `GET /api/agent-runtimes/providers` | Runtime Registry | Dashboard, channels |
+| `GET /api/agent-runtimes/sessions` | Runtime Sessions | Dashboard |
+| `GET /api/agent-channels/providers` | Channel Status | Dashboard |
+| `GET /api/agent-channels/session-records` | Channel Runtime Session Records | Dashboard |
+| `GET /api/agent-channels/conversations` | Channel Conversations | Dashboard |
+| `GET /api/local-runtimes` | Local Runtime Status | Dashboard |
+| `GET /api/resources` | Resource Catalog | Dashboard |
+| `GET /api/tools/status` | Tool Installer Status | Dashboard |
 | `GET /health` | Health Check | Monitoring |
 
 See [API Documentation](./docs/API.md) for the full reference.
