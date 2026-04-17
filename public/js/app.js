@@ -1256,6 +1256,8 @@ document.addEventListener('alpine:init', () => {
                     localSession.runtimeStatus = runtimeSession.status || localSession.runtimeStatus || '';
                     localSession.title = runtimeSession.title || localSession.title || this.t('newChat');
                     localSession.model = runtimeSession.model || localSession.model || '';
+                    localSession.attachedRuntimeProvider = runtimeSession.provider || localSession.attachedRuntimeProvider || '';
+                    localSession.attachedRuntimeModel = runtimeSession.model || localSession.attachedRuntimeModel || '';
                     localSession.updatedAt = runtimeSession.updatedAt || localSession.updatedAt;
                 }
                 this.persistChatSessions();
@@ -1360,6 +1362,8 @@ document.addEventListener('alpine:init', () => {
                 sourceId: this.chatSourceId || this.chatSources[0]?.id || '',
                 runtimeProvider: this.chatRuntimeProvider || 'codex',
                 runtimeSessionId: '',
+                attachedRuntimeProvider: '',
+                attachedRuntimeModel: '',
                 runtimeStatus: '',
                 runtimeLastEventSeq: 0,
                 runtimePendingQuestion: null,
@@ -1468,6 +1472,8 @@ document.addEventListener('alpine:init', () => {
             if (!session) return;
             session.runtimeProvider = session.runtimeProvider || this.chatRuntimeProvider || 'codex';
             session.runtimeSessionId = session.runtimeSessionId || '';
+            session.attachedRuntimeProvider = session.attachedRuntimeProvider || '';
+            session.attachedRuntimeModel = session.attachedRuntimeModel || '';
             session.runtimeStatus = session.runtimeStatus || '';
             session.runtimeLastEventSeq = Number(session.runtimeLastEventSeq || 0);
             session.runtimePendingQuestion = session.runtimePendingQuestion || null;
@@ -1504,6 +1510,94 @@ document.addEventListener('alpine:init', () => {
                 this.chatMessages = [...session.messages];
             }
             return true;
+        },
+
+        activeRuntimeSessionBadge(session = this.getActiveChatSession()) {
+            if (!session?.runtimeSessionId) {
+                return this.t('agentRuntimeNoAttachedSession');
+            }
+            return `${this.t('agentRuntimeSessionShort')} ${String(session.runtimeSessionId).slice(0, 8)}`;
+        },
+
+        runtimeSessionConfigChanged(session) {
+            if (!session?.runtimeSessionId) return false;
+            const selectedProvider = String(this.chatRuntimeProvider || session.runtimeProvider || 'codex').trim();
+            const selectedModel = String(this.chatModel || session.model || '').trim();
+            const attachedProvider = String(session.attachedRuntimeProvider || '').trim();
+            const attachedModel = String(session.attachedRuntimeModel || '').trim();
+
+            if (attachedProvider && selectedProvider && attachedProvider !== selectedProvider) {
+                return true;
+            }
+
+            return attachedModel !== selectedModel;
+        },
+
+        buildRuntimeSessionRestartNotice(session) {
+            const reasons = [];
+            const selectedProvider = String(this.chatRuntimeProvider || session?.runtimeProvider || 'codex').trim();
+            const selectedModel = String(this.chatModel || session?.model || '').trim();
+            const attachedProvider = String(session?.attachedRuntimeProvider || '').trim();
+            const attachedModel = String(session?.attachedRuntimeModel || '').trim();
+
+            if (attachedProvider && selectedProvider && attachedProvider !== selectedProvider) {
+                reasons.push(this.t('agentRuntimeProviderChanged'));
+            }
+            if (attachedModel !== selectedModel) {
+                reasons.push(this.t('agentRuntimeModelChanged'));
+            }
+
+            const detail = reasons.length > 0
+                ? `${this.t('agentRuntimeStartedFreshBecause')} ${reasons.join(', ')}.`
+                : this.t('agentRuntimeDetachedNotice');
+
+            return `${this.t('agentRuntimeFreshSessionReady')} ${detail}`;
+        },
+
+        resetActiveRuntimeBinding({ mode = 'agent-runtime', notice = '' } = {}) {
+            const session = this.getActiveChatSession();
+            if (!session) return;
+
+            this.ensureAgentRuntimeSessionDefaults(session);
+
+            if (session.id === this.activeChatSessionId) {
+                this.closeAgentRuntimeStream();
+            }
+
+            session.mode = mode;
+            session.runtimeSessionId = '';
+            session.attachedRuntimeProvider = '';
+            session.attachedRuntimeModel = '';
+            session.runtimeStatus = '';
+            session.runtimeLastEventSeq = 0;
+            session.runtimePendingQuestion = null;
+            session.runtimePendingApprovals = [];
+            session.runtimeUnread = false;
+
+            if (notice) {
+                this.appendAgentRuntimeMessage(session.id, {
+                    kind: 'agent-status',
+                    content: notice
+                });
+            }
+
+            this.syncActiveChatSession();
+        },
+
+        startFreshAgentRuntimeSession() {
+            this.resetActiveRuntimeBinding({
+                mode: 'agent-runtime',
+                notice: this.t('agentRuntimeFreshSessionReady')
+            });
+        },
+
+        detachAgentRuntimeSession() {
+            const session = this.getActiveChatSession();
+            if (!session?.runtimeSessionId) return;
+            this.resetActiveRuntimeBinding({
+                mode: 'agent-runtime',
+                notice: this.t('agentRuntimeDetachedNotice')
+            });
         },
 
         applyAgentRuntimeEvent(chatSessionId, event) {
@@ -1779,6 +1873,13 @@ document.addEventListener('alpine:init', () => {
             this.scrollChatToBottom(shouldAutoScroll);
 
             try {
+                if (this.runtimeSessionConfigChanged(session)) {
+                    this.resetActiveRuntimeBinding({
+                        mode: 'agent-runtime',
+                        notice: this.buildRuntimeSessionRestartNotice(session)
+                    });
+                }
+
                 if (session.runtimePendingQuestion?.questionId && session.runtimeSessionId) {
                     const { ok, data, error } = await this.api(`/api/agent-runtimes/sessions/${encodeURIComponent(session.runtimeSessionId)}/question`, {
                         method: 'POST',
@@ -1818,6 +1919,8 @@ document.addEventListener('alpine:init', () => {
                     }
                     session.runtimeSessionId = data.session.id;
                     session.runtimeProvider = data.session.provider || this.chatRuntimeProvider;
+                    session.attachedRuntimeProvider = data.session.provider || this.chatRuntimeProvider;
+                    session.attachedRuntimeModel = data.session.model || (this.chatModel.trim() || '');
                     session.runtimeStatus = data.session.status || 'running';
                     session.model = this.chatModel.trim() || session.model;
                     this.connectAgentRuntimeStream(session);
@@ -1832,6 +1935,8 @@ document.addEventListener('alpine:init', () => {
                         throw new Error(data?.error || error || this.t('requestFailed'));
                     }
                     session.runtimeStatus = data.session.status || 'running';
+                    session.attachedRuntimeProvider = data.session.provider || session.attachedRuntimeProvider || session.runtimeProvider;
+                    session.attachedRuntimeModel = data.session.model || session.attachedRuntimeModel || session.model || '';
                     this.connectAgentRuntimeStream(session);
                 }
             } catch (error) {
@@ -2023,6 +2128,8 @@ document.addEventListener('alpine:init', () => {
                 existing.runtimeProvider = runtimeSession.provider;
                 existing.runtimeStatus = runtimeSession.status || existing.runtimeStatus || '';
                 existing.model = runtimeSession.model || existing.model || '';
+                existing.attachedRuntimeProvider = runtimeSession.provider || existing.attachedRuntimeProvider || '';
+                existing.attachedRuntimeModel = runtimeSession.model || existing.attachedRuntimeModel || '';
                 existing.title = runtimeSession.title || existing.title || this.chatSessionTitle(existing);
                 return existing;
             }
@@ -2035,6 +2142,8 @@ document.addEventListener('alpine:init', () => {
                 sourceId: '',
                 runtimeProvider: runtimeSession.provider || 'codex',
                 runtimeSessionId: runtimeSession.id,
+                attachedRuntimeProvider: runtimeSession.provider || 'codex',
+                attachedRuntimeModel: runtimeSession.model || '',
                 runtimeStatus: runtimeSession.status || '',
                 runtimeLastEventSeq: 0,
                 runtimePendingQuestion: null,

@@ -95,7 +95,10 @@ export class AgentChannelOutboundDispatcher {
         }
 
         if (event.type === AGENT_EVENT_TYPE.COMPLETED || event.type === AGENT_EVENT_TYPE.FAILED) {
-          this.conversationStore.clearActiveRuntimeSession(conversation.id);
+          this.conversationStore.patch(conversation.id, {
+            lastPendingApprovalId: null,
+            lastPendingQuestionId: null
+          });
         }
       } catch (error) {
         this.deliveryStore.saveOutbound({

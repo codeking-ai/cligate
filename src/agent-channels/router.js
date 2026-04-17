@@ -88,6 +88,13 @@ export class AgentChannelRouter {
       }
     });
 
+    if (result?.type === 'conversation_reset') {
+      return {
+        ...result,
+        conversation: this.conversationStore.clearActiveRuntimeSession(conversation.id)
+      };
+    }
+
     if (result?.session?.id) {
       this.conversationStore.bindRuntimeSession(conversation.id, result.session.id, {
         mode: CHANNEL_CONVERSATION_MODE.AGENT_RUNTIME

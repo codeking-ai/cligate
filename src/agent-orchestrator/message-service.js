@@ -23,6 +23,14 @@ function parseAgentCommand(args) {
   };
 }
 
+function buildResetResponse(message, activeSessionId = null) {
+  return {
+    type: 'conversation_reset',
+    message,
+    previousSessionId: activeSessionId || null
+  };
+}
+
 export class AgentOrchestratorMessageService {
   constructor({
     runtimeSessionManager = agentRuntimeSessionManager
@@ -116,6 +124,45 @@ export class AgentOrchestratorMessageService {
         provider: spec.provider,
         session
       };
+    }
+
+    if (parsed?.command === 'new') {
+      if (!parsed.args) {
+        return buildResetResponse(
+          activeSessionId
+            ? 'Detached the active runtime session. Your next message will start a fresh task.'
+            : 'No active runtime session is attached. Your next message will start a fresh task.',
+          activeSessionId
+        );
+      }
+
+      const spec = parseAgentCommand(parsed.args);
+      const provider = spec?.provider || defaultRuntimeProvider;
+      const input = spec?.input || parsed.args;
+      const session = await this.startRuntimeTask({
+        provider,
+        input,
+        cwd,
+        model,
+        metadata
+      });
+
+      return {
+        type: 'runtime_started',
+        provider,
+        session,
+        startedFresh: true,
+        replacedSessionId: activeSessionId
+      };
+    }
+
+    if (parsed?.command === 'detach') {
+      return buildResetResponse(
+        activeSessionId
+          ? 'Detached the active runtime session from this conversation.'
+          : 'No active runtime session is attached to this conversation.',
+        activeSessionId
+      );
     }
 
     if (parsed?.command === 'continue') {

@@ -7,11 +7,16 @@ function buildRouterResultText(result) {
     case 'command_error':
       return result.message || 'Command error';
     case 'runtime_started':
+      if (result?.startedFresh && result?.replacedSessionId) {
+        return `Started a fresh task with ${result?.session?.provider || result?.provider || 'agent'}. Previous session ${result.replacedSessionId} was detached. New session: ${result?.session?.id || ''}`.trim();
+      }
       return `Task accepted. Session ${result?.session?.id || ''} started with ${result?.session?.provider || result?.provider || 'agent'}.`.trim();
     case 'runtime_continued':
       return `Sent follow-up to session ${result?.session?.id || ''}.`.trim();
     case 'runtime_cancelled':
       return `Session ${result?.session?.id || ''} cancelled.`.trim();
+    case 'conversation_reset':
+      return result?.message || 'Runtime session detached.';
     case 'runtime_status':
       return `Session ${result?.session?.id || ''}: ${result?.session?.status || 'unknown'}${result?.session?.summary ? `\n${result.session.summary}` : ''}`.trim();
     case 'approval_resolved':

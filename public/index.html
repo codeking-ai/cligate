@@ -639,6 +639,14 @@
                                         <span class="text-white font-mono" x-text="chatRuntimeProviderLabel(chatRuntimeProvider)"></span>
                                         <span class="px-2 py-1 rounded-full bg-space-800 border border-space-border/40 text-[10px] font-mono text-gray-300"
                                             x-text="agentRuntimeStatusLabel()"></span>
+                                        <span class="px-2 py-1 rounded-full bg-space-900/70 border border-space-border/30 text-[10px] font-mono text-gray-400"
+                                            x-text="activeRuntimeSessionBadge()"></span>
+                                        <button class="btn btn-xs bg-space-800 hover:bg-space-700 border border-space-border text-white"
+                                            x-show="getActiveChatSession()?.runtimeSessionId"
+                                            @click="startFreshAgentRuntimeSession()" x-text="t('agentRuntimeNewSession')"></button>
+                                        <button class="btn btn-xs bg-space-900 hover:bg-space-800 border border-space-border text-gray-300"
+                                            x-show="getActiveChatSession()?.runtimeSessionId"
+                                            @click="detachAgentRuntimeSession()" x-text="t('agentRuntimeDetach')"></button>
                                     </div>
                                 </template>
                             </div>

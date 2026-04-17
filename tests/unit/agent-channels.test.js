@@ -16,6 +16,7 @@ import { AgentChannelDeliveryStore } from '../../src/agent-channels/delivery-sto
 import { AgentChannelPairingStore } from '../../src/agent-channels/pairing-store.js';
 import { AgentChannelRouter } from '../../src/agent-channels/router.js';
 import { AgentChannelManager } from '../../src/agent-channels/manager.js';
+import { AgentChannelOutboundDispatcher } from '../../src/agent-channels/outbound-dispatcher.js';
 import FeishuChannelProvider from '../../src/agent-channels/providers/feishu-provider.js';
 import TelegramChannelProvider from '../../src/agent-channels/providers/telegram-provider.js';
 import { formatAgentRuntimeEventForChannel } from '../../src/agent-channels/formatter.js';
@@ -202,6 +203,32 @@ test('AgentOrchestratorMessageService starts and continues runtime sessions from
   assert.equal(continued.session.turnCount, 2);
 });
 
+test('AgentOrchestratorMessageService supports explicit session reset and fresh runtime starts', async () => {
+  const runtimeSessionManager = createRuntimeManager();
+  const service = new AgentOrchestratorMessageService({ runtimeSessionManager });
+
+  const started = await service.routeUserMessage({
+    message: { text: '/agent codex inspect repo' },
+    conversation: null
+  });
+
+  const reset = await service.routeUserMessage({
+    message: { text: '/new' },
+    conversation: { activeRuntimeSessionId: started.session.id }
+  });
+  assert.equal(reset.type, 'conversation_reset');
+  assert.equal(reset.previousSessionId, started.session.id);
+
+  const fresh = await service.routeUserMessage({
+    message: { text: '/new codex fix the failing test' },
+    conversation: { activeRuntimeSessionId: started.session.id }
+  });
+  assert.equal(fresh.type, 'runtime_started');
+  assert.equal(fresh.startedFresh, true);
+  assert.equal(fresh.replacedSessionId, started.session.id);
+  assert.notEqual(fresh.session.id, started.session.id);
+});
+
 test('AgentChannelRouter binds runtime sessions to conversations', async () => {
   const runtimeSessionManager = createRuntimeManager();
   const router = new AgentChannelRouter({
@@ -232,6 +259,128 @@ test('AgentChannelRouter binds runtime sessions to conversations', async () => {
   assert.equal(result.type, 'runtime_started');
   assert.equal(result.conversation.activeRuntimeSessionId, result.session.id);
   assert.equal(result.conversation.mode, 'agent-runtime');
+});
+
+test('AgentChannelRouter clears conversation binding on explicit reset command', async () => {
+  const runtimeSessionManager = createRuntimeManager();
+  const conversationStore = new AgentChannelConversationStore({
+    configDir: createTempDir('cligate-agent-channels-router-reset-conv-')
+  });
+  const router = new AgentChannelRouter({
+    conversationStore,
+    deliveryStore: new AgentChannelDeliveryStore({
+      configDir: createTempDir('cligate-agent-channels-router-reset-delivery-')
+    }),
+    pairingStore: new AgentChannelPairingStore({
+      configDir: createTempDir('cligate-agent-channels-router-reset-pairing-')
+    }),
+    messageService: new AgentOrchestratorMessageService({ runtimeSessionManager }),
+    requirePairing: false
+  });
+
+  const started = await router.routeInboundMessage({
+    channel: 'telegram',
+    accountId: 'default',
+    externalMessageId: 'm_1',
+    externalConversationId: 'chat_1',
+    externalUserId: 'user_1',
+    externalUserName: 'alice',
+    text: '/agent codex inspect repo',
+    messageType: 'text'
+  });
+
+  const reset = await router.routeInboundMessage({
+    channel: 'telegram',
+    accountId: 'default',
+    externalMessageId: 'm_2',
+    externalConversationId: 'chat_1',
+    externalUserId: 'user_1',
+    externalUserName: 'alice',
+    text: '/new',
+    messageType: 'text'
+  });
+
+  assert.equal(started.conversation.activeRuntimeSessionId, started.session.id);
+  assert.equal(reset.type, 'conversation_reset');
+  assert.equal(reset.conversation.activeRuntimeSessionId, null);
+  assert.equal(reset.conversation.mode, 'assistant');
+});
+
+test('completed runtime events keep channel conversations attached to the same session', async () => {
+  const runtimeSessionManager = createRuntimeManager();
+  const conversationStore = new AgentChannelConversationStore({
+    configDir: createTempDir('cligate-agent-channels-sticky-conv-')
+  });
+  const deliveryStore = new AgentChannelDeliveryStore({
+    configDir: createTempDir('cligate-agent-channels-sticky-delivery-')
+  });
+  const router = new AgentChannelRouter({
+    conversationStore,
+    deliveryStore,
+    pairingStore: new AgentChannelPairingStore({
+      configDir: createTempDir('cligate-agent-channels-sticky-pairing-')
+    }),
+    messageService: new AgentOrchestratorMessageService({ runtimeSessionManager }),
+    requirePairing: false
+  });
+  const dispatcher = new AgentChannelOutboundDispatcher({
+    runtimeSessionManager,
+    conversationStore,
+    deliveryStore,
+    registry: {
+      get() {
+        return {
+          async sendMessage() {
+            return { messageId: 'outbound_1' };
+          }
+        };
+      }
+    }
+  });
+
+  const started = await router.routeInboundMessage({
+    channel: 'telegram',
+    accountId: 'default',
+    externalMessageId: 'm_1',
+    externalConversationId: 'chat_1',
+    externalUserId: 'user_1',
+    externalUserName: 'alice',
+    text: '/agent codex inspect repo',
+    messageType: 'text'
+  });
+
+  conversationStore.patch(started.conversation.id, {
+    lastPendingApprovalId: 'approval_1',
+    lastPendingQuestionId: 'question_1'
+  });
+
+  await dispatcher.handleRuntimeEvent({
+    sessionId: started.session.id,
+    seq: 999,
+    type: AGENT_EVENT_TYPE.COMPLETED,
+    payload: {
+      result: 'done'
+    }
+  });
+
+  const afterCompleted = conversationStore.get(started.conversation.id);
+  assert.equal(afterCompleted.activeRuntimeSessionId, started.session.id);
+  assert.equal(afterCompleted.lastPendingApprovalId, null);
+  assert.equal(afterCompleted.lastPendingQuestionId, null);
+
+  const followUp = await router.routeInboundMessage({
+    channel: 'telegram',
+    accountId: 'default',
+    externalMessageId: 'm_2',
+    externalConversationId: 'chat_1',
+    externalUserId: 'user_1',
+    externalUserName: 'alice',
+    text: 'follow up',
+    messageType: 'text'
+  });
+
+  assert.equal(followUp.type, 'runtime_continued');
+  assert.equal(followUp.session.id, started.session.id);
 });
 
 test('AgentOrchestratorMessageService resolves approvals and answers pending questions', async () => {
