@@ -80,7 +80,7 @@ document.addEventListener('alpine:init', () => {
         channelProvidersLoading: false,
         channelSettings: {
             telegram: { enabled: false, mode: 'polling', botToken: '', pollingIntervalMs: 2000, defaultRuntimeProvider: 'codex', model: '', cwd: '', requirePairing: false },
-            feishu: { enabled: false, mode: 'webhook', appId: '', appSecret: '', encryptKey: '', verificationToken: '', defaultRuntimeProvider: 'codex', model: '', cwd: '', requirePairing: false }
+            feishu: { enabled: false, mode: 'websocket', appId: '', appSecret: '', encryptKey: '', verificationToken: '', defaultRuntimeProvider: 'codex', model: '', cwd: '', requirePairing: false }
         },
         channelSettingsSaving: { telegram: false, feishu: false },
         channelConversations: [],

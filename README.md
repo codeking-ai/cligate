@@ -40,7 +40,7 @@
 - **Local Model Routing** — Route supported requests to locally configured runtimes such as Ollama when you want an on-device path
 
 ### Channels & Runtime Operations
-- **Channel Gateway** — Connect Telegram and Feishu to CliGate so mobile conversations can enter the same orchestration layer as the web chat
+- **Channel Gateway** — Connect Telegram and Feishu to CliGate so mobile conversations can enter the same orchestration layer as the web chat; Feishu supports local desktop use via WebSocket mode
 - **Conversation Records** — Inspect channel-linked runtime session records, message transcripts, pairing state, and execution progress from the dashboard
 - **Sticky Runtime Sessions** — Continue the same runtime session across follow-up messages in web chat or channel conversations until explicitly reset
 - **Approval-aware Execution** — Surface runtime questions and approval requirements in the dashboard workflow instead of hiding them in logs
@@ -56,7 +56,7 @@
 - **Dashboard** — Quick status metrics (total/available accounts, expired tokens, default plan), quick test buttons, Claude Code usage example
 - **Chat UI** — Interactive chat interface with source selector, runtime provider selection, system prompt, session history, and direct testing for routed models
 - **Account Management** — Tabbed interface for ChatGPT, Claude, and Antigravity accounts with add/remove/enable/disable/switch
-- **Channels** — Configure Telegram / Feishu providers, default runtimes, pairing requirements, and working directories
+- **Channels** — Configure Telegram polling plus Feishu WebSocket/Webhook providers, default runtimes, pairing requirements, and working directories
 - **Conversation Records** — Review channel threads and message transcripts without reading raw JSONL logs
 - **API Key Management** — Add, test, edit, disable API keys with provider-specific fields (Azure deployment name/API version, Vertex project ID/location)
 - **Local Models** — Register local runtimes, check health, refresh discovered models, and enable local model routing
@@ -201,6 +201,7 @@ Dashboard opens at **http://localhost:8081**
 2. Click **Add Account** → Login with ChatGPT / Claude / Google (Antigravity)
 3. Or go to **API Keys** tab → **Add API Key** with your OpenAI, Azure, Gemini, Vertex AI, or other provider keys
 4. Optionally configure **Channels** (Telegram / Feishu) or **Local Models** for local runtime routing
+   Feishu local desktop setups should use **WebSocket** mode; **Webhook** mode is only needed when you have a public callback URL
 5. Accounts are automatically saved and tokens are auto-refreshed
 
 **CLI**:
@@ -253,7 +254,8 @@ In the **Settings** tab:
 
 ### 5. Configure channels or local runtimes (optional)
 
-- **Channels** tab — Configure Telegram / Feishu provider settings, default runtime provider, working directory, and pairing requirements
+- **Channels** tab — Configure Telegram polling or Feishu WebSocket/Webhook settings, default runtime provider, working directory, and pairing requirements
+- For **Feishu** on a local desktop install, choose **WebSocket** mode in the dashboard and set Feishu Open Platform event subscription to persistent connection mode
 - **Conversation Records** tab — Inspect mobile session threads and runtime transcripts
 - **Local Models** tab — Register a local runtime endpoint, check availability, and import discovered models into routing
 

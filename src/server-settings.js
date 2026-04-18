@@ -32,7 +32,7 @@ const DEFAULT_SETTINGS = {
         },
         feishu: {
             enabled: false,
-            mode: 'webhook',
+            mode: 'websocket',
             appId: '',
             appSecret: '',
             encryptKey: '',

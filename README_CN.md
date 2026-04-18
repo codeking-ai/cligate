@@ -40,7 +40,7 @@
 - **本地模型路由** — 支持将请求路由到本地配置的运行时，例如 Ollama
 
 ### 渠道与运行时编排
-- **渠道网关** — 接入 Telegram / 飞书，让手机端对话进入和 Web Chat 相同的编排层
+- **渠道网关** — 接入 Telegram / 飞书，让手机端对话进入和 Web Chat 相同的编排层；飞书支持通过 WebSocket 模式在本地桌面环境直接使用
 - **会话记录** — 在仪表盘里查看渠道关联的 runtime session 记录、消息记录、配对状态和执行进度
 - **Sticky Runtime Session** — Web Chat 或渠道消息可以持续挂接同一个 runtime session，直到用户显式重置
 - **审批感知执行** — 运行时问题和审批状态可以在界面中直接处理，而不是只能看日志
@@ -56,7 +56,7 @@
 - **仪表盘** — 快速状态指标（总账户/可用账户数、过期 token、默认计划）、快速测试按钮、Claude Code 使用示例
 - **Chat 聊天** — 交互式聊天界面，支持选择数据源、运行时 provider、模型、系统提示词和聊天历史
 - **账户管理** — 选项卡式界面，管理 ChatGPT、Claude 和 Antigravity 账户，支持添加/删除/启用/禁用/切换
-- **渠道管理** — 配置 Telegram / 飞书 provider、默认运行时、工作目录和配对审核
+- **渠道管理** — 配置 Telegram 轮询，以及飞书 WebSocket / Webhook provider、默认运行时、工作目录和配对审核
 - **会话记录** — 无需翻 JSONL 日志，直接查看渠道线程和消息记录
 - **API Key 管理** — 添加、测试、编辑、禁用 API Key，支持 provider 专属字段（Azure 部署名称/API 版本、Vertex 项目 ID/区域）
 - **本地模型** — 注册本地运行时、检查健康状态、刷新发现到的模型，并接入路由
@@ -199,7 +199,8 @@ cligate start
 1. 打开 http://localhost:8081 → **账户管理** 标签
 2. 点击 **添加账户** → 使用 ChatGPT / Claude / Google（Antigravity）账号登录
 3. 或前往 **API Keys** 标签 → **添加 API Key**，填入 OpenAI、Azure、Gemini、Vertex AI 或其他 provider 密钥
-4. 如有需要，再去 **渠道** 或 **本地模型** 页面配置 Telegram / 飞书或本地运行时
+4. 如有需要，再去 **渠道** 或 **本地模型** 页面配置 Telegram / 飞书或本地运行时  
+   飞书在本地桌面环境推荐使用 **WebSocket** 模式；只有在具备公网回调地址时才需要 **Webhook**
 5. 账户自动保存，token 自动刷新
 
 **命令行**：
@@ -252,7 +253,8 @@ openai_base_url = "http://localhost:8081"
 
 ### 5. 配置渠道或本地运行时（可选）
 
-- **渠道** 页面：配置 Telegram / 飞书 provider、默认运行时、工作目录和配对审核
+- **渠道** 页面：配置 Telegram 轮询或飞书 WebSocket / Webhook、默认运行时、工作目录和配对审核
+- **飞书** 本地桌面部署建议在仪表盘中选择 **WebSocket** 模式，并在飞书开放平台把事件订阅方式切到“长连接”
 - **会话记录** 页面：查看移动端 session 线程和 runtime transcript
 - **本地模型** 页面：配置本地运行时地址、检查状态，并把发现到的模型接入系统路由
 

@@ -2086,6 +2086,13 @@
                             </label>
                             <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
                                 <label class="block">
+                                    <span class="text-xs text-gray-500 mb-1 block" x-text="t('channelMode')"></span>
+                                    <select class="select select-sm w-full bg-space-800 border-space-border text-white" x-model="channelSettings.feishu.mode">
+                                        <option value="websocket" x-text="t('channelModeWebsocket')"></option>
+                                        <option value="webhook" x-text="t('channelModeWebhook')"></option>
+                                    </select>
+                                </label>
+                                <label class="block">
                                     <span class="text-xs text-gray-500 mb-1 block" x-text="t('channelAppId')"></span>
                                     <input type="text" class="input input-sm w-full bg-space-800 border-space-border text-white"
                                         x-model="channelSettings.feishu.appId">
@@ -2096,6 +2103,7 @@
                                         x-model="channelSettings.feishu.appSecret">
                                 </label>
                             </div>
+                            <div class="text-xs text-gray-500 font-mono" x-text="t('channelFeishuModeDesc')"></div>
                             <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
                                 <label class="block">
                                     <span class="text-xs text-gray-500 mb-1 block" x-text="t('channelVerificationToken')"></span>
@@ -2132,7 +2140,7 @@
                                 <span class="text-sm text-gray-300" x-text="t('channelRequirePairing')"></span>
                                 <input type="checkbox" class="checkbox checkbox-sm" x-model="channelSettings.feishu.requirePairing">
                             </label>
-                            <div class="text-xs text-gray-500 font-mono">Webhook: `/api/agent-channels/feishu/webhook`</div>
+                            <div class="text-xs text-gray-500 font-mono" x-show="channelSettings.feishu.mode === 'webhook'">Webhook: `/api/agent-channels/feishu/webhook`</div>
                             <button class="btn btn-sm bg-neon-cyan/90 hover:bg-neon-cyan text-space-950 border-none"
                                 @click="saveChannelSettings('feishu')" :disabled="channelSettingsSaving.feishu">
                                 <span x-text="channelSettingsSaving.feishu ? t('sending') : t('saveChannelSettings')"></span>

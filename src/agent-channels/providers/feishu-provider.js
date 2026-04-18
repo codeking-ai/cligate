@@ -1,4 +1,5 @@
 import { createNormalizedChannelMessage } from '../models.js';
+import * as Lark from '@larksuiteoapi/node-sdk';
 
 function buildRouterResultText(result) {
   switch (result?.type) {
@@ -46,9 +47,10 @@ export class FeishuChannelProvider {
     this.id = 'feishu';
     this.fetchImpl = fetchImpl;
     this.capabilities = {
-      mode: 'webhook',
+      mode: 'websocket',
       supportsWebhook: true,
       supportsPolling: false,
+      supportsWebsocket: true,
       supportsInteractiveApproval: true,
       supportsRichCard: true,
       supportsThreading: true,
@@ -61,6 +63,8 @@ export class FeishuChannelProvider {
       accessToken: '',
       expiresAt: 0
     };
+    this.wsClient = null;
+    this.sdkClient = null;
   }
 
   async start({ settings, router, logger } = {}) {
@@ -75,10 +79,41 @@ export class FeishuChannelProvider {
       return { started: false, reason: 'feishu appId/appSecret is not configured' };
     }
 
-    return { started: true };
+    if ((this.settings?.mode || 'websocket') === 'websocket') {
+      this.sdkClient = new Lark.Client({
+        appId: this.settings.appId,
+        appSecret: this.settings.appSecret
+      });
+
+      this.wsClient = new Lark.WSClient({
+        appId: this.settings.appId,
+        appSecret: this.settings.appSecret,
+        loggerLevel: Lark.LoggerLevel.info
+      });
+
+      this.wsClient.start({
+        eventDispatcher: new Lark.EventDispatcher({}).register({
+          'im.message.receive_v1': async (data) => {
+            await this.handleWebhook({
+              header: { event_type: 'im.message.receive_v1' },
+              event: data
+            });
+          }
+        })
+      });
+    }
+
+    return { started: true, mode: this.settings?.mode || 'websocket' };
   }
 
   async stop() {
+    try {
+      this.wsClient?.close?.({ force: true });
+    } catch (error) {
+      this.logger?.warn?.(`[Feishu] Failed to close websocket client: ${error.message}`);
+    }
+    this.wsClient = null;
+    this.sdkClient = null;
     return { stopped: true };
   }
 
@@ -194,6 +229,32 @@ export class FeishuChannelProvider {
   }
 
   async sendMessage({ conversation, text, buttons = [] } = {}) {
+    if (this.sdkClient) {
+      const tail = buttons.length > 0
+        ? `\n\nActions: ${buttons.map((button) => `/${button.action || button.id}`).join(' / ')}`
+        : '';
+      const response = await this.sdkClient.im.v1.message.create({
+        params: {
+          receive_id_type: 'chat_id'
+        },
+        data: {
+          receive_id: conversation?.externalConversationId,
+          msg_type: 'text',
+          content: JSON.stringify({
+            text: `${String(text || '')}${tail}`
+          })
+        }
+      });
+
+      if (Number(response?.code) !== 0) {
+        throw new Error(response?.msg || 'Failed to send Feishu message');
+      }
+
+      return {
+        messageId: String(response?.data?.message_id || '')
+      };
+    }
+
     const token = await this.getTenantAccessToken();
     const tail = buttons.length > 0
       ? `\n\nActions: ${buttons.map((button) => `/${button.action || button.id}`).join(' / ')}`

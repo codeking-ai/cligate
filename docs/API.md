@@ -261,6 +261,10 @@ GET /health
 
 ## Agent Channel Gateway
 
+Feishu supports two connection models:
+- `websocket` for local desktop deployments without a public callback URL
+- `webhook` for server deployments with a public HTTPS callback endpoint
+
 | Endpoint | Method | Description |
 |----------|--------|-------------|
 | `/api/agent-channels/providers` | GET | List channel provider status |
