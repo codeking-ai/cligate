@@ -258,6 +258,27 @@ openai_base_url = "http://localhost:8081"
 - **会话记录** 页面：查看移动端 session 线程和 runtime transcript
 - **本地模型** 页面：配置本地运行时地址、检查状态，并把发现到的模型接入系统路由
 
+### 6. 在 Telegram / 飞书中切换 Codex 和 Claude Code
+
+每个渠道都有一个 **默认运行时 Provider**，用于新会话的默认入口。一旦某条对话已经启动 runtime session，后续普通文本会继续挂到当前 provider，直到你显式重置或切换。
+
+可在 Telegram / 飞书中使用这些命令：
+
+- `/cx <任务>` — 启动一个新的 **Codex** 会话
+- `/cc <任务>` — 启动一个新的 **Claude Code** 会话
+- `/agent codex <任务>` — Codex 的完整写法
+- `/agent claude <任务>` — Claude Code 的完整写法
+- `/new` — 解除当前 runtime session 绑定；下一条普通消息会按渠道默认 provider 启动新会话
+- `/new cx <任务>` 或 `/new codex <任务>` — 立即启动一个新的 Codex 会话
+- `/new cc <任务>` 或 `/new claude <任务>` — 立即启动一个新的 Claude Code 会话
+
+推荐使用方式：
+
+- 把默认 provider 设成你最常用的那个
+- 需要临时切换工具时，用 `/cx` 或 `/cc`
+- 想继续当前任务时，直接发送普通文本即可
+- 想开启新的任务线程时，先发 `/new`
+
 ---
 
 ## 模型映射

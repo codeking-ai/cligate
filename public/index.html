@@ -2056,11 +2056,11 @@
                                 <input type="text" class="input input-sm w-full bg-space-800 border-space-border text-white"
                                     x-model="channelSettings.telegram.model" :placeholder="t('chatModelPlaceholder')">
                             </label>
-                            <label class="block">
-                                <span class="text-xs text-gray-500 mb-1 block" x-text="t('channelWorkingDirectory')"></span>
-                                <input type="text" class="input input-sm w-full bg-space-800 border-space-border text-white"
-                                    x-model="channelSettings.telegram.cwd" placeholder="D:\repo">
-                            </label>
+                                <label class="block">
+                                    <span class="text-xs text-gray-500 mb-1 block" x-text="t('channelWorkingDirectory')"></span>
+                                    <input type="text" class="input input-sm w-full bg-space-800 border-space-border text-white"
+                                        x-model="channelSettings.telegram.cwd">
+                                </label>
                             <label class="flex items-center justify-between gap-3">
                                 <span class="text-sm text-gray-300" x-text="t('channelRequirePairing')"></span>
                                 <input type="checkbox" class="checkbox checkbox-sm" x-model="channelSettings.telegram.requirePairing">
@@ -2134,7 +2134,7 @@
                             <label class="block">
                                 <span class="text-xs text-gray-500 mb-1 block" x-text="t('channelWorkingDirectory')"></span>
                                 <input type="text" class="input input-sm w-full bg-space-800 border-space-border text-white"
-                                    x-model="channelSettings.feishu.cwd" placeholder="D:\repo">
+                                    x-model="channelSettings.feishu.cwd">
                             </label>
                             <label class="flex items-center justify-between gap-3">
                                 <span class="text-sm text-gray-300" x-text="t('channelRequirePairing')"></span>

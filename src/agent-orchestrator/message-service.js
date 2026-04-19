@@ -5,9 +5,10 @@ function withDefaultRuntimeOptions(provider, metadata = {}) {
   const next = { ...(metadata || {}) };
   const runtimeOptions = { ...(next.runtimeOptions || {}) };
 
-  if (provider === 'codex') {
+  if (provider === 'codex' && String(next.cwd || '').trim()) {
     runtimeOptions.codex = {
       approvalPolicy: 'on-request',
+      sandboxMode: 'workspace-write',
       ...(runtimeOptions.codex || {})
     };
   }
@@ -33,6 +34,23 @@ function parseLeadingCommand(input) {
   };
 }
 
+function parseProviderAlias(command, args) {
+  const normalized = String(command || '').toLowerCase();
+  if (normalized === 'cx') {
+    return {
+      provider: 'codex',
+      input: String(args || '').trim()
+    };
+  }
+  if (normalized === 'cc') {
+    return {
+      provider: 'claude-code',
+      input: String(args || '').trim()
+    };
+  }
+  return null;
+}
+
 function parseAgentCommand(args) {
   const match = String(args || '').match(/^(codex|claude(?:-code)?)\s+(.+)$/is);
   if (!match) return null;
@@ -40,6 +58,15 @@ function parseAgentCommand(args) {
     provider: match[1].toLowerCase().startsWith('claude') ? 'claude-code' : 'codex',
     input: String(match[2] || '').trim()
   };
+}
+
+function parseRuntimeTarget(args) {
+  const command = parseLeadingCommand(`/${String(args || '').trim()}`);
+  const alias = parseProviderAlias(command?.command, command?.args);
+  if (alias) {
+    return alias;
+  }
+  return parseAgentCommand(args);
 }
 
 function buildResetResponse(message, activeSessionId = null) {
@@ -94,7 +121,10 @@ export class AgentOrchestratorMessageService {
       input,
       cwd,
       model,
-      metadata: withDefaultRuntimeOptions(provider, metadata)
+      metadata: withDefaultRuntimeOptions(provider, {
+        ...(metadata || {}),
+        cwd
+      })
     });
   }
 
@@ -152,12 +182,40 @@ export class AgentOrchestratorMessageService {
     const pendingApprovalId = conversation?.lastPendingApprovalId || null;
     const pendingQuestionId = conversation?.lastPendingQuestionId || null;
 
+    const aliased = parseProviderAlias(parsed?.command, parsed?.args);
+    if (aliased) {
+      if (!aliased.input) {
+        return {
+          type: 'command_error',
+          message: aliased.provider === 'codex'
+            ? 'Usage: /cx <task>'
+            : 'Usage: /cc <task>'
+        };
+      }
+
+      const session = await this.startRuntimeTask({
+        provider: aliased.provider,
+        input: aliased.input,
+        cwd,
+        model,
+        metadata
+      });
+
+      return {
+        type: 'runtime_started',
+        provider: aliased.provider,
+        session,
+        startedFresh: true,
+        replacedSessionId: activeSessionId
+      };
+    }
+
     if (parsed?.command === 'agent') {
       const spec = parseAgentCommand(parsed.args);
       if (!spec) {
         return {
           type: 'command_error',
-          message: 'Usage: /agent codex <task> or /agent claude <task>'
+          message: 'Usage: /agent codex <task>, /agent claude <task>, /cx <task>, or /cc <task>'
         };
       }
 
@@ -186,7 +244,7 @@ export class AgentOrchestratorMessageService {
         );
       }
 
-      const spec = parseAgentCommand(parsed.args);
+      const spec = parseRuntimeTarget(parsed.args);
       const provider = spec?.provider || defaultRuntimeProvider;
       const input = spec?.input || parsed.args;
       const session = await this.startRuntimeTask({

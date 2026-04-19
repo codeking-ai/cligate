@@ -259,6 +259,27 @@ In the **Settings** tab:
 - **Conversation Records** tab — Inspect mobile session threads and runtime transcripts
 - **Local Models** tab — Register a local runtime endpoint, check availability, and import discovered models into routing
 
+### 6. Control Codex and Claude Code from Telegram / Feishu
+
+Each channel has a **Default Runtime Provider** for new conversations. Once a runtime session is started, follow-up plain messages stay attached to that same provider until you reset or explicitly switch it.
+
+Use these commands from Telegram or Feishu:
+
+- `/cx <task>` — Start a fresh **Codex** session
+- `/cc <task>` — Start a fresh **Claude Code** session
+- `/agent codex <task>` — Explicit long form for Codex
+- `/agent claude <task>` — Explicit long form for Claude Code
+- `/new` — Detach the current runtime session; the next plain message starts fresh with the channel default provider
+- `/new cx <task>` or `/new codex <task>` — Start a fresh Codex session immediately
+- `/new cc <task>` or `/new claude <task>` — Start a fresh Claude Code session immediately
+
+Suggested operating model:
+
+- Set the channel default to the provider you use most often
+- Use `/cx` or `/cc` when you want to switch tools for the current conversation
+- Keep sending plain follow-up messages to continue the bound session
+- Use `/new` before starting a different task thread
+
 ---
 
 ## Model Mapping

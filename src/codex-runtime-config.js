@@ -79,6 +79,10 @@ function ensureTopLevelKey(content, key, valueLiteral) {
   return lines.join('\n');
 }
 
+function removeTopLevelKey(content, key) {
+  return String(content || '').replace(new RegExp(`^${escapeRegExp(key)}\\s*=\\s*.*\\n?`, 'm'), '');
+}
+
 function findSectionRange(content, sectionName) {
   const source = String(content || '');
   const lines = source.split('\n');
@@ -130,6 +134,31 @@ function ensureSectionKey(content, sectionName, key, valueLiteral) {
   return lines.join('\n');
 }
 
+function removeSectionKey(content, sectionName, key) {
+  const section = findSectionRange(content, sectionName);
+  if (!section) {
+    return String(content || '');
+  }
+
+  const { lines, start, end } = section;
+  const keyPattern = new RegExp(`^${escapeRegExp(key)}\\s*=\\s*.*$`);
+  for (let index = start + 1; index < end; index += 1) {
+    if (keyPattern.test(lines[index])) {
+      lines.splice(index, 1);
+      break;
+    }
+  }
+
+  const nextSection = findSectionRange(lines.join('\n'), sectionName);
+  if (!nextSection) {
+    return lines.join('\n');
+  }
+  if (nextSection.end === nextSection.start + 1) {
+    lines.splice(nextSection.start, 1);
+  }
+  return lines.join('\n');
+}
+
 function parseTopLevelKey(content, key) {
   const match = String(content || '').match(new RegExp(`^${escapeRegExp(key)}\\s*=\\s*(.+)$`, 'm'));
   return match ? match[1].trim() : null;
@@ -173,12 +202,21 @@ export function applyCodexRuntimeCompatibility(content = '', {
   settings = RECOMMENDED_CODEX_RUNTIME_SETTINGS
 } = {}) {
   let next = ensureTrailingNewline(content);
+  const hasWorkspaceRoot = Boolean(String(cwd || '').trim());
+
   next = ensureTopLevelKey(next, 'allow_login_shell', settings.allowLoginShell ? 'true' : 'false');
-  next = ensureTopLevelKey(next, 'sandbox_mode', JSON.stringify(settings.sandboxMode));
   next = ensureSectionKey(next, 'features', 'powershell_utf8', settings.powershellUtf8 ? 'true' : 'false');
 
-  if (process.platform === 'win32' && settings.windowsSandbox) {
-    next = ensureSectionKey(next, 'windows', 'sandbox', JSON.stringify(settings.windowsSandbox));
+  if (hasWorkspaceRoot) {
+    next = ensureTopLevelKey(next, 'sandbox_mode', JSON.stringify(settings.sandboxMode));
+    if (process.platform === 'win32' && settings.windowsSandbox) {
+      next = ensureSectionKey(next, 'windows', 'sandbox', JSON.stringify(settings.windowsSandbox));
+    }
+  } else {
+    next = removeTopLevelKey(next, 'sandbox_mode');
+    if (process.platform === 'win32') {
+      next = removeSectionKey(next, 'windows', 'sandbox');
+    }
   }
 
   for (const projectKey of buildTrustedProjectKeys(cwd)) {

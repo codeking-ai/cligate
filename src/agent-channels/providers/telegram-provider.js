@@ -17,6 +17,12 @@ function mapCallbackDataToText(data) {
   return raw;
 }
 
+function providerLabel(providerId) {
+  if (providerId === 'claude-code') return 'Claude Code';
+  if (providerId === 'codex') return 'Codex';
+  return String(providerId || 'agent');
+}
+
 function buildRouterResultText(result) {
   switch (result?.type) {
     case 'pairing_required':
@@ -25,9 +31,9 @@ function buildRouterResultText(result) {
       return result.message || 'Command error';
     case 'runtime_started':
       if (result?.startedFresh && result?.replacedSessionId) {
-        return `Started a fresh task with ${result?.session?.provider || result?.provider || 'agent'}. Previous session ${result.replacedSessionId} was detached. New session: ${result?.session?.id || ''}`.trim();
+        return `Started a fresh task with ${providerLabel(result?.session?.provider || result?.provider)}. Previous session ${result.replacedSessionId} was detached. New session: ${result?.session?.id || ''}`.trim();
       }
-      return `Task accepted. Session ${result?.session?.id || ''} started with ${result?.session?.provider || result?.provider || 'agent'}.`.trim();
+      return `Task accepted. Session ${result?.session?.id || ''} started with ${providerLabel(result?.session?.provider || result?.provider)}.`.trim();
     case 'runtime_continued':
       return `Sent follow-up to session ${result?.session?.id || ''}.`.trim();
     case 'runtime_cancelled':

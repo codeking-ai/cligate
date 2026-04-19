@@ -54,6 +54,7 @@ export function buildCodexSpawnEnv(baseEnv = process.env, runtimeOptions = {}, {
 
   if (
     platform === 'win32'
+    && runtimeOptions.sandboxMode
     && !runtimeOptions.dangerouslyBypass
     && env[pathKey]
     && parseBooleanFlag(env.CLIGATE_CODEX_FORCE_WINDOWS_POWERSHELL ?? '1')
@@ -80,6 +81,7 @@ export function buildCodexSpawnEnv(baseEnv = process.env, runtimeOptions = {}, {
 export function resolveCodexRuntimeOptions(session, { env = process.env } = {}) {
   const runtimeOptions = session?.metadata?.runtimeOptions || {};
   const codexOptions = runtimeOptions?.codex || session?.metadata?.codex || {};
+  const hasWorkspaceRoot = Boolean(String(session?.cwd || '').trim());
 
   const dangerouslyBypass = parseBooleanFlag(
     codexOptions.dangerouslyBypass
@@ -87,26 +89,26 @@ export function resolveCodexRuntimeOptions(session, { env = process.env } = {}) 
       ?? env.CLIGATE_CODEX_DANGEROUSLY_BYPASS
   );
 
-  const sandboxMode = normalizeRuntimeOption(
-    readRuntimeOption(
-      codexOptions,
-      'sandboxMode',
-      'sandbox_mode',
-      'sandbox'
-    ) || readRuntimeOption(runtimeOptions, 'sandboxMode', 'sandbox_mode', 'sandbox') || env.CLIGATE_CODEX_SANDBOX_MODE,
-    CODEX_SANDBOX_MODES,
-    'workspace-write'
-  );
+  const sandboxSource = readRuntimeOption(
+    codexOptions,
+    'sandboxMode',
+    'sandbox_mode',
+    'sandbox'
+  ) || readRuntimeOption(runtimeOptions, 'sandboxMode', 'sandbox_mode', 'sandbox') || env.CLIGATE_CODEX_SANDBOX_MODE;
 
-  const approvalPolicy = normalizeRuntimeOption(
-    readRuntimeOption(
-      codexOptions,
-      'approvalPolicy',
-      'approval_policy'
-    ) || readRuntimeOption(runtimeOptions, 'approvalPolicy', 'approval_policy') || env.CLIGATE_CODEX_APPROVAL_POLICY,
-    CODEX_APPROVAL_POLICIES,
-    'never'
-  );
+  const approvalSource = readRuntimeOption(
+    codexOptions,
+    'approvalPolicy',
+    'approval_policy'
+  ) || readRuntimeOption(runtimeOptions, 'approvalPolicy', 'approval_policy') || env.CLIGATE_CODEX_APPROVAL_POLICY;
+
+  const sandboxMode = sandboxSource
+    ? normalizeRuntimeOption(sandboxSource, CODEX_SANDBOX_MODES, hasWorkspaceRoot ? 'workspace-write' : '')
+    : (hasWorkspaceRoot ? 'workspace-write' : '');
+
+  const approvalPolicy = approvalSource
+    ? normalizeRuntimeOption(approvalSource, CODEX_APPROVAL_POLICIES, hasWorkspaceRoot ? 'on-request' : '')
+    : (hasWorkspaceRoot ? 'on-request' : '');
 
   return {
     sandboxMode,
@@ -122,8 +124,12 @@ export function buildCodexExecArgs(session, input = '', { env = process.env } = 
   if (runtimeOptions.dangerouslyBypass) {
     args.push('--dangerously-bypass-approvals-and-sandbox');
   } else {
-    args.push('--sandbox', runtimeOptions.sandboxMode);
-    args.push('-c', `approval_policy="${runtimeOptions.approvalPolicy}"`);
+    if (runtimeOptions.sandboxMode) {
+      args.push('--sandbox', runtimeOptions.sandboxMode);
+    }
+    if (runtimeOptions.approvalPolicy) {
+      args.push('-c', `approval_policy="${runtimeOptions.approvalPolicy}"`);
+    }
   }
   args.push('--json');
 

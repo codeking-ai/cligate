@@ -216,6 +216,91 @@ test('AgentOrchestratorMessageService starts and continues runtime sessions from
   assert.equal(continued.session.turnCount, 2);
 });
 
+test('AgentOrchestratorMessageService supports /cx and /cc mobile aliases', async () => {
+  const registry = new AgentRuntimeRegistry();
+  registry.register(new FakeProvider());
+  registry.register(new FakeInteractiveProvider());
+  const runtimeSessionManager = new AgentRuntimeSessionManager({
+    registry,
+    store: new AgentRuntimeSessionStore({
+      configDir: createTempDir('cligate-agent-channels-runtime-alias-')
+    }),
+    eventBus: new AgentRuntimeEventBus(),
+    approvalService: new AgentRuntimeApprovalService()
+  });
+  const service = new AgentOrchestratorMessageService({ runtimeSessionManager });
+
+  const codexStarted = await service.routeUserMessage({
+    message: { text: '/cx inspect repo' },
+    conversation: null
+  });
+  assert.equal(codexStarted.type, 'runtime_started');
+  assert.equal(codexStarted.session.provider, 'codex');
+
+  const claudeStarted = await service.routeUserMessage({
+    message: { text: '/cc review this directory' },
+    conversation: null
+  });
+  assert.equal(claudeStarted.type, 'runtime_started');
+  assert.equal(claudeStarted.session.provider, 'claude-code');
+  assert.equal(claudeStarted.startedFresh, true);
+});
+
+test('AgentOrchestratorMessageService supports /new cx and /new cc mobile aliases', async () => {
+  const registry = new AgentRuntimeRegistry();
+  registry.register(new FakeProvider());
+  registry.register(new FakeInteractiveProvider());
+  const runtimeSessionManager = new AgentRuntimeSessionManager({
+    registry,
+    store: new AgentRuntimeSessionStore({
+      configDir: createTempDir('cligate-agent-channels-runtime-new-alias-')
+    }),
+    eventBus: new AgentRuntimeEventBus(),
+    approvalService: new AgentRuntimeApprovalService()
+  });
+  const service = new AgentOrchestratorMessageService({ runtimeSessionManager });
+
+  const initial = await service.routeUserMessage({
+    message: { text: '/cx inspect repo' },
+    conversation: null
+  });
+
+  const freshClaude = await service.routeUserMessage({
+    message: { text: '/new cc review this directory' },
+    conversation: { activeRuntimeSessionId: initial.session.id }
+  });
+  assert.equal(freshClaude.type, 'runtime_started');
+  assert.equal(freshClaude.session.provider, 'claude-code');
+  assert.equal(freshClaude.replacedSessionId, initial.session.id);
+
+  const freshCodex = await service.routeUserMessage({
+    message: { text: '/new cx write a script' },
+    conversation: { activeRuntimeSessionId: freshClaude.session.id }
+  });
+  assert.equal(freshCodex.type, 'runtime_started');
+  assert.equal(freshCodex.session.provider, 'codex');
+  assert.equal(freshCodex.replacedSessionId, freshClaude.session.id);
+});
+
+test('AgentOrchestratorMessageService only injects strict Codex defaults when cwd is set', async () => {
+  const runtimeSessionManager = createRuntimeManager();
+  const service = new AgentOrchestratorMessageService({ runtimeSessionManager });
+
+  const unrestricted = await service.startRuntimeTask({
+    provider: 'codex',
+    input: 'inspect repo'
+  });
+  assert.deepEqual(unrestricted.metadata.runtimeOptions || {}, {});
+
+  const restricted = await service.startRuntimeTask({
+    provider: 'codex',
+    input: 'inspect repo',
+    cwd: 'D:\\tmp'
+  });
+  assert.equal(restricted.metadata.runtimeOptions?.codex?.approvalPolicy, 'on-request');
+  assert.equal(restricted.metadata.runtimeOptions?.codex?.sandboxMode, 'workspace-write');
+});
+
 test('AgentOrchestratorMessageService supports explicit session reset and fresh runtime starts', async () => {
   const runtimeSessionManager = createRuntimeManager();
   const service = new AgentOrchestratorMessageService({ runtimeSessionManager });

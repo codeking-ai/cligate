@@ -503,7 +503,7 @@ test('buildSpawnCommand preserves embedded quotes in config-style arguments', ()
   ]);
 });
 
-test('resolveCodexRuntimeOptions defaults to workspace-write and never approval', () => {
+test('resolveCodexRuntimeOptions preserves native Codex defaults when cwd is empty', () => {
   const options = resolveCodexRuntimeOptions({
     metadata: {}
   }, {
@@ -511,8 +511,23 @@ test('resolveCodexRuntimeOptions defaults to workspace-write and never approval'
   });
 
   assert.deepEqual(options, {
+    sandboxMode: '',
+    approvalPolicy: '',
+    dangerouslyBypass: false
+  });
+});
+
+test('resolveCodexRuntimeOptions defaults to workspace-write and on-request when cwd is set', () => {
+  const options = resolveCodexRuntimeOptions({
+    cwd: 'D:\\cligatespace',
+    metadata: {}
+  }, {
+    env: {}
+  });
+
+  assert.deepEqual(options, {
     sandboxMode: 'workspace-write',
-    approvalPolicy: 'never',
+    approvalPolicy: 'on-request',
     dangerouslyBypass: false
   });
 });
@@ -556,7 +571,7 @@ test('buildCodexExecArgs emits writable defaults and supports dangerous bypass',
     '--sandbox',
     'workspace-write',
     '-c',
-    'approval_policy="never"',
+    'approval_policy="on-request"',
     '--json',
     '--model'
   ]);
@@ -584,6 +599,25 @@ test('buildCodexExecArgs emits writable defaults and supports dangerous bypass',
   assert.ok(!bypassArgs.includes('--sandbox'));
   assert.ok(!bypassArgs.includes('--ask-for-approval'));
   assert.equal(bypassArgs.at(-1), 'do the thing');
+});
+
+test('buildCodexExecArgs skips forced sandbox and approval flags when cwd is empty', () => {
+  const args = buildCodexExecArgs({
+    model: 'gpt-5.4',
+    metadata: {}
+  }, 'say hello', {
+    env: {}
+  });
+
+  assert.deepEqual(args.slice(0, 4), [
+    'exec',
+    '--json',
+    '--model',
+    'gpt-5.4'
+  ]);
+  assert.ok(!args.includes('--sandbox'));
+  assert.ok(!args.some((value) => String(value).includes('approval_policy=')));
+  assert.equal(args.at(-1), 'say hello');
 });
 
 test('buildCodexExecArgs appends resume prompt after the provider session id', () => {
@@ -617,7 +651,8 @@ test('buildCodexSpawnEnv filters PowerShell 7 from PATH on windows sandbox runs'
     PATH: 'D:\\soft\\windowspowershell\\7;C:\\Windows\\System32',
     CLIGATE_CODEX_FORCE_WINDOWS_POWERSHELL: '1'
   }, {
-    dangerouslyBypass: false
+    dangerouslyBypass: false,
+    sandboxMode: 'workspace-write'
   }, {
     platform: 'win32'
   });

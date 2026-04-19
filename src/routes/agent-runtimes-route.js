@@ -1,8 +1,8 @@
 import agentRuntimeSessionManager from '../agent-runtime/session-manager.js';
 
-function withInteractiveCodexDefaults(provider, metadata = {}) {
+function withInteractiveCodexDefaults(provider, metadata = {}, cwd = '') {
   const next = { ...(metadata || {}) };
-  if (provider !== 'codex') {
+  if (provider !== 'codex' || !String(cwd || '').trim()) {
     return next;
   }
 
@@ -10,6 +10,7 @@ function withInteractiveCodexDefaults(provider, metadata = {}) {
     ...(next.runtimeOptions || {}),
     codex: {
       approvalPolicy: 'on-request',
+      sandboxMode: 'workspace-write',
       ...((next.runtimeOptions || {}).codex || {})
     }
   };
@@ -66,7 +67,7 @@ export async function handleCreateAgentRuntimeSession(req, res) {
       input,
       cwd,
       model,
-      metadata: withInteractiveCodexDefaults(provider, metadata)
+      metadata: withInteractiveCodexDefaults(provider, metadata, cwd)
     });
     return res.json({ success: true, session });
   } catch (error) {
