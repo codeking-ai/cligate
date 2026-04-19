@@ -68,7 +68,8 @@ function decorateConversation(conversation, { includeDeliveries = false } = {}) 
     pairingCode: pairing?.code || '',
     pairingApprovedAt: pairing?.approvedAt || null,
     ...summarizeDelivery(deliveries[deliveries.length - 1] || null),
-    deliveries: includeDeliveries ? deliveries : undefined
+    deliveries: includeDeliveries ? deliveries : undefined,
+    supervisor: conversation?.metadata?.supervisor || null
   };
 }
 

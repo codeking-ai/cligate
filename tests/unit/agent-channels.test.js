@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import AgentRuntimeApprovalService from '../../src/agent-runtime/approval-service.js';
+import { AgentRuntimeApprovalPolicyStore } from '../../src/agent-runtime/approval-policy-store.js';
 import AgentRuntimeEventBus from '../../src/agent-runtime/event-bus.js';
 import { AGENT_EVENT_TYPE } from '../../src/agent-runtime/models.js';
 import { AgentRuntimeRegistry } from '../../src/agent-runtime/registry.js';
@@ -58,6 +59,16 @@ class FakeInteractiveProvider {
     onApprovalRequest({
       title: 'Need permission',
       summary: 'Run command'
+      ,
+      rawRequest: {
+        requestId: 'approval-request-1',
+        subtype: 'can_use_tool',
+        tool_name: 'Read',
+        blocked_path: 'D:\\lovetoday\\index.html',
+        input: {
+          file_path: 'D:\\lovetoday\\index.html'
+        }
+      }
     });
     onQuestionRequest({
       questionId: 'question-1',
@@ -81,7 +92,10 @@ function createRuntimeManager() {
       configDir: createTempDir('cligate-agent-channels-runtime-')
     }),
     eventBus: new AgentRuntimeEventBus(),
-    approvalService: new AgentRuntimeApprovalService()
+    approvalService: new AgentRuntimeApprovalService(),
+    approvalPolicyStore: new AgentRuntimeApprovalPolicyStore({
+      configDir: createTempDir('cligate-agent-channels-runtime-policy-')
+    })
   });
 }
 
@@ -94,7 +108,27 @@ function createInteractiveRuntimeManager() {
       configDir: createTempDir('cligate-agent-channels-runtime-interactive-')
     }),
     eventBus: new AgentRuntimeEventBus(),
-    approvalService: new AgentRuntimeApprovalService()
+    approvalService: new AgentRuntimeApprovalService(),
+    approvalPolicyStore: new AgentRuntimeApprovalPolicyStore({
+      configDir: createTempDir('cligate-agent-channels-runtime-interactive-policy-')
+    })
+  });
+}
+
+function createHybridRuntimeManager() {
+  const registry = new AgentRuntimeRegistry();
+  registry.register(new FakeProvider());
+  registry.register(new FakeInteractiveProvider());
+  return new AgentRuntimeSessionManager({
+    registry,
+    store: new AgentRuntimeSessionStore({
+      configDir: createTempDir('cligate-agent-channels-runtime-hybrid-')
+    }),
+    eventBus: new AgentRuntimeEventBus(),
+    approvalService: new AgentRuntimeApprovalService(),
+    approvalPolicyStore: new AgentRuntimeApprovalPolicyStore({
+      configDir: createTempDir('cligate-agent-channels-runtime-hybrid-policy-')
+    })
   });
 }
 
@@ -226,7 +260,10 @@ test('AgentOrchestratorMessageService supports /cx and /cc mobile aliases', asyn
       configDir: createTempDir('cligate-agent-channels-runtime-alias-')
     }),
     eventBus: new AgentRuntimeEventBus(),
-    approvalService: new AgentRuntimeApprovalService()
+    approvalService: new AgentRuntimeApprovalService(),
+    approvalPolicyStore: new AgentRuntimeApprovalPolicyStore({
+      configDir: createTempDir('cligate-agent-channels-runtime-alias-policy-')
+    })
   });
   const service = new AgentOrchestratorMessageService({ runtimeSessionManager });
 
@@ -256,7 +293,10 @@ test('AgentOrchestratorMessageService supports /new cx and /new cc mobile aliase
       configDir: createTempDir('cligate-agent-channels-runtime-new-alias-')
     }),
     eventBus: new AgentRuntimeEventBus(),
-    approvalService: new AgentRuntimeApprovalService()
+    approvalService: new AgentRuntimeApprovalService(),
+    approvalPolicyStore: new AgentRuntimeApprovalPolicyStore({
+      configDir: createTempDir('cligate-agent-channels-runtime-new-alias-policy-')
+    })
   });
   const service = new AgentOrchestratorMessageService({ runtimeSessionManager });
 
@@ -563,6 +603,60 @@ test('AgentOrchestratorMessageService resolves approvals and answers pending que
   assert.equal(questionResult.question.status, 'answered');
 });
 
+test('AgentOrchestratorMessageService accepts natural-language approval and can remember session policy', async () => {
+  const runtimeSessionManager = createInteractiveRuntimeManager();
+  const approvalPolicyStore = new AgentRuntimeApprovalPolicyStore({
+    configDir: createTempDir('cligate-agent-channels-approval-memory-')
+  });
+  const service = new AgentOrchestratorMessageService({ runtimeSessionManager, approvalPolicyStore });
+
+  const started = await service.startRuntimeTask({
+    provider: 'claude-code',
+    input: 'interactive task'
+  });
+  const pendingApproval = runtimeSessionManager.approvalService.listPending(started.id)[0];
+
+  const resolved = await service.routeUserMessage({
+    message: { text: '同意这个会话里这个目录后续都允许' },
+    conversation: {
+      activeRuntimeSessionId: started.id,
+      lastPendingApprovalId: pendingApproval.approvalId
+    }
+  });
+
+  assert.equal(resolved.type, 'approval_resolved');
+  assert.equal(resolved.approval.status, 'approved');
+  assert.ok(resolved.policy);
+  assert.equal(approvalPolicyStore.listPolicies({ scope: 'session', scopeRef: started.id }).length, 1);
+});
+
+test('AgentOrchestratorMessageService can remember approval at conversation scope', async () => {
+  const runtimeSessionManager = createInteractiveRuntimeManager();
+  const approvalPolicyStore = new AgentRuntimeApprovalPolicyStore({
+    configDir: createTempDir('cligate-agent-channels-approval-conversation-memory-')
+  });
+  const service = new AgentOrchestratorMessageService({ runtimeSessionManager, approvalPolicyStore });
+
+  const started = await service.startRuntimeTask({
+    provider: 'claude-code',
+    input: 'interactive task'
+  });
+  const pendingApproval = runtimeSessionManager.approvalService.listPending(started.id)[0];
+
+  const resolved = await service.routeUserMessage({
+    message: { text: '同意这个对话里这个目录后续都允许' },
+    conversation: {
+      id: 'conv_123',
+      activeRuntimeSessionId: started.id,
+      lastPendingApprovalId: pendingApproval.approvalId
+    }
+  });
+
+  assert.equal(resolved.type, 'approval_resolved');
+  assert.equal(resolved.policy.scope, 'conversation');
+  assert.equal(approvalPolicyStore.listPolicies({ scope: 'conversation', scopeRef: 'conv_123' }).length, 1);
+});
+
 test('AgentOrchestratorMessageService returns a friendly busy message while the active session is still running', async () => {
   const runtimeSessionManager = createInteractiveRuntimeManager();
   const service = new AgentOrchestratorMessageService({ runtimeSessionManager });
@@ -581,6 +675,505 @@ test('AgentOrchestratorMessageService returns a friendly busy message while the 
 
   assert.equal(busyResult.type, 'command_error');
   assert.match(busyResult.message, /permission decision|need your answer|working on the current task/i);
+});
+
+test('AgentOrchestratorMessageService answers natural-language status queries from conversation task memory', async () => {
+  const runtimeSessionManager = createRuntimeManager();
+  const service = new AgentOrchestratorMessageService({ runtimeSessionManager });
+
+  const result = await service.routeUserMessage({
+    message: { text: '现在做到哪了' },
+    conversation: {
+      metadata: {
+        supervisor: {
+          taskMemory: {
+            current: {
+              provider: 'claude-code',
+              title: 'Create demo page',
+              status: 'waiting_approval',
+              pendingApprovalTitle: 'Claude Code wants to use Bash',
+              summary: 'Created the folder and is about to write files.'
+            }
+          }
+        }
+      }
+    }
+  });
+
+  assert.equal(result.type, 'supervisor_status');
+  assert.match(result.message, /Create demo page/);
+  assert.match(result.message, /waiting_approval/i);
+  assert.match(result.message, /Claude Code wants to use Bash/);
+});
+
+test('AgentOrchestratorMessageService prefers structured supervisor brief for status replies', async () => {
+  const runtimeSessionManager = createRuntimeManager();
+  const service = new AgentOrchestratorMessageService({ runtimeSessionManager });
+
+  const result = await service.routeUserMessage({
+    message: { text: '进展如何' },
+    conversation: {
+      metadata: {
+        supervisor: {
+          brief: {
+            kind: 'current',
+            title: 'Build settings page',
+            provider: 'codex',
+            providerLabel: 'Codex',
+            status: 'waiting_approval',
+            summary: 'Created the layout and is waiting to write the final file.',
+            result: '',
+            error: '',
+            waitingReason: 'approval: Write D:\\tmp\\settings.html',
+            nextSuggestion: 'Reply with approval so the task can continue.'
+          }
+        }
+      }
+    }
+  });
+
+  assert.equal(result.type, 'supervisor_status');
+  assert.match(result.message, /Build settings page/);
+  assert.match(result.message, /waiting_approval/i);
+  assert.match(result.message, /Write D:\\tmp\\settings\.html/);
+});
+
+test('AgentOrchestratorMessageService answers wrap-up requests from remembered task context', async () => {
+  const runtimeSessionManager = createRuntimeManager();
+  const service = new AgentOrchestratorMessageService({ runtimeSessionManager });
+
+  const result = await service.routeUserMessage({
+    message: { text: '总结一下' },
+    conversation: {
+      metadata: {
+        supervisor: {
+          taskMemory: {
+            current: {
+              provider: 'codex',
+              title: 'Build login page',
+              status: 'completed',
+              summary: 'Created the HTML page and verified the output file.',
+              result: 'The file is available at D:\\tmp\\login.html'
+            }
+          }
+        }
+      }
+    }
+  });
+
+  assert.equal(result.type, 'supervisor_status');
+  assert.match(result.message, /Build login page/);
+  assert.match(result.message, /Created the HTML page/);
+  assert.match(result.message, /D:\\tmp\\login\.html/);
+});
+
+test('AgentOrchestratorMessageService treats high-confidence fresh-task phrasing as a new task', async () => {
+  const runtimeSessionManager = createRuntimeManager();
+  const service = new AgentOrchestratorMessageService({ runtimeSessionManager });
+
+  const started = await service.routeUserMessage({
+    message: { text: '/cx inspect repo' },
+    conversation: null
+  });
+
+  const fresh = await service.routeUserMessage({
+    message: { text: '开始新任务：写一个新的说明文档' },
+    conversation: {
+      activeRuntimeSessionId: started.session.id
+    }
+  });
+
+  assert.equal(fresh.type, 'runtime_started');
+  assert.equal(fresh.startedFresh, true);
+  assert.equal(fresh.replacedSessionId, started.session.id);
+  assert.notEqual(fresh.session.id, started.session.id);
+});
+
+test('AgentOrchestratorMessageService treats sibling-task phrasing as a fresh task', async () => {
+  const runtimeSessionManager = createRuntimeManager();
+  const service = new AgentOrchestratorMessageService({ runtimeSessionManager });
+
+  const started = await service.routeUserMessage({
+    message: { text: '/cx inspect repo' },
+    conversation: null
+  });
+
+  const fresh = await service.routeUserMessage({
+    message: { text: '另外再做一个：生成部署说明' },
+    conversation: {
+      activeRuntimeSessionId: started.session.id
+    }
+  });
+
+  assert.equal(fresh.type, 'runtime_started');
+  assert.equal(fresh.startedFresh, true);
+  assert.equal(fresh.replacedSessionId, started.session.id);
+  assert.notEqual(fresh.session.id, started.session.id);
+});
+
+test('AgentOrchestratorMessageService treats related-task phrasing as a fresh sibling task', async () => {
+  const runtimeSessionManager = createRuntimeManager();
+  const service = new AgentOrchestratorMessageService({ runtimeSessionManager });
+
+  const started = await service.routeUserMessage({
+    message: { text: '/cx create a login page' },
+    conversation: null
+  });
+
+  const fresh = await service.routeUserMessage({
+    message: { text: '基于刚才那个再做一个：注册页' },
+    conversation: {
+      activeRuntimeSessionId: started.session.id
+    }
+  });
+
+  assert.equal(fresh.type, 'runtime_started');
+  assert.equal(fresh.startedFresh, true);
+  assert.match(String(fresh.message || ''), /related sibling task/i);
+  assert.notEqual(fresh.session.id, started.session.id);
+});
+
+test('AgentOrchestratorMessageService treats revision phrasing as an update to the current task', async () => {
+  const runtimeSessionManager = createRuntimeManager();
+  const service = new AgentOrchestratorMessageService({ runtimeSessionManager });
+
+  const started = await service.routeUserMessage({
+    message: { text: '/cx create a login page' },
+    conversation: null
+  });
+
+  const continued = await service.routeUserMessage({
+    message: { text: '再加一个扫码登录入口' },
+    conversation: {
+      activeRuntimeSessionId: started.session.id
+    }
+  });
+
+  assert.equal(continued.type, 'runtime_continued');
+  assert.match(String(continued.message || ''), /update to the current task/i);
+  assert.equal(continued.session.id, started.session.id);
+});
+
+test('AgentOrchestratorMessageService revives remembered task context for follow-up revisions without an active session', async () => {
+  const runtimeSessionManager = createHybridRuntimeManager();
+  const service = new AgentOrchestratorMessageService({ runtimeSessionManager });
+
+  const started = await service.routeUserMessage({
+    message: { text: '/cc create a login page' },
+    conversation: null
+  });
+
+  const followUp = await service.routeUserMessage({
+    message: { text: '把按钮改成绿色' },
+    conversation: {
+      metadata: {
+        supervisor: {
+          brief: {
+            kind: 'last_completed',
+            title: started.session.title || 'create a login page',
+            provider: 'claude-code',
+            providerLabel: 'Claude Code',
+            status: 'completed',
+            summary: 'Created the initial login page.',
+            result: 'index.html is ready.',
+            error: '',
+            waitingReason: '',
+            nextSuggestion: 'You can ask for a revision, a follow-up change, or start a related task.'
+          }
+        }
+      }
+    },
+    defaultRuntimeProvider: 'codex'
+  });
+
+  assert.equal(followUp.type, 'runtime_started');
+  assert.equal(followUp.provider, 'claude-code');
+  assert.equal(followUp.startedFresh, true);
+  assert.match(String(followUp.message || ''), /remembered conversation context/i);
+});
+
+test('AgentOrchestratorMessageService prefers remembered provider for related fresh tasks', async () => {
+  const runtimeSessionManager = createHybridRuntimeManager();
+  const service = new AgentOrchestratorMessageService({ runtimeSessionManager });
+
+  const response = await service.routeUserMessage({
+    message: { text: '另外再做一个：生成部署说明' },
+    conversation: {
+      metadata: {
+        supervisor: {
+          brief: {
+            kind: 'last_completed',
+            title: 'Create a login page',
+            provider: 'claude-code',
+            providerLabel: 'Claude Code',
+            status: 'completed',
+            summary: 'The login page is finished.',
+            result: 'index.html is ready.',
+            error: '',
+            waitingReason: '',
+            nextSuggestion: 'You can ask for a revision, a follow-up change, or start a related task.'
+          }
+        }
+      }
+    },
+    defaultRuntimeProvider: 'codex'
+  });
+
+  assert.equal(response.type, 'runtime_started');
+  assert.equal(response.provider, 'claude-code');
+  assert.equal(response.startedFresh, true);
+});
+
+test('AgentChannelRouter writes remembered follow-up context into current task memory', async () => {
+  const runtimeSessionManager = createHybridRuntimeManager();
+  const conversationStore = new AgentChannelConversationStore({
+    configDir: createTempDir('cligate-agent-channels-remembered-followup-conv-')
+  });
+  const deliveryStore = new AgentChannelDeliveryStore({
+    configDir: createTempDir('cligate-agent-channels-remembered-followup-delivery-')
+  });
+  const router = new AgentChannelRouter({
+    conversationStore,
+    deliveryStore,
+    pairingStore: new AgentChannelPairingStore({
+      configDir: createTempDir('cligate-agent-channels-remembered-followup-pairing-')
+    }),
+    messageService: new AgentOrchestratorMessageService({ runtimeSessionManager }),
+    requirePairing: false
+  });
+
+  const existing = conversationStore.findOrCreateByExternal({
+    channel: 'telegram',
+    accountId: 'default',
+    externalConversationId: 'chat_followup',
+    externalUserId: 'user_1',
+    metadata: {
+      supervisor: {
+        brief: {
+          kind: 'last_completed',
+          title: 'Create a login page',
+          provider: 'claude-code',
+          providerLabel: 'Claude Code',
+          status: 'completed',
+          summary: 'Created the initial login page.',
+          result: 'index.html is ready.',
+          error: '',
+          waitingReason: '',
+          nextSuggestion: 'You can ask for a revision, a follow-up change, or start a related task.'
+        }
+      }
+    }
+  });
+  assert.ok(existing);
+
+  const result = await router.routeInboundMessage({
+    channel: 'telegram',
+    accountId: 'default',
+    externalMessageId: 'm_followup_1',
+    externalConversationId: 'chat_followup',
+    externalUserId: 'user_1',
+    externalUserName: 'alice',
+    text: '把按钮改成绿色',
+    messageType: 'text'
+  }, {
+    defaultRuntimeProvider: 'codex'
+  });
+
+  assert.equal(result.type, 'runtime_started');
+  assert.equal(result.session.provider, 'claude-code');
+  assert.equal(result.conversation.metadata?.supervisor?.taskMemory?.current?.title, '把按钮改成绿色');
+  assert.equal(result.conversation.metadata?.supervisor?.taskMemory?.current?.originKind, 'remembered_follow_up');
+  assert.equal(result.conversation.metadata?.supervisor?.taskMemory?.current?.sourceTitle, 'Create a login page');
+  assert.match(String(result.conversation.metadata?.supervisor?.brief?.summary || ''), /Continuing remembered task "Create a login page"/i);
+  assert.match(String(result.conversation.metadata?.supervisor?.brief?.nextSuggestion || ''), /wait for completion|status update|\/cancel/i);
+});
+
+test('AgentChannelRouter writes related sibling origin into remembered task memory', async () => {
+  const runtimeSessionManager = createHybridRuntimeManager();
+  const conversationStore = new AgentChannelConversationStore({
+    configDir: createTempDir('cligate-agent-channels-related-origin-conv-')
+  });
+  const deliveryStore = new AgentChannelDeliveryStore({
+    configDir: createTempDir('cligate-agent-channels-related-origin-delivery-')
+  });
+  const router = new AgentChannelRouter({
+    conversationStore,
+    deliveryStore,
+    pairingStore: new AgentChannelPairingStore({
+      configDir: createTempDir('cligate-agent-channels-related-origin-pairing-')
+    }),
+    messageService: new AgentOrchestratorMessageService({ runtimeSessionManager }),
+    requirePairing: false
+  });
+
+  conversationStore.findOrCreateByExternal({
+    channel: 'telegram',
+    accountId: 'default',
+    externalConversationId: 'chat_related',
+    externalUserId: 'user_1',
+    metadata: {
+      supervisor: {
+        brief: {
+          kind: 'last_completed',
+          title: 'Create a login page',
+          provider: 'claude-code',
+          providerLabel: 'Claude Code',
+          status: 'completed',
+          summary: 'The login page is finished.',
+          result: 'index.html is ready.',
+          error: '',
+          waitingReason: '',
+          nextSuggestion: 'You can ask for a revision, a follow-up change, or start a related task.'
+        }
+      }
+    }
+  });
+
+  const result = await router.routeInboundMessage({
+    channel: 'telegram',
+    accountId: 'default',
+    externalMessageId: 'm_related_1',
+    externalConversationId: 'chat_related',
+    externalUserId: 'user_1',
+    externalUserName: 'alice',
+    text: '基于刚才那个再做一个：注册页',
+    messageType: 'text'
+  }, {
+    defaultRuntimeProvider: 'codex'
+  });
+
+  assert.equal(result.type, 'runtime_started');
+  assert.equal(result.session.provider, 'claude-code');
+  assert.equal(result.conversation.metadata?.supervisor?.taskMemory?.current?.title, '注册页');
+  assert.equal(result.conversation.metadata?.supervisor?.taskMemory?.current?.originKind, 'related_sibling');
+  assert.equal(result.conversation.metadata?.supervisor?.taskMemory?.current?.sourceTitle, 'Create a login page');
+  assert.match(String(result.conversation.metadata?.supervisor?.brief?.summary || ''), /Derived from remembered task "Create a login page"/i);
+  assert.match(String(result.conversation.metadata?.supervisor?.brief?.nextSuggestion || ''), /wait for completion|status update|\/cancel/i);
+});
+
+test('AgentOrchestratorMessageService uses origin-aware next suggestions for remembered failures', async () => {
+  const runtimeSessionManager = createRuntimeManager();
+  const service = new AgentOrchestratorMessageService({ runtimeSessionManager });
+
+  const result = await service.routeUserMessage({
+    message: { text: '进展如何' },
+    conversation: {
+      metadata: {
+        supervisor: {
+          brief: {
+            kind: 'current',
+            title: 'Polish login page',
+            provider: 'claude-code',
+            providerLabel: 'Claude Code',
+            status: 'failed',
+            summary: 'Continuing remembered task "Create a login page".',
+            result: '',
+            error: 'Write was blocked.',
+            waitingReason: '',
+            nextSuggestion: 'You can retry this follow-up task, revise the request, or return to "Create a login page".'
+          }
+        }
+      }
+    }
+  });
+
+  assert.equal(result.type, 'supervisor_status');
+  assert.match(String(result.message || ''), /retry this follow-up task/i);
+  assert.match(String(result.message || ''), /Create a login page/);
+});
+
+test('AgentOrchestratorMessageService retries a remembered failed task from natural language', async () => {
+  const runtimeSessionManager = createHybridRuntimeManager();
+  const service = new AgentOrchestratorMessageService({ runtimeSessionManager });
+
+  const response = await service.routeUserMessage({
+    message: { text: '重试刚才那个' },
+    conversation: {
+      metadata: {
+        supervisor: {
+          brief: {
+            kind: 'current',
+            title: 'Polish login page',
+            provider: 'claude-code',
+            providerLabel: 'Claude Code',
+            status: 'failed',
+            summary: 'Continuing remembered task "Create a login page".',
+            result: '',
+            error: 'Write was blocked.',
+            waitingReason: '',
+            nextSuggestion: 'You can retry this follow-up task, revise the request, or return to "Create a login page".',
+            sourceTitle: 'Create a login page',
+            sourceProvider: 'claude-code',
+            sourceStatus: 'completed'
+          }
+        }
+      }
+    },
+    defaultRuntimeProvider: 'codex'
+  });
+
+  assert.equal(response.type, 'runtime_started');
+  assert.equal(response.provider, 'claude-code');
+  assert.equal(response.supervisorContext?.kind, 'retry_task');
+  assert.equal(response.supervisorContext?.title, 'Polish login page');
+  assert.match(String(response.message || ''), /retry from the remembered failed task/i);
+});
+
+test('AgentOrchestratorMessageService can return to the remembered source task after a failed derived task', async () => {
+  const runtimeSessionManager = createHybridRuntimeManager();
+  const service = new AgentOrchestratorMessageService({ runtimeSessionManager });
+
+  const response = await service.routeUserMessage({
+    message: { text: '回到上一个任务' },
+    conversation: {
+      metadata: {
+        supervisor: {
+          brief: {
+            kind: 'current',
+            title: 'Polish login page',
+            provider: 'claude-code',
+            providerLabel: 'Claude Code',
+            status: 'failed',
+            summary: 'Continuing remembered task "Create a login page".',
+            result: '',
+            error: 'Write was blocked.',
+            waitingReason: '',
+            nextSuggestion: 'You can retry this follow-up task, revise the request, or return to "Create a login page".',
+            sourceTitle: 'Create a login page',
+            sourceProvider: 'codex',
+            sourceStatus: 'completed'
+          }
+        }
+      }
+    },
+    defaultRuntimeProvider: 'claude-code'
+  });
+
+  assert.equal(response.type, 'runtime_started');
+  assert.equal(response.provider, 'codex');
+  assert.equal(response.supervisorContext?.kind, 'return_to_source');
+  assert.equal(response.supervisorContext?.title, 'Create a login page');
+  assert.match(String(response.message || ''), /returned to the remembered source task/i);
+});
+
+test('AgentOrchestratorMessageService keeps provider switching explicit when inferred from natural language', async () => {
+  const runtimeSessionManager = createRuntimeManager();
+  const service = new AgentOrchestratorMessageService({ runtimeSessionManager });
+
+  const started = await service.routeUserMessage({
+    message: { text: '/cx inspect repo' },
+    conversation: null
+  });
+
+  const response = await service.routeUserMessage({
+    message: { text: '切到 Claude Code' },
+    conversation: {
+      activeRuntimeSessionId: started.session.id
+    }
+  });
+
+  assert.equal(response.type, 'command_error');
+  assert.match(response.message, /\/new cc/i);
 });
 
 test('TelegramChannelProvider normalizes messages and callback approvals', () => {
@@ -960,4 +1553,66 @@ test('session records are grouped by runtime session instead of channel conversa
   });
   assert.equal(detail.session.id, second.session.id);
   assert.ok(detail.deliveries.every((entry) => entry.sessionId === second.session.id));
+});
+
+test('completed runtime events update conversation supervisor task memory', async () => {
+  const runtimeSessionManager = createRuntimeManager();
+  const conversationStore = new AgentChannelConversationStore({
+    configDir: createTempDir('cligate-agent-channels-supervisor-conv-')
+  });
+  const deliveryStore = new AgentChannelDeliveryStore({
+    configDir: createTempDir('cligate-agent-channels-supervisor-delivery-')
+  });
+  const router = new AgentChannelRouter({
+    conversationStore,
+    deliveryStore,
+    pairingStore: new AgentChannelPairingStore({
+      configDir: createTempDir('cligate-agent-channels-supervisor-pairing-')
+    }),
+    messageService: new AgentOrchestratorMessageService({ runtimeSessionManager }),
+    requirePairing: false
+  });
+  const dispatcher = new AgentChannelOutboundDispatcher({
+    runtimeSessionManager,
+    conversationStore,
+    deliveryStore,
+    registry: {
+      get() {
+        return {
+          async sendMessage() {
+            return { messageId: 'outbound_supervisor_1' };
+          }
+        };
+      }
+    }
+  });
+
+  const started = await router.routeInboundMessage({
+    channel: 'telegram',
+    accountId: 'default',
+    externalMessageId: 'm_1',
+    externalConversationId: 'chat_1',
+    externalUserId: 'user_1',
+    externalUserName: 'alice',
+    text: '/cx create a demo page',
+    messageType: 'text'
+  });
+
+  await dispatcher.handleRuntimeEvent({
+    sessionId: started.session.id,
+    seq: 999,
+    type: AGENT_EVENT_TYPE.COMPLETED,
+    ts: new Date().toISOString(),
+    payload: {
+      result: 'done',
+      summary: 'finished'
+    }
+  });
+
+  const updatedConversation = conversationStore.get(started.conversation.id);
+  assert.equal(updatedConversation.metadata?.supervisor?.taskMemory?.current?.status, 'completed');
+  assert.equal(updatedConversation.metadata?.supervisor?.taskMemory?.lastCompleted?.sessionId, started.session.id);
+  assert.equal(updatedConversation.metadata?.supervisor?.brief?.kind, 'current');
+  assert.equal(updatedConversation.metadata?.supervisor?.brief?.status, 'completed');
+  assert.match(String(updatedConversation.metadata?.supervisor?.brief?.summary || ''), /done:create a demo page/i);
 });

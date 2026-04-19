@@ -280,6 +280,23 @@ Suggested operating model:
 - Keep sending plain follow-up messages to continue the bound session
 - Use `/new` before starting a different task thread
 
+Supervisor behavior on mobile channels:
+
+- If you ask natural-language status questions such as `progress`, `status`, `done?`, `进展如何`, or `现在做到哪了`, CliGate will answer from remembered task state when possible instead of forwarding that message as a new runtime prompt
+- If a task is waiting for approval or user input, CliGate will mention the current task and what it is waiting for
+- Repeated permissions can be remembered at session scope or conversation scope, so later requests in the same thread can be auto-approved
+- If you say things like `开始新任务：...` or `start a new task: ...`, CliGate will treat that as a fresh task request instead of blindly continuing the current runtime session
+- If you say things like `另外再做一个：...`, `单独做一个：...`, or `另起一个：...`, CliGate will also treat that as a sibling fresh task in the same conversation
+- If you say things like `基于刚才那个再做一个：...`, CliGate will treat that as a related sibling task instead of editing the current one
+- If you say `切到 Codex` or `切到 Claude Code`, CliGate will guide you to use `/new cx ...` or `/new cc ...` so provider switching stays explicit and predictable
+- If you ask for a wrap-up using phrases like `总结一下`, `收尾`, `summarize`, or `recap`, CliGate will try to answer from remembered task context before forwarding anything to the runtime
+- If you say `再加一个...`, `顺便加上...`, or `把...改成...`, CliGate will keep the same runtime session and treat it as an update to the current task
+- Internally, CliGate now maintains a structured supervisor brief per channel conversation so status replies, wrap-ups, and busy-state explanations all use the same remembered task context
+- If the current runtime session is already gone but the conversation still has a remembered supervisor brief, high-confidence follow-up phrases such as revisions or related-task requests will revive that remembered context and keep using the same provider instead of silently falling back to the channel default
+- When that remembered follow-up path is used, CliGate also writes the origin relationship back into the current task memory and supervisor brief, so later status updates and wrap-ups can explain which earlier task this run came from
+- Supervisor next-step suggestions are now also derived from that same structured brief, so status, wrap-up, and failure replies all use the same controlled recommendation logic instead of ad-hoc text
+- For failed remembered tasks, CliGate now also supports high-confidence recovery intents such as `重试刚才那个` / `retry that` and `回到上一个任务` / `return to the previous task`, but it only acts when the remembered brief makes the recovery target explicit
+
 ---
 
 ## Model Mapping

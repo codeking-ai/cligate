@@ -1,5 +1,6 @@
 import { logger } from '../utils/logger.js';
 import AgentRuntimeApprovalService from './approval-service.js';
+import agentRuntimeApprovalPolicyStore, { AgentRuntimeApprovalPolicyStore } from './approval-policy-store.js';
 import AgentRuntimeEventBus from './event-bus.js';
 import { createAgentEvent, createAgentSession, AGENT_EVENT_TYPE, AGENT_SESSION_STATUS } from './models.js';
 import { createDefaultAgentRuntimeRegistry } from './registry.js';
@@ -14,12 +15,16 @@ export class AgentRuntimeSessionManager {
     registry = createDefaultAgentRuntimeRegistry(),
     store = new AgentRuntimeSessionStore(),
     eventBus = new AgentRuntimeEventBus(),
-    approvalService = new AgentRuntimeApprovalService()
+    approvalService = new AgentRuntimeApprovalService(),
+    approvalPolicyStore = agentRuntimeApprovalPolicyStore
   } = {}) {
     this.registry = registry;
     this.store = store;
     this.eventBus = eventBus;
     this.approvalService = approvalService;
+    this.approvalPolicyStore = approvalPolicyStore instanceof AgentRuntimeApprovalPolicyStore
+      ? approvalPolicyStore
+      : approvalPolicyStore;
     this.questionsBySession = new Map();
     this.sessions = new Map();
     this.seqBySession = new Map();
@@ -289,6 +294,8 @@ export class AgentRuntimeSessionManager {
 
     const turnId = `${session.id}:turn:${session.turnCount + 1}`;
     const turnState = { settled: false };
+    let handle = null;
+    const deferredApprovalResponses = [];
     const patched = this._patchSession(sessionId, {
       status: AGENT_SESSION_STATUS.RUNNING,
       currentTurnId: turnId,
@@ -298,7 +305,7 @@ export class AgentRuntimeSessionManager {
 
     logger.info(`[AgentRuntime] Starting ${patched.provider} turn ${patched.turnCount} | session=${patched.id}`);
 
-    const handle = await provider.startTurn({
+    handle = await provider.startTurn({
       session: patched,
       input,
       onProviderEvent: ({ type, payload }) => {
@@ -313,6 +320,58 @@ export class AgentRuntimeSessionManager {
           summary,
           rawRequest
         });
+        const conversationId = patched?.metadata?.source?.conversationId || patched?.metadata?.conversationId || '';
+        const rememberedPolicy = this.approvalPolicyStore?.findFirstMatchingPolicy?.({
+          candidates: [
+            conversationId ? { scope: 'conversation', scopeRef: conversationId } : null,
+            { scope: 'session', scopeRef: sessionId }
+          ].filter(Boolean),
+          provider: patched.provider,
+          rawRequest
+        });
+
+        if (rememberedPolicy) {
+          this.approvalService.resolveApproval(sessionId, approval.approvalId, 'approve');
+          this._emitEvent(sessionId, AGENT_EVENT_TYPE.PROGRESS, {
+            phase: 'approval_auto_resolved',
+            approvalId: approval.approvalId,
+            policyId: rememberedPolicy.id,
+            message: 'Supervisor auto-approved this request using a remembered session rule.'
+          });
+          const runResponse = async () => {
+            if (!handle?.respondApproval) {
+              deferredApprovalResponses.push({
+                approval: { ...approval, status: 'approved' },
+                decision: 'approve',
+                policyId: rememberedPolicy.id
+              });
+              return;
+            }
+            await handle.respondApproval({ approval: { ...approval, status: 'approved' }, decision: 'approve' });
+          };
+          Promise.resolve(runResponse())
+            .then(() => {
+              if (!handle?.respondApproval) return;
+              this._emitEvent(sessionId, AGENT_EVENT_TYPE.APPROVAL_RESOLVED, {
+                approvalId: approval.approvalId,
+                decision: 'approved',
+                autoApproved: true,
+                policyId: rememberedPolicy.id
+              });
+              this._refreshInteractiveState(sessionId);
+            })
+            .catch((error) => {
+              this._patchSession(sessionId, {
+                status: AGENT_SESSION_STATUS.FAILED,
+                error: error?.message || 'Failed to auto-resolve approval',
+                currentTurnId: null
+              });
+              this._emitEvent(sessionId, AGENT_EVENT_TYPE.FAILED, {
+                message: error?.message || 'Failed to auto-resolve approval'
+              });
+            });
+          return;
+        }
         this._patchSession(sessionId, {
           status: AGENT_SESSION_STATUS.WAITING_APPROVAL
         });
@@ -366,6 +425,20 @@ export class AgentRuntimeSessionManager {
         });
       }
     });
+
+    for (const deferred of deferredApprovalResponses) {
+      await handle.respondApproval?.({
+        approval: deferred.approval,
+        decision: deferred.decision
+      });
+      this._emitEvent(sessionId, AGENT_EVENT_TYPE.APPROVAL_RESOLVED, {
+        approvalId: deferred.approval.approvalId,
+        decision: 'approved',
+        autoApproved: true,
+        policyId: deferred.policyId
+      });
+      this._refreshInteractiveState(sessionId);
+    }
 
     if (handle?.pid) {
       this._patchSession(sessionId, { pid: handle.pid });

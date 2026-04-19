@@ -90,6 +90,19 @@ function buildCompletedMessage({ providerLabel, session, resultText, summaryText
   return lines.join('\n');
 }
 
+function buildApprovalMessage(providerLabel, payload = {}) {
+  const lines = [];
+  lines.push(`${providerLabel} needs permission to continue.`);
+  if (payload?.title) {
+    lines.push(`Request: ${payload.title}`);
+  }
+  if (payload?.summary) {
+    lines.push(payload.summary);
+  }
+  lines.push('Reply with: 同意 / approve / ok, 拒绝 / deny / no, or say “本会话允许这个目录后续操作”.');
+  return lines.join('\n\n').trim();
+}
+
 export function formatAgentRuntimeEventForChannel({ event, session } = {}) {
   const providerLabel = session?.provider || event?.payload?.provider || 'agent';
 
@@ -101,7 +114,7 @@ export function formatAgentRuntimeEventForChannel({ event, session } = {}) {
       };
     case AGENT_EVENT_TYPE.APPROVAL_REQUEST:
       return {
-        text: `${providerLabel} requires approval: ${event?.payload?.title || 'Permission request'}\n${event?.payload?.summary || ''}`.trim(),
+        text: buildApprovalMessage(providerLabel, event?.payload || {}),
         buttons: [
           { id: 'approve', text: 'Approve', action: 'approve', approvalId: event?.payload?.approvalId },
           { id: 'deny', text: 'Deny', action: 'deny', approvalId: event?.payload?.approvalId }

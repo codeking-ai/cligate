@@ -107,9 +107,35 @@ export function extractAssistantText(message) {
 }
 
 export function buildApprovalSummary(request) {
-  const description = request?.description || request?.title || request?.tool_name || 'Permission request';
-  const toolName = request?.tool_name ? `tool=${request.tool_name}` : null;
-  return [description, toolName].filter(Boolean).join(' | ');
+  const toolName = request?.display_name || request?.tool_name || 'Tool';
+  const description = request?.input?.description || request?.description || request?.title || '';
+  const command = request?.input?.command ? `Command: ${request.input.command}` : null;
+  const filePath = request?.input?.file_path ? `Path: ${request.input.file_path}` : null;
+  const blockedPath = request?.blocked_path || request?.blockedPath
+    ? `Blocked path: ${String(request?.blocked_path || request?.blockedPath).replace(/^\/([A-Za-z])/, (_, drive) => `${drive.toUpperCase()}:`)}` : null;
+  const suggestions = Array.isArray(request?.permission_suggestions) && request.permission_suggestions.length > 0
+    ? `Suggestions: ${request.permission_suggestions.map((item) => {
+      if (item?.type === 'addDirectories' && Array.isArray(item?.directories)) {
+        return `allow ${item.directories.join(', ')} for this session`;
+      }
+      if (item?.type === 'addRules' && Array.isArray(item?.rules)) {
+        return `allow ${item.rules.map((rule) => rule?.ruleContent).filter(Boolean).join(', ')}`;
+      }
+      if (item?.type === 'setMode' && item?.mode) {
+        return `set mode ${item.mode} for this session`;
+      }
+      return item?.type || 'session policy update';
+    }).join('; ')}`
+    : null;
+
+  return [
+    `${toolName} permission request`,
+    description ? `Purpose: ${description}` : null,
+    command,
+    filePath,
+    blockedPath,
+    suggestions
+  ].filter(Boolean).join('\n');
 }
 
 export function createClaudeCodeMessageProcessor({
@@ -175,7 +201,9 @@ export function createClaudeCodeMessageProcessor({
       if (request.subtype === 'can_use_tool') {
         onApprovalRequest?.({
           kind: 'tool_permission',
-          title: request.title || 'Claude Code permission request',
+          title: request.display_name
+            ? `Claude Code wants to use ${request.display_name}`
+            : (request.title || 'Claude Code permission request'),
           summary: buildApprovalSummary(request),
           rawRequest: {
             requestId,

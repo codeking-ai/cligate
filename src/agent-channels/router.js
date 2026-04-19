@@ -2,6 +2,7 @@ import agentChannelConversationStore from './conversation-store.js';
 import agentChannelDeliveryStore from './delivery-store.js';
 import agentChannelPairingStore from './pairing-store.js';
 import agentOrchestratorMessageService from '../agent-orchestrator/message-service.js';
+import { buildSupervisorBrief } from '../agent-orchestrator/supervisor-brief.js';
 import { CHANNEL_CONVERSATION_MODE } from './models.js';
 
 function buildInboundKey(message) {
@@ -84,8 +85,10 @@ export class AgentChannelRouter {
         source: {
           kind: 'channel',
           channel: message.channel,
-          accountId: message.accountId
-        }
+          accountId: message.accountId,
+          conversationId: conversation.id
+        },
+        conversationId: conversation.id
       }
     });
 
@@ -114,8 +117,43 @@ export class AgentChannelRouter {
     }
 
     if (result?.session?.id) {
+      const supervisorContext = (result?.supervisorContext && typeof result.supervisorContext === 'object')
+        ? result.supervisorContext
+        : {};
+      const taskMemory = {
+        ...((conversation.metadata?.supervisor?.taskMemory && typeof conversation.metadata.supervisor.taskMemory === 'object')
+          ? conversation.metadata.supervisor.taskMemory
+          : {}),
+        current: {
+          sessionId: result.session.id,
+          provider: result.session.provider,
+          title: supervisorContext.title || result.session.title || message.text || '',
+          status: 'starting',
+          startedAt: result.session.createdAt || new Date().toISOString(),
+          lastUpdateAt: result.session.updatedAt || new Date().toISOString(),
+          summary: String(supervisorContext.summary || '').trim(),
+          result: '',
+          originKind: String(supervisorContext.kind || '').trim() || 'direct',
+          sourceTitle: String(supervisorContext.sourceTitle || '').trim(),
+          sourceProvider: String(supervisorContext.sourceProvider || '').trim(),
+          sourceStatus: String(supervisorContext.sourceStatus || '').trim()
+        }
+      };
       this.conversationStore.bindRuntimeSession(conversation.id, result.session.id, {
-        mode: CHANNEL_CONVERSATION_MODE.AGENT_RUNTIME
+        mode: CHANNEL_CONVERSATION_MODE.AGENT_RUNTIME,
+        metadata: {
+          ...(conversation.metadata || {}),
+          supervisor: {
+            ...((conversation.metadata?.supervisor && typeof conversation.metadata.supervisor === 'object')
+              ? conversation.metadata.supervisor
+              : {}),
+            taskMemory,
+            brief: buildSupervisorBrief({
+              taskMemory,
+              session: result.session
+            })
+          }
+        }
       });
     }
 

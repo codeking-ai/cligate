@@ -279,6 +279,23 @@ openai_base_url = "http://localhost:8081"
 - 想继续当前任务时，直接发送普通文本即可
 - 想开启新的任务线程时，先发 `/new`
 
+渠道里的 supervisor 行为：
+
+- 如果你发送 `进展如何`、`现在做到哪了`、`完成了吗`、`结果呢`、`status`、`progress` 这类自然语言状态追问，CliGate 会优先用记住的任务状态直接回答，而不是把这句话继续转发给 runtime
+- 如果当前任务在等待审批或等待补充输入，CliGate 会带着当前任务名和等待原因一起提示你
+- 重复出现的权限请求可以记到 session 级或 conversation 级，后续同一线程里的同类请求会自动放行
+- 如果你发送 `开始新任务：...`、`新任务：...` 这类表达，CliGate 会把它当成开启新任务，而不是继续当前 session
+- 如果你发送 `另外再做一个：...`、`单独做一个：...`、`另起一个：...` 这类表达，CliGate 也会把它当成当前对话中的并列新任务
+- 如果你发送 `基于刚才那个再做一个：...` 这类表达，CliGate 会把它当成基于上一结果的 related task，而不是继续修改当前任务
+- 如果你说 `切到 Codex` 或 `切到 Claude Code`，CliGate 会提示你使用 `/new cx ...` 或 `/new cc ...`，让 provider 切换保持明确可控
+- 如果你发送 `总结一下`、`收尾`、`整理一下`、`给我结果` 这类表达，CliGate 会优先尝试从记住的任务上下文直接给你总结，而不是先转发给 runtime
+- 如果你发送 `再加一个...`、`顺便加上...`、`把...改成...` 这类表达，CliGate 会保留当前 runtime，并把它当成对当前任务的补充修改
+- 现在 CliGate 还会为每条渠道对话维护一份结构化的 supervisor brief，所以状态回复、总结回复和忙碌提示会引用同一份任务上下文，而不是各自拼凑
+- 如果当前 runtime session 已经结束或脱离，但这条渠道对话里还保留着 remembered supervisor brief，那么像“继续刚才那个”“把按钮改成绿色”或 related task 这类高置信度后续指令，会基于这份上下文重新拉起同一个 provider，而不是悄悄退回到 channel 默认 provider
+- 当走这条 remembered follow-up 路径时，CliGate 还会把“这次任务来源于哪个上一个任务”一起写回当前 task memory 和 supervisor brief，后面的状态回复、总结和忙碌提示都会沿用这条来源说明
+- 现在 supervisor 的下一步建议也统一从这份结构化 brief 推导出来，所以状态回复、总结回复和失败提示会共享同一套可控的建议逻辑，而不是各自临时拼文案
+- 对于 remembered failed task，CliGate 现在还支持像 `重试刚才那个`、`retry that`、`回到上一个任务` 这类高置信度恢复意图，但只有在 remembered brief 能明确定位恢复目标时才会执行，不会自动擅自恢复
+
 ---
 
 ## 模型映射

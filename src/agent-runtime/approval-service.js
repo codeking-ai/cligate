@@ -29,6 +29,11 @@ export class AgentRuntimeApprovalService {
     return (this.approvalsBySession.get(sessionId) || []).filter((approval) => approval.status === 'pending');
   }
 
+  getApproval(sessionId, approvalId) {
+    const approvals = this.approvalsBySession.get(sessionId) || [];
+    return approvals.find((entry) => entry.approvalId === approvalId) || null;
+  }
+
   resolveApproval(sessionId, approvalId, decision) {
     const approvals = this.approvalsBySession.get(sessionId) || [];
     const approval = approvals.find((entry) => entry.approvalId === approvalId);

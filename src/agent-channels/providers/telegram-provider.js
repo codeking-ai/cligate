@@ -30,11 +30,17 @@ function buildRouterResultText(result) {
     case 'command_error':
       return result.message || 'Command error';
     case 'runtime_started':
+      if (result?.message) {
+        return `${result.message}\nSession ${result?.session?.id || ''} started with ${providerLabel(result?.session?.provider || result?.provider)}.`.trim();
+      }
       if (result?.startedFresh && result?.replacedSessionId) {
         return `Started a fresh task with ${providerLabel(result?.session?.provider || result?.provider)}. Previous session ${result.replacedSessionId} was detached. New session: ${result?.session?.id || ''}`.trim();
       }
       return `Task accepted. Session ${result?.session?.id || ''} started with ${providerLabel(result?.session?.provider || result?.provider)}.`.trim();
     case 'runtime_continued':
+      if (result?.message) {
+        return `${result.message}\nSent follow-up to session ${result?.session?.id || ''}.`.trim();
+      }
       return `Sent follow-up to session ${result?.session?.id || ''}.`.trim();
     case 'runtime_cancelled':
       return `Session ${result?.session?.id || ''} cancelled.`.trim();
@@ -42,8 +48,10 @@ function buildRouterResultText(result) {
       return result?.message || 'Runtime session detached.';
     case 'runtime_status':
       return `Session ${result?.session?.id || ''}: ${result?.session?.status || 'unknown'}${result?.session?.summary ? `\n${result.session.summary}` : ''}`.trim();
+    case 'supervisor_status':
+      return result?.message || 'No supervisor status available.';
     case 'approval_resolved':
-      return `Approval ${result?.approval?.status || 'resolved'}.`;
+      return result?.message || `Approval ${result?.approval?.status || 'resolved'}.`;
     case 'question_answered':
       return 'Answer sent to the active task.';
     default:
