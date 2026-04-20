@@ -1,9 +1,12 @@
 import crypto from 'crypto';
+import { URL } from 'url';
 
 import { createNormalizedChannelMessage } from '../models.js';
 
 const DINGTALK_TOKEN_CACHE_TTL_MS = 60 * 60 * 1000;
 const DINGTALK_TIMESTAMP_SKEW_MS = 60 * 60 * 1000;
+const DINGTALK_STREAM_CALLBACK_TOPIC = '/v1.0/im/bot/messages/get';
+const DINGTALK_STREAM_RECONNECT_DELAY_MS = 3000;
 
 function providerLabel(providerId) {
   if (providerId === 'claude-code') return 'Claude Code';
@@ -111,16 +114,22 @@ function chooseSetting(settings = {}, ...keys) {
 }
 
 export class DingTalkChannelProvider {
-  constructor({ fetchImpl = globalThis.fetch } = {}) {
+  constructor({
+    fetchImpl = globalThis.fetch,
+    webSocketFactory = null,
+    reconnectDelayMs = DINGTALK_STREAM_RECONNECT_DELAY_MS
+  } = {}) {
     this.id = 'dingtalk';
     this.label = 'DingTalk';
     this.fetchImpl = fetchImpl;
+    this.webSocketFactory = webSocketFactory;
+    this.reconnectDelayMs = reconnectDelayMs;
     this.capabilities = {
-      mode: 'webhook',
-      supportedModes: ['webhook'],
+      mode: 'stream',
+      supportedModes: ['stream', 'webhook'],
       supportsWebhook: true,
       supportsPolling: false,
-      supportsWebsocket: false,
+      supportsWebsocket: true,
       supportsInteractiveApproval: false,
       supportsRichCard: false,
       supportsThreading: false,
@@ -133,7 +142,10 @@ export class DingTalkChannelProvider {
         type: 'select',
         labelKey: 'channelMode',
         section: 'basic',
-        options: [{ value: 'webhook', labelKey: 'channelModeWebhook' }],
+        options: [
+          { value: 'stream', labelKey: 'channelModeStream' },
+          { value: 'webhook', labelKey: 'channelModeWebhook' }
+        ],
         descriptionKey: 'channelDingTalkModeDesc'
       },
       { key: 'clientId', type: 'text', labelKey: 'channelClientId', section: 'auth' },
@@ -152,26 +164,219 @@ export class DingTalkChannelProvider {
       accessToken: '',
       expiresAt: 0
     };
+    this.streamSocket = null;
+    this.streamReconnectTimer = null;
+    this.streamClosedByProvider = false;
   }
 
   async start({ settings, router, logger } = {}) {
     this.settings = settings || {};
     this.router = router || null;
     this.logger = logger || console;
+    this.streamClosedByProvider = false;
 
     if (!this.fetchImpl) {
       return { started: false, reason: 'fetch is unavailable' };
     }
+    if (!this.router) {
+      return { started: false, reason: 'router is unavailable' };
+    }
 
-    if ((this.settings?.mode || 'webhook') !== 'webhook') {
+    const mode = this.settings?.mode || 'stream';
+    if (!['stream', 'webhook'].includes(mode)) {
       return { started: false, reason: `unsupported dingtalk mode: ${this.settings?.mode}` };
     }
 
-    return { started: true, mode: this.settings?.mode || 'webhook' };
+    if (mode === 'stream') {
+      const clientId = chooseSetting(this.settings, 'clientId', 'appKey');
+      const clientSecret = chooseSetting(this.settings, 'clientSecret', 'appSecret');
+      if (!clientId || !clientSecret) {
+        return { started: false, reason: 'dingtalk clientId/clientSecret is not configured' };
+      }
+      await this.openStreamConnection();
+    }
+
+    return { started: true, mode };
   }
 
   async stop() {
+    this.streamClosedByProvider = true;
+    if (this.streamReconnectTimer) {
+      clearTimeout(this.streamReconnectTimer);
+      this.streamReconnectTimer = null;
+    }
+    try {
+      this.streamSocket?.close?.();
+    } catch (error) {
+      this.logger?.warn?.(`[DingTalk] Failed to close stream socket: ${error.message}`);
+    }
+    this.streamSocket = null;
     return { stopped: true };
+  }
+
+  async createWebSocket(url) {
+    if (this.webSocketFactory) {
+      return this.webSocketFactory(url);
+    }
+    if (typeof globalThis.WebSocket === 'function') {
+      return new globalThis.WebSocket(url);
+    }
+    const { default: WebSocket } = await import('ws');
+    return new WebSocket(url);
+  }
+
+  async openStreamConnection() {
+    const connection = await this.registerStreamConnection();
+    const target = new URL(String(connection.endpoint || ''));
+    target.searchParams.set('ticket', String(connection.ticket || ''));
+
+    const socket = await this.createWebSocket(target.toString());
+    this.streamSocket = socket;
+
+    socket.addEventListener?.('message', (event) => {
+      void this.handleStreamFrame(event?.data);
+    });
+    socket.addEventListener?.('error', (error) => {
+      this.logger?.warn?.(`[DingTalk] Stream socket error: ${error?.message || 'unknown error'}`);
+    });
+    socket.addEventListener?.('close', () => {
+      if (this.streamSocket === socket) {
+        this.streamSocket = null;
+      }
+      this.scheduleStreamReconnect();
+    });
+
+    if (typeof socket.on === 'function') {
+      socket.on('message', (data) => {
+        void this.handleStreamFrame(data);
+      });
+      socket.on('error', (error) => {
+        this.logger?.warn?.(`[DingTalk] Stream socket error: ${error?.message || 'unknown error'}`);
+      });
+      socket.on('close', () => {
+        if (this.streamSocket === socket) {
+          this.streamSocket = null;
+        }
+        this.scheduleStreamReconnect();
+      });
+    }
+  }
+
+  scheduleStreamReconnect() {
+    if (this.streamClosedByProvider || (this.settings?.mode || 'stream') !== 'stream') {
+      return;
+    }
+    if (this.streamReconnectTimer) {
+      return;
+    }
+    this.streamReconnectTimer = setTimeout(() => {
+      this.streamReconnectTimer = null;
+      void this.openStreamConnection().catch((error) => {
+        this.logger?.warn?.(`[DingTalk] Failed to reconnect stream: ${error.message}`);
+        this.scheduleStreamReconnect();
+      });
+    }, this.reconnectDelayMs);
+  }
+
+  async registerStreamConnection() {
+    const clientId = chooseSetting(this.settings, 'clientId', 'appKey');
+    const clientSecret = chooseSetting(this.settings, 'clientSecret', 'appSecret');
+    const response = await this.fetchImpl('https://api.dingtalk.com/v1.0/gateway/connections/open', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: 'application/json'
+      },
+      body: JSON.stringify({
+        clientId,
+        clientSecret,
+        subscriptions: [
+          {
+            type: 'CALLBACK',
+            topic: DINGTALK_STREAM_CALLBACK_TOPIC
+          }
+        ],
+        ua: 'cligate-dingtalk/1.1.1'
+      })
+    });
+
+    const data = await response.json();
+    if (!response.ok || !data?.endpoint || !data?.ticket) {
+      throw new Error(data?.message || data?.msg || 'Failed to open DingTalk stream connection');
+    }
+    return data;
+  }
+
+  buildStreamAck(frame = {}, data = { response: null }) {
+    return {
+      code: 200,
+      headers: {
+        messageId: String(frame?.headers?.messageId || ''),
+        contentType: 'application/json'
+      },
+      message: 'OK',
+      data: JSON.stringify(data)
+    };
+  }
+
+  sendStreamAck(frame, data) {
+    if (!this.streamSocket) {
+      return;
+    }
+    this.streamSocket.send(JSON.stringify(this.buildStreamAck(frame, data)));
+  }
+
+  async handleStreamFrame(rawFrame) {
+    let frame;
+    try {
+      frame = JSON.parse(Buffer.isBuffer(rawFrame) ? rawFrame.toString('utf8') : String(rawFrame || ''));
+    } catch {
+      return;
+    }
+
+    const topic = String(frame?.headers?.topic || '');
+    if (frame?.type === 'SYSTEM' && topic === 'ping') {
+      let pingData = {};
+      try {
+        pingData = JSON.parse(String(frame?.data || '{}'));
+      } catch {
+        pingData = {};
+      }
+      this.sendStreamAck(frame, { opaque: pingData?.opaque || '' });
+      return;
+    }
+
+    if (frame?.type === 'SYSTEM' && topic === 'disconnect') {
+      return;
+    }
+
+    if (frame?.type !== 'CALLBACK' || topic !== DINGTALK_STREAM_CALLBACK_TOPIC) {
+      this.sendStreamAck(frame, { response: null });
+      return;
+    }
+
+    let payload = null;
+    try {
+      payload = JSON.parse(String(frame?.data || '{}'));
+    } catch {
+      payload = null;
+    }
+
+    if (!payload) {
+      this.sendStreamAck(frame, { response: null });
+      return;
+    }
+
+    try {
+      await this.handleWebhook(payload, { skipVerification: true });
+      this.sendStreamAck(frame, { response: null });
+    } catch (error) {
+      this.logger?.warn?.(`[DingTalk] Failed to process stream callback: ${error.message}`);
+      this.sendStreamAck(frame, {
+        status: 'LATER',
+        message: error.message
+      });
+    }
   }
 
   verifySignature(payload = {}, options = {}) {
@@ -387,15 +592,17 @@ export class DingTalkChannelProvider {
   }
 
   async handleWebhook(payload, options = {}) {
-    const verification = this.verifySignature(payload, options);
-    if (!verification.ok) {
-      return {
-        status: 401,
-        body: {
-          success: false,
-          error: verification.reason
-        }
-      };
+    if (!options.skipVerification) {
+      const verification = this.verifySignature(payload, options);
+      if (!verification.ok) {
+        return {
+          status: 401,
+          body: {
+            success: false,
+            error: verification.reason
+          }
+        };
+      }
     }
 
     const normalized = this.normalizeInbound(payload);

@@ -82,7 +82,7 @@ document.addEventListener('alpine:init', () => {
         channelSettings: {
             telegram: { enabled: false, mode: 'polling', botToken: '', pollingIntervalMs: 2000, defaultRuntimeProvider: 'codex', model: '', cwd: '', requirePairing: false },
             feishu: { enabled: false, mode: 'websocket', appId: '', appSecret: '', encryptKey: '', verificationToken: '', defaultRuntimeProvider: 'codex', model: '', cwd: '', requirePairing: false },
-            dingtalk: { enabled: false, mode: 'webhook', clientId: '', clientSecret: '', robotCode: '', signingSecret: '', defaultRuntimeProvider: 'codex', model: '', cwd: '', requirePairing: false }
+            dingtalk: { enabled: false, mode: 'stream', clientId: '', clientSecret: '', robotCode: '', signingSecret: '', defaultRuntimeProvider: 'codex', model: '', cwd: '', requirePairing: false }
         },
         channelSettingsSaving: { telegram: false, feishu: false, dingtalk: false },
         channelConversations: [],

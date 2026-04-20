@@ -44,7 +44,7 @@ const DEFAULT_SETTINGS = {
         },
         dingtalk: {
             enabled: false,
-            mode: 'webhook',
+            mode: 'stream',
             appKey: '',
             appSecret: '',
             clientId: '',

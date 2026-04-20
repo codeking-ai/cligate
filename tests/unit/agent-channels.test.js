@@ -1560,6 +1560,97 @@ test('DingTalkChannelProvider normalizes text events and routes webhook messages
   assert.equal(calls[0].body.msgtype, 'text');
 });
 
+test('DingTalkChannelProvider starts stream mode and routes callback frames', async () => {
+  const fetchCalls = [];
+  const sentFrames = [];
+  const messageHandlers = [];
+  const socket = {
+    on(event, handler) {
+      if (event === 'message') {
+        messageHandlers.push(handler);
+      }
+    },
+    send(payload) {
+      sentFrames.push(JSON.parse(payload));
+    },
+    close() {}
+  };
+
+  const provider = new DingTalkChannelProvider({
+    fetchImpl: async (url, options = {}) => {
+      fetchCalls.push({
+        url,
+        body: options.body ? JSON.parse(options.body) : null
+      });
+      return {
+        ok: true,
+        json: async () => ({
+          endpoint: 'wss://example.invalid/gateway',
+          ticket: 'ticket_123'
+        })
+      };
+    },
+    webSocketFactory: async (url) => {
+      fetchCalls.push({ url, body: null });
+      return socket;
+    }
+  });
+
+  const routed = [];
+  provider.router = {
+    routeInboundMessage: async (message) => {
+      routed.push(message);
+      return {
+        type: 'runtime_status',
+        session: { id: 'session_stream_1', status: 'running', summary: 'busy' }
+      };
+    }
+  };
+
+  const started = await provider.start({
+    settings: {
+      enabled: true,
+      mode: 'stream',
+      clientId: 'client_id',
+      clientSecret: 'client_secret',
+      defaultRuntimeProvider: 'codex'
+    },
+    router: provider.router,
+    logger: console
+  });
+
+  assert.equal(started.started, true);
+  assert.equal(started.mode, 'stream');
+  assert.match(String(fetchCalls[0].url), /gateway\/connections\/open/);
+  assert.match(String(fetchCalls[1].url), /ticket=ticket_123/);
+
+  await provider.handleStreamFrame(JSON.stringify({
+    type: 'CALLBACK',
+    headers: {
+      topic: '/v1.0/im/bot/messages/get',
+      messageId: 'stream_msg_1'
+    },
+    data: JSON.stringify({
+      msgId: 'dt_stream_1',
+      conversationId: 'cid_stream_1',
+      senderId: 'uid_stream_1',
+      senderNick: 'alice',
+      sessionWebhook: 'https://example.invalid/dingtalk/session-webhook',
+      sessionWebhookExpiredTime: String(Date.now() + 60_000),
+      text: {
+        content: '/status'
+      }
+    })
+  }));
+
+  assert.equal(routed.length, 1);
+  assert.equal(routed[0].channel, 'dingtalk');
+  assert.equal(routed[0].externalConversationId, 'cid_stream_1');
+  assert.equal(sentFrames.length, 1);
+  assert.equal(sentFrames[0].code, 200);
+  assert.equal(sentFrames[0].headers.messageId, 'stream_msg_1');
+});
+
 test('DingTalkChannelProvider falls back to app API when session webhook is unavailable', async () => {
   const calls = [];
   const provider = new DingTalkChannelProvider({

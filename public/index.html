@@ -2068,7 +2068,7 @@
                                                 <div class="text-xs text-gray-500 font-mono mt-2"
                                                     x-show="provider.id === 'feishu' && field.key === 'mode' && channelSettings[provider.id]?.mode === 'webhook'">Webhook: `/api/agent-channels/feishu/webhook`</div>
                                                 <div class="text-xs text-gray-500 font-mono mt-2"
-                                                    x-show="provider.id === 'dingtalk' && field.key === 'mode'">Webhook: `/api/agent-channels/dingtalk/webhook`</div>
+                                                    x-show="provider.id === 'dingtalk' && field.key === 'mode' && channelSettings[provider.id]?.mode === 'webhook'">Webhook: `/api/agent-channels/dingtalk/webhook`</div>
                                             </div>
                                         </template>
                                     </div>
