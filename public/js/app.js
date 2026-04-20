@@ -78,11 +78,13 @@ document.addEventListener('alpine:init', () => {
         localRuntimeModelsLoading: false,
         channelProviders: [],
         channelProvidersLoading: false,
+        channelCatalog: [],
         channelSettings: {
             telegram: { enabled: false, mode: 'polling', botToken: '', pollingIntervalMs: 2000, defaultRuntimeProvider: 'codex', model: '', cwd: '', requirePairing: false },
-            feishu: { enabled: false, mode: 'websocket', appId: '', appSecret: '', encryptKey: '', verificationToken: '', defaultRuntimeProvider: 'codex', model: '', cwd: '', requirePairing: false }
+            feishu: { enabled: false, mode: 'websocket', appId: '', appSecret: '', encryptKey: '', verificationToken: '', defaultRuntimeProvider: 'codex', model: '', cwd: '', requirePairing: false },
+            dingtalk: { enabled: false, mode: 'webhook', clientId: '', clientSecret: '', robotCode: '', signingSecret: '', defaultRuntimeProvider: 'codex', model: '', cwd: '', requirePairing: false }
         },
-        channelSettingsSaving: { telegram: false, feishu: false },
+        channelSettingsSaving: { telegram: false, feishu: false, dingtalk: false },
         channelConversations: [],
         channelConversationsLoading: false,
         selectedChannelConversationId: '',
@@ -435,6 +437,7 @@ document.addEventListener('alpine:init', () => {
             }
             if (tab === 'channels') {
                 this.loadChannelProviders();
+                this.loadChannelCatalog();
                 this.loadChannelSettings();
             }
             if (tab === 'conversationRecords') {
@@ -1400,6 +1403,44 @@ document.addEventListener('alpine:init', () => {
             if (status.enabled && status.lastError) return this.t('channelStatusError');
             if (status.enabled) return this.t('channelStatusEnabled');
             return this.t('channelStatusDisabled');
+        },
+
+        channelProviderFormSections(provider) {
+            const fields = Array.isArray(provider?.configFields) ? provider.configFields : [];
+            const ordered = ['basic', 'auth', 'transport', 'runtime', 'security', 'advanced'];
+            return ordered
+                .map(section => ({
+                    section,
+                    fields: fields.filter(field => (field?.section || 'advanced') === section)
+                }))
+                .filter(group => group.fields.length > 0);
+        },
+
+        channelFieldInputType(field) {
+            if (field?.type === 'password') return 'password';
+            if (field?.type === 'number') return 'number';
+            return 'text';
+        },
+
+        channelFieldLabel(field) {
+            return this.t(field?.labelKey || field?.key || '');
+        },
+
+        channelFieldDescription(field) {
+            return field?.descriptionKey ? this.t(field.descriptionKey) : '';
+        },
+
+        channelFieldPlaceholder(field) {
+            return field?.placeholderKey ? this.t(field.placeholderKey) : '';
+        },
+
+        channelSectionLabel(section) {
+            if (section === 'basic') return 'Basic';
+            if (section === 'auth') return 'Auth';
+            if (section === 'transport') return 'Transport';
+            if (section === 'runtime') return 'Runtime';
+            if (section === 'security') return 'Security';
+            return 'Advanced';
         },
 
         channelConversationStatusClass(conversation) {
@@ -2931,20 +2972,46 @@ document.addEventListener('alpine:init', () => {
             this.channelProvidersLoading = false;
         },
 
+        async loadChannelCatalog() {
+            const { ok, data } = await this.api('/api/agent-channels/catalog');
+            if (ok && Array.isArray(data?.providers)) {
+                this.channelCatalog = data.providers;
+                for (const provider of this.channelCatalog) {
+                    if (!this.channelSettings[provider.id]) {
+                        this.channelSettings[provider.id] = {};
+                    }
+                    for (const field of (provider.configFields || [])) {
+                        if (this.channelSettings[provider.id][field.key] === undefined) {
+                            if (field.type === 'boolean') {
+                                this.channelSettings[provider.id][field.key] = false;
+                            } else if (field.type === 'number') {
+                                this.channelSettings[provider.id][field.key] = 0;
+                            } else if (field.type === 'select' && Array.isArray(field.options) && field.options[0]) {
+                                this.channelSettings[provider.id][field.key] = field.options[0].value;
+                            } else {
+                                this.channelSettings[provider.id][field.key] = '';
+                            }
+                        }
+                    }
+                    if (this.channelSettingsSaving[provider.id] === undefined) {
+                        this.channelSettingsSaving[provider.id] = false;
+                    }
+                }
+            }
+        },
+
         async loadChannelSettings() {
             const { ok, data } = await this.api('/api/agent-channels/settings');
             if (!ok || !data?.channels) return;
 
-            this.channelSettings = {
-                telegram: {
-                    ...this.channelSettings.telegram,
-                    ...(data.channels.telegram || {})
-                },
-                feishu: {
-                    ...this.channelSettings.feishu,
-                    ...(data.channels.feishu || {})
-                }
-            };
+            const next = { ...this.channelSettings };
+            for (const [channelId, value] of Object.entries(data.channels || {})) {
+                next[channelId] = {
+                    ...(next[channelId] || {}),
+                    ...(value || {})
+                };
+            }
+            this.channelSettings = next;
         },
 
         async loadChannelConversations(options = {}) {

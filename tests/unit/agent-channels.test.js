@@ -19,6 +19,7 @@ import { AgentChannelRouter } from '../../src/agent-channels/router.js';
 import { AgentChannelManager } from '../../src/agent-channels/manager.js';
 import { AgentChannelOutboundDispatcher } from '../../src/agent-channels/outbound-dispatcher.js';
 import FeishuChannelProvider from '../../src/agent-channels/providers/feishu-provider.js';
+import DingTalkChannelProvider from '../../src/agent-channels/providers/dingtalk-provider.js';
 import TelegramChannelProvider from '../../src/agent-channels/providers/telegram-provider.js';
 import { formatAgentRuntimeEventForChannel } from '../../src/agent-channels/formatter.js';
 import {
@@ -380,8 +381,7 @@ test('AgentChannelRouter binds runtime sessions to conversations', async () => {
     pairingStore: new AgentChannelPairingStore({
       configDir: createTempDir('cligate-agent-channels-router-pairing-')
     }),
-    messageService: new AgentOrchestratorMessageService({ runtimeSessionManager }),
-    requirePairing: false
+    messageService: new AgentOrchestratorMessageService({ runtimeSessionManager })
   });
 
   const result = await router.routeInboundMessage({
@@ -404,6 +404,56 @@ test('AgentChannelRouter binds runtime sessions to conversations', async () => {
   assert.equal(deliveries[0].sessionId, result.session.id);
 });
 
+test('AgentChannelRouter enforces pairing dynamically from route options', async () => {
+  const runtimeSessionManager = createRuntimeManager();
+  const router = new AgentChannelRouter({
+    conversationStore: new AgentChannelConversationStore({
+      configDir: createTempDir('cligate-agent-channels-router-dynamic-pairing-conv-')
+    }),
+    deliveryStore: new AgentChannelDeliveryStore({
+      configDir: createTempDir('cligate-agent-channels-router-dynamic-pairing-delivery-')
+    }),
+    pairingStore: new AgentChannelPairingStore({
+      configDir: createTempDir('cligate-agent-channels-router-dynamic-pairing-store-')
+    }),
+    messageService: new AgentOrchestratorMessageService({ runtimeSessionManager })
+  });
+
+  const required = await router.routeInboundMessage({
+    channel: 'telegram',
+    accountId: 'default',
+    externalMessageId: 'm_pair_1',
+    externalConversationId: 'chat_pair_1',
+    externalUserId: 'user_1',
+    externalUserName: 'alice',
+    text: '/agent codex inspect repo',
+    messageType: 'text'
+  }, {
+    requirePairing: true,
+    defaultRuntimeProvider: 'codex'
+  });
+
+  assert.equal(required.type, 'pairing_required');
+  assert.equal(required.pairing.status, 'pending');
+
+  const bypassed = await router.routeInboundMessage({
+    channel: 'telegram',
+    accountId: 'default',
+    externalMessageId: 'm_pair_2',
+    externalConversationId: 'chat_pair_2',
+    externalUserId: 'user_2',
+    externalUserName: 'bob',
+    text: '/agent codex inspect repo',
+    messageType: 'text'
+  }, {
+    requirePairing: false,
+    defaultRuntimeProvider: 'codex'
+  });
+
+  assert.equal(bypassed.type, 'runtime_started');
+  assert.equal(bypassed.session.provider, 'codex');
+});
+
 test('AgentChannelRouter clears conversation binding on explicit reset command', async () => {
   const runtimeSessionManager = createRuntimeManager();
   const conversationStore = new AgentChannelConversationStore({
@@ -417,8 +467,7 @@ test('AgentChannelRouter clears conversation binding on explicit reset command',
     pairingStore: new AgentChannelPairingStore({
       configDir: createTempDir('cligate-agent-channels-router-reset-pairing-')
     }),
-    messageService: new AgentOrchestratorMessageService({ runtimeSessionManager }),
-    requirePairing: false
+    messageService: new AgentOrchestratorMessageService({ runtimeSessionManager })
   });
 
   const started = await router.routeInboundMessage({
@@ -463,8 +512,7 @@ test('completed runtime events keep channel conversations attached to the same s
     pairingStore: new AgentChannelPairingStore({
       configDir: createTempDir('cligate-agent-channels-sticky-pairing-')
     }),
-    messageService: new AgentOrchestratorMessageService({ runtimeSessionManager }),
-    requirePairing: false
+    messageService: new AgentOrchestratorMessageService({ runtimeSessionManager })
   });
   const dispatcher = new AgentChannelOutboundDispatcher({
     runtimeSessionManager,
@@ -540,8 +588,7 @@ test('AgentChannelRouter stores fresh-session inbound messages under the new run
     pairingStore: new AgentChannelPairingStore({
       configDir: createTempDir('cligate-agent-channels-router-fresh-pairing-')
     }),
-    messageService: new AgentOrchestratorMessageService({ runtimeSessionManager }),
-    requirePairing: false
+    messageService: new AgentOrchestratorMessageService({ runtimeSessionManager })
   });
 
   const started = await router.routeInboundMessage({
@@ -938,8 +985,7 @@ test('AgentChannelRouter writes remembered follow-up context into current task m
     pairingStore: new AgentChannelPairingStore({
       configDir: createTempDir('cligate-agent-channels-remembered-followup-pairing-')
     }),
-    messageService: new AgentOrchestratorMessageService({ runtimeSessionManager }),
-    requirePairing: false
+    messageService: new AgentOrchestratorMessageService({ runtimeSessionManager })
   });
 
   const existing = conversationStore.findOrCreateByExternal({
@@ -1002,8 +1048,7 @@ test('AgentChannelRouter writes related sibling origin into remembered task memo
     pairingStore: new AgentChannelPairingStore({
       configDir: createTempDir('cligate-agent-channels-related-origin-pairing-')
     }),
-    messageService: new AgentOrchestratorMessageService({ runtimeSessionManager }),
-    requirePairing: false
+    messageService: new AgentOrchestratorMessageService({ runtimeSessionManager })
   });
 
   conversationStore.findOrCreateByExternal({
@@ -1443,6 +1488,192 @@ test('FeishuChannelProvider handles webhook challenge and replies to router resu
   assert.equal(calls[1].body.receive_id, 'oc_1');
 });
 
+test('DingTalkChannelProvider normalizes text events and routes webhook messages', async () => {
+  const calls = [];
+  const provider = new DingTalkChannelProvider({
+    fetchImpl: async (url, options = {}) => {
+      calls.push({
+        url,
+        body: options.body ? JSON.parse(options.body) : null,
+        headers: options.headers || {}
+      });
+
+      if (String(url).includes('/oauth2/accessToken')) {
+        return {
+          ok: true,
+          json: async () => ({
+            accessToken: 'dt_access_token'
+          })
+        };
+      }
+
+      return {
+        ok: true,
+        json: async () => ({})
+      };
+    }
+  });
+
+  const normalized = provider.normalizeInbound({
+    msgId: 'dt_msg_1',
+    conversationId: 'cid_1',
+    senderId: 'uid_1',
+    senderNick: 'alice',
+    text: {
+      content: '/status'
+    }
+  });
+
+  assert.equal(normalized.channel, 'dingtalk');
+  assert.equal(normalized.externalConversationId, 'cid_1');
+  assert.equal(normalized.externalUserId, 'uid_1');
+  assert.equal(normalized.text, '/status');
+
+  provider.router = {
+    routeInboundMessage: async () => ({
+      type: 'runtime_status',
+      session: { id: 'session_dt_1', status: 'ready', summary: 'done' }
+    })
+  };
+  provider.settings = {
+    mode: 'webhook',
+    defaultRuntimeProvider: 'codex',
+    requirePairing: true
+  };
+
+  const result = await provider.handleWebhook({
+    msgId: 'dt_msg_2',
+    conversationId: 'cid_2',
+    senderId: 'uid_2',
+    senderNick: 'bob',
+    sessionWebhook: 'https://example.invalid/dingtalk/session-webhook',
+    sessionWebhookExpiredTime: String(Date.now() + 60_000),
+    text: {
+      content: '/status'
+    }
+  });
+
+  assert.equal(result.status, 200);
+  assert.equal(result.body.success, true);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].url, 'https://example.invalid/dingtalk/session-webhook');
+  assert.equal(calls[0].body.msgtype, 'text');
+});
+
+test('DingTalkChannelProvider falls back to app API when session webhook is unavailable', async () => {
+  const calls = [];
+  const provider = new DingTalkChannelProvider({
+    fetchImpl: async (url, options = {}) => {
+      calls.push({
+        url,
+        body: options.body ? JSON.parse(options.body) : null,
+        headers: options.headers || {}
+      });
+
+      if (String(url).includes('/oauth2/accessToken')) {
+        return {
+          ok: true,
+          json: async () => ({
+            accessToken: 'dt_access_token'
+          })
+        };
+      }
+
+      return {
+        ok: true,
+        json: async () => ({
+          processQueryKey: 'process_key_1'
+        })
+      };
+    }
+  });
+
+  provider.settings = {
+    mode: 'webhook',
+    clientId: 'client_id',
+    clientSecret: 'client_secret',
+    robotCode: 'robot_123'
+  };
+
+  const result = await provider.sendMessage({
+    conversation: {
+      externalConversationId: 'cid_fallback',
+      metadata: {
+        channelContext: {
+          sessionWebhook: 'https://example.invalid/expired-webhook',
+          sessionWebhookExpiredTime: String(Date.now() - 1),
+          robotCode: 'robot_123',
+          conversationType: '1',
+          senderStaffId: 'staff_123'
+        }
+      }
+    },
+    text: 'hello from cligate'
+  });
+
+  assert.equal(result.messageId, 'process_key_1');
+  assert.equal(calls.length, 2);
+  assert.match(String(calls[0].url), /oauth2\/accessToken/);
+  assert.match(String(calls[1].url), /robot\/oToMessages\/batchSend/);
+  assert.deepEqual(calls[1].body.userIds, ['staff_123']);
+  assert.equal(calls[1].body.robotCode, 'robot_123');
+});
+
+test('DingTalkChannelProvider uses group send API for group conversation fallback', async () => {
+  const calls = [];
+  const provider = new DingTalkChannelProvider({
+    fetchImpl: async (url, options = {}) => {
+      calls.push({
+        url,
+        body: options.body ? JSON.parse(options.body) : null,
+        headers: options.headers || {}
+      });
+
+      if (String(url).includes('/oauth2/accessToken')) {
+        return {
+          ok: true,
+          json: async () => ({
+            accessToken: 'dt_access_token'
+          })
+        };
+      }
+
+      return {
+        ok: true,
+        json: async () => ({
+          processQueryKey: 'group_key_1'
+        })
+      };
+    }
+  });
+
+  provider.settings = {
+    mode: 'webhook',
+    clientId: 'client_id',
+    clientSecret: 'client_secret',
+    robotCode: 'robot_group'
+  };
+
+  const result = await provider.sendMessage({
+    conversation: {
+      externalConversationId: 'cid_group',
+      metadata: {
+        channelContext: {
+          conversationType: '2',
+          robotCode: 'robot_group'
+        }
+      }
+    },
+    text: 'group message'
+  });
+
+  assert.equal(result.messageId, 'group_key_1');
+  assert.equal(calls.length, 2);
+  assert.match(String(calls[1].url), /robot\/groupMessages\/send/);
+  assert.equal(calls[1].body.openConversationId, 'cid_group');
+  assert.equal(calls[1].body.robotCode, 'robot_group');
+});
+
 test('channel formatter prefers completed result text over generic completion label', () => {
   const formatted = formatAgentRuntimeEventForChannel({
     event: {
@@ -1507,8 +1738,7 @@ test('session records are grouped by runtime session instead of channel conversa
     conversationStore,
     deliveryStore,
     pairingStore,
-    messageService: new AgentOrchestratorMessageService({ runtimeSessionManager }),
-    requirePairing: false
+    messageService: new AgentOrchestratorMessageService({ runtimeSessionManager })
   });
 
   await router.routeInboundMessage({
@@ -1569,8 +1799,7 @@ test('completed runtime events update conversation supervisor task memory', asyn
     pairingStore: new AgentChannelPairingStore({
       configDir: createTempDir('cligate-agent-channels-supervisor-pairing-')
     }),
-    messageService: new AgentOrchestratorMessageService({ runtimeSessionManager }),
-    requirePairing: false
+    messageService: new AgentOrchestratorMessageService({ runtimeSessionManager })
   });
   const dispatcher = new AgentChannelOutboundDispatcher({
     runtimeSessionManager,

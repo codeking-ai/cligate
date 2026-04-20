@@ -104,9 +104,11 @@ function splitTelegramText(text, maxLength = TELEGRAM_SAFE_MESSAGE_LIMIT) {
 export class TelegramChannelProvider {
   constructor({ fetchImpl = globalThis.fetch } = {}) {
     this.id = 'telegram';
+    this.label = 'Telegram';
     this.fetchImpl = fetchImpl;
     this.capabilities = {
       mode: 'polling',
+      supportedModes: ['polling'],
       supportsWebhook: true,
       supportsPolling: true,
       supportsInteractiveApproval: true,
@@ -114,6 +116,16 @@ export class TelegramChannelProvider {
       supportsThreading: false,
       supportsEditMessage: true
     };
+    this.configFields = [
+      { key: 'enabled', type: 'boolean', labelKey: 'channelEnabled', section: 'basic' },
+      { key: 'mode', type: 'select', labelKey: 'channelMode', section: 'basic', options: [{ value: 'polling', labelKey: 'channelModePolling' }] },
+      { key: 'botToken', type: 'password', labelKey: 'channelBotToken', placeholderKey: 'channelBotTokenPlaceholder', section: 'auth' },
+      { key: 'pollingIntervalMs', type: 'number', labelKey: 'channelPollInterval', section: 'transport' },
+      { key: 'defaultRuntimeProvider', type: 'runtime-provider', labelKey: 'channelDefaultRuntime', section: 'runtime' },
+      { key: 'model', type: 'text', labelKey: 'chatModel', placeholderKey: 'chatModelPlaceholder', section: 'runtime' },
+      { key: 'cwd', type: 'text', labelKey: 'channelWorkingDirectory', section: 'runtime' },
+      { key: 'requirePairing', type: 'boolean', labelKey: 'channelRequirePairing', section: 'security' }
+    ];
     this.running = false;
     this.timer = null;
     this.pollInFlight = false;
@@ -263,6 +275,7 @@ export class TelegramChannelProvider {
 
         const result = await this.router.routeInboundMessage(inbound, {
           defaultRuntimeProvider: this.settings?.defaultRuntimeProvider || 'codex',
+          requirePairing: this.settings?.requirePairing === true,
           cwd: this.settings?.cwd || '',
           model: this.settings?.model || ''
         });

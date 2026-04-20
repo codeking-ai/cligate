@@ -114,6 +114,7 @@ export function createNormalizedChannelMessage({
   text = '',
   messageType = 'text',
   action = null,
+  metadata = {},
   raw = null,
   ts = null
 } = {}) {
@@ -130,6 +131,7 @@ export function createNormalizedChannelMessage({
     text: String(text || ''),
     messageType: String(messageType || 'text'),
     action,
+    metadata: metadata && typeof metadata === 'object' ? metadata : {},
     ts: ts || nowIso(),
     raw
   };

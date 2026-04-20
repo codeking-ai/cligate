@@ -198,6 +198,13 @@ export function handleListAgentChannelProviders(_req, res) {
   });
 }
 
+export function handleGetAgentChannelCatalog(_req, res) {
+  res.json({
+    success: true,
+    providers: agentChannelRegistry.list()
+  });
+}
+
 export function handleGetAgentChannelSettings(_req, res) {
   res.json({
     success: true,
@@ -241,6 +248,28 @@ export async function handleFeishuChannelWebhook(req, res) {
     }
 
     const settings = getServerSettings().channels?.feishu || {};
+    provider.settings = settings;
+    provider.router = agentChannelManager.router;
+
+    const result = await provider.handleWebhook(req.body || {}, {
+      cwd: settings.cwd || '',
+      model: settings.model || ''
+    });
+
+    return res.status(result?.status || 200).json(result?.body || { success: true });
+  } catch (error) {
+    return res.status(500).json({ success: false, error: error.message });
+  }
+}
+
+export async function handleDingTalkChannelWebhook(req, res) {
+  try {
+    const provider = agentChannelRegistry.get('dingtalk');
+    if (!provider) {
+      return res.status(404).json({ success: false, error: 'dingtalk provider unavailable' });
+    }
+
+    const settings = getServerSettings().channels?.dingtalk || {};
     provider.settings = settings;
     provider.router = agentChannelManager.router;
 
@@ -359,10 +388,12 @@ export function handleDenyAgentChannelPairing(req, res) {
 
 export default {
   handleListAgentChannelProviders,
+  handleGetAgentChannelCatalog,
   handleGetAgentChannelSettings,
   handleUpdateAgentChannelSettings,
   handleRefreshAgentChannels,
   handleFeishuChannelWebhook,
+  handleDingTalkChannelWebhook,
   handleListAgentChannelConversations,
   handleGetAgentChannelConversation,
   handleListAgentChannelSessionRecords,

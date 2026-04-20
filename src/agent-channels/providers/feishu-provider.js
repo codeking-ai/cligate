@@ -59,9 +59,11 @@ function readMessageText(content) {
 export class FeishuChannelProvider {
   constructor({ fetchImpl = globalThis.fetch } = {}) {
     this.id = 'feishu';
+    this.label = 'Feishu';
     this.fetchImpl = fetchImpl;
     this.capabilities = {
       mode: 'websocket',
+      supportedModes: ['websocket', 'webhook'],
       supportsWebhook: true,
       supportsPolling: false,
       supportsWebsocket: true,
@@ -70,6 +72,28 @@ export class FeishuChannelProvider {
       supportsThreading: true,
       supportsEditMessage: false
     };
+    this.configFields = [
+      { key: 'enabled', type: 'boolean', labelKey: 'channelEnabled', section: 'basic' },
+      {
+        key: 'mode',
+        type: 'select',
+        labelKey: 'channelMode',
+        section: 'basic',
+        options: [
+          { value: 'websocket', labelKey: 'channelModeWebsocket' },
+          { value: 'webhook', labelKey: 'channelModeWebhook' }
+        ],
+        descriptionKey: 'channelFeishuModeDesc'
+      },
+      { key: 'appId', type: 'text', labelKey: 'channelAppId', section: 'auth' },
+      { key: 'appSecret', type: 'password', labelKey: 'channelAppSecret', section: 'auth' },
+      { key: 'verificationToken', type: 'text', labelKey: 'channelVerificationToken', section: 'security' },
+      { key: 'encryptKey', type: 'text', labelKey: 'channelEncryptKey', section: 'security' },
+      { key: 'defaultRuntimeProvider', type: 'runtime-provider', labelKey: 'channelDefaultRuntime', section: 'runtime' },
+      { key: 'model', type: 'text', labelKey: 'chatModel', placeholderKey: 'chatModelPlaceholder', section: 'runtime' },
+      { key: 'cwd', type: 'text', labelKey: 'channelWorkingDirectory', section: 'runtime' },
+      { key: 'requirePairing', type: 'boolean', labelKey: 'channelRequirePairing', section: 'security' }
+    ];
     this.settings = null;
     this.router = null;
     this.logger = console;
@@ -215,6 +239,7 @@ export class FeishuChannelProvider {
 
     const result = await this.router.routeInboundMessage(normalized, {
       defaultRuntimeProvider: this.settings?.defaultRuntimeProvider || 'codex',
+      requirePairing: this.settings?.requirePairing === true,
       cwd: this.settings?.cwd || options.cwd || '',
       model: this.settings?.model || options.model || ''
     });

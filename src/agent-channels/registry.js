@@ -1,5 +1,15 @@
+import DingTalkChannelProvider from './providers/dingtalk-provider.js';
 import FeishuChannelProvider from './providers/feishu-provider.js';
 import TelegramChannelProvider from './providers/telegram-provider.js';
+
+function buildProviderDescriptor(provider) {
+  return {
+    id: provider.id,
+    label: provider.label || provider.id,
+    capabilities: provider.capabilities || {},
+    configFields: Array.isArray(provider.configFields) ? provider.configFields : []
+  };
+}
 
 export class AgentChannelRegistry {
   constructor() {
@@ -19,10 +29,7 @@ export class AgentChannelRegistry {
   }
 
   list() {
-    return [...this.providers.values()].map((provider) => ({
-      id: provider.id,
-      capabilities: provider.capabilities || {}
-    }));
+    return [...this.providers.values()].map((provider) => buildProviderDescriptor(provider));
   }
 }
 
@@ -30,6 +37,7 @@ export function createDefaultAgentChannelRegistry() {
   const registry = new AgentChannelRegistry();
   registry.register(new TelegramChannelProvider());
   registry.register(new FeishuChannelProvider());
+  registry.register(new DingTalkChannelProvider());
   return registry;
 }
 

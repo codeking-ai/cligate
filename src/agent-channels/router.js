@@ -20,14 +20,12 @@ export class AgentChannelRouter {
     conversationStore = agentChannelConversationStore,
     deliveryStore = agentChannelDeliveryStore,
     pairingStore = agentChannelPairingStore,
-    messageService = agentOrchestratorMessageService,
-    requirePairing = false
+    messageService = agentOrchestratorMessageService
   } = {}) {
     this.conversationStore = conversationStore;
     this.deliveryStore = deliveryStore;
     this.pairingStore = pairingStore;
     this.messageService = messageService;
-    this.requirePairing = requirePairing;
   }
 
   async routeInboundMessage(message, options = {}) {
@@ -50,11 +48,16 @@ export class AgentChannelRouter {
         ? `${message.externalUserName} / ${message.channel}`
         : `${message.externalUserId} / ${message.channel}`,
       metadata: {
-        lastMessageType: message.messageType || 'text'
+        lastMessageType: message.messageType || 'text',
+        channelContext: {
+          ...((message.metadata && typeof message.metadata === 'object') ? message.metadata : {})
+        }
       }
     });
 
-    if (this.requirePairing && !this.pairingStore.isApproved(
+    const requirePairing = options.requirePairing === true;
+
+    if (requirePairing && !this.pairingStore.isApproved(
       message.channel,
       message.accountId,
       message.externalUserId,

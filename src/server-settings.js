@@ -41,6 +41,20 @@ const DEFAULT_SETTINGS = {
             model: '',
             cwd: '',
             requirePairing: false
+        },
+        dingtalk: {
+            enabled: false,
+            mode: 'webhook',
+            appKey: '',
+            appSecret: '',
+            clientId: '',
+            clientSecret: '',
+            robotCode: '',
+            signingSecret: '',
+            defaultRuntimeProvider: 'codex',
+            model: '',
+            cwd: '',
+            requirePairing: false
         }
     }
 };
@@ -54,6 +68,10 @@ function normalizeChannelsConfig(channels = {}) {
         feishu: {
             ...DEFAULT_SETTINGS.channels.feishu,
             ...(channels.feishu || {})
+        },
+        dingtalk: {
+            ...DEFAULT_SETTINGS.channels.dingtalk,
+            ...(channels.dingtalk || {})
         }
     };
 }

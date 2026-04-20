@@ -5,6 +5,7 @@ import agentChannelConversationStore from '../../src/agent-channels/conversation
 import agentChannelManager from '../../src/agent-channels/manager.js';
 import agentChannelPairingStore from '../../src/agent-channels/pairing-store.js';
 import {
+  handleGetAgentChannelCatalog,
   handleGetAgentChannelSettings,
   handleListAgentChannelConversations,
   handleListAgentChannelProviders,
@@ -53,7 +54,7 @@ test('agent channel route lists provider statuses from manager', async () => {
     {
       target: agentChannelManager,
       key: 'getProviderStatuses',
-      value: () => [{ id: 'telegram', status: { running: true } }]
+      value: () => [{ id: 'telegram', label: 'Telegram', configFields: ['enabled'], status: { running: true } }]
     }
   ], async () => {
     const res = mockRes();
@@ -62,6 +63,8 @@ test('agent channel route lists provider statuses from manager', async () => {
     assert.equal(res._status, 200);
     assert.equal(res._body.success, true);
     assert.equal(res._body.providers[0].id, 'telegram');
+    assert.equal(res._body.providers[0].label, 'Telegram');
+    assert.deepEqual(res._body.providers[0].configFields, ['enabled']);
   });
 });
 
@@ -124,4 +127,16 @@ test('agent channel route returns settings payload', () => {
   assert.equal(res._status, 200);
   assert.equal(res._body.success, true);
   assert.ok(res._body.channels);
+  assert.ok(res._body.channels.dingtalk);
+});
+
+test('agent channel route returns provider catalog metadata', () => {
+  const res = mockRes();
+  handleGetAgentChannelCatalog({}, res);
+  assert.equal(res._status, 200);
+  assert.equal(res._body.success, true);
+  assert.ok(Array.isArray(res._body.providers));
+  assert.ok(res._body.providers.some((provider) => provider.id === 'telegram'));
+  assert.ok(res._body.providers.some((provider) => provider.id === 'feishu'));
+  assert.ok(res._body.providers.some((provider) => provider.id === 'dingtalk'));
 });

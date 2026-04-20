@@ -268,10 +268,12 @@ Feishu supports two connection models:
 | Endpoint | Method | Description |
 |----------|--------|-------------|
 | `/api/agent-channels/providers` | GET | List channel provider status |
+| `/api/agent-channels/catalog` | GET | List channel provider metadata used by future dynamic channel configuration UIs |
 | `/api/agent-channels/settings` | GET | Get channel settings |
 | `/api/agent-channels/settings/:channel` | PUT | Update channel settings |
 | `/api/agent-channels/refresh` | POST | Refresh channel providers |
 | `/api/agent-channels/feishu/webhook` | POST | Receive Feishu webhook events |
+| `/api/agent-channels/dingtalk/webhook` | POST | Receive DingTalk webhook events |
 | `/api/agent-channels/session-records` | GET | List channel-linked runtime session records used by Conversation Records |
 | `/api/agent-channels/session-records/:id` | GET | Get one channel-linked runtime session record |
 | `/api/agent-channels/conversations` | GET | List stored channel conversation threads |

@@ -47,10 +47,12 @@ import {
 } from './agent-runtimes-route.js';
 import {
   handleListAgentChannelProviders,
+  handleGetAgentChannelCatalog,
   handleGetAgentChannelSettings,
   handleUpdateAgentChannelSettings,
   handleRefreshAgentChannels,
   handleFeishuChannelWebhook,
+  handleDingTalkChannelWebhook,
   handleListAgentChannelConversations,
   handleGetAgentChannelConversation,
   handleListAgentChannelSessionRecords,
@@ -320,10 +322,12 @@ export function registerApiRoutes(app, { port }) {
 
   // ─── Agent Channel Gateway ──────────────────────────────────────────────
   app.get('/api/agent-channels/providers', handleListAgentChannelProviders);
+  app.get('/api/agent-channels/catalog', handleGetAgentChannelCatalog);
   app.get('/api/agent-channels/settings', handleGetAgentChannelSettings);
   app.put('/api/agent-channels/settings/:channel', handleUpdateAgentChannelSettings);
   app.post('/api/agent-channels/refresh', handleRefreshAgentChannels);
   app.post('/api/agent-channels/feishu/webhook', handleFeishuChannelWebhook);
+  app.post('/api/agent-channels/dingtalk/webhook', handleDingTalkChannelWebhook);
   app.get('/api/agent-channels/session-records', handleListAgentChannelSessionRecords);
   app.get('/api/agent-channels/session-records/:id', handleGetAgentChannelSessionRecord);
   app.get('/api/agent-channels/conversations', handleListAgentChannelConversations);
