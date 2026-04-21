@@ -1,6 +1,8 @@
 import { createNormalizedChannelMessage } from '../models.js';
 import * as Lark from '@larksuiteoapi/node-sdk';
 
+const FEISHU_SAFE_MESSAGE_LIMIT = 3500;
+
 function providerLabel(providerId) {
   if (providerId === 'claude-code') return 'Claude Code';
   if (providerId === 'codex') return 'Codex';
@@ -56,6 +58,45 @@ function readMessageText(content) {
     }
   }
   return String(content?.text || '');
+}
+
+function splitFeishuText(text, maxLength = FEISHU_SAFE_MESSAGE_LIMIT) {
+  const source = String(text || '').replace(/\r\n/g, '\n').trim();
+  if (!source) {
+    return [''];
+  }
+
+  if (source.length <= maxLength) {
+    return [source];
+  }
+
+  const chunks = [];
+  let remaining = source;
+  while (remaining.length > maxLength) {
+    let splitAt = remaining.lastIndexOf('\n', maxLength);
+    if (splitAt <= 0) {
+      splitAt = remaining.lastIndexOf(' ', maxLength);
+    }
+    if (splitAt <= 0) {
+      splitAt = maxLength;
+    }
+
+    const chunk = remaining.slice(0, splitAt).trim();
+    if (chunk) {
+      chunks.push(chunk);
+    }
+    remaining = remaining.slice(splitAt).trim();
+  }
+
+  if (remaining) {
+    chunks.push(remaining);
+  }
+
+  if (chunks.length <= 1) {
+    return chunks;
+  }
+
+  return chunks.map((chunk, index) => `[${index + 1}/${chunks.length}] ${chunk}`);
 }
 
 export class FeishuChannelProvider {
@@ -270,62 +311,69 @@ export class FeishuChannelProvider {
   }
 
   async sendMessage({ conversation, text, buttons = [] } = {}) {
-    if (this.sdkClient) {
-      const tail = buttons.length > 0
-        ? `\n\nActions: ${buttons.map((button) => `/${button.action || button.id}`).join(' / ')}`
-        : '';
-      const response = await this.sdkClient.im.v1.message.create({
-        params: {
-          receive_id_type: 'chat_id'
-        },
-        data: {
-          receive_id: conversation?.externalConversationId,
-          msg_type: 'text',
-          content: JSON.stringify({
-            text: `${String(text || '')}${tail}`
-          })
-        }
-      });
+    const tail = buttons.length > 0
+      ? `\n\nActions: ${buttons.map((button) => `/${button.action || button.id}`).join(' / ')}`
+      : '';
+    const textChunks = splitFeishuText(`${String(text || '')}${tail}`);
+    let result = null;
 
-      if (Number(response?.code) !== 0) {
-        throw new Error(response?.msg || 'Failed to send Feishu message');
+    if (this.sdkClient) {
+      for (const chunk of textChunks) {
+        const response = await this.sdkClient.im.v1.message.create({
+          params: {
+            receive_id_type: 'chat_id'
+          },
+          data: {
+            receive_id: conversation?.externalConversationId,
+            msg_type: 'text',
+            content: JSON.stringify({
+              text: chunk
+            })
+          }
+        });
+
+        if (Number(response?.code) !== 0) {
+          throw new Error(response?.msg || 'Failed to send Feishu message');
+        }
+
+        result = response;
       }
 
       return {
-        messageId: String(response?.data?.message_id || '')
+        messageId: String(result?.data?.message_id || '')
       };
     }
 
     const token = await this.getTenantAccessToken();
-    const tail = buttons.length > 0
-      ? `\n\nActions: ${buttons.map((button) => `/${button.action || button.id}`).join(' / ')}`
-      : '';
-
-    const response = await this.fetchImpl(
-      'https://open.feishu.cn/open-apis/im/v1/messages?receive_id_type=chat_id',
-      {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json; charset=utf-8',
-          Authorization: `Bearer ${token}`
-        },
-        body: JSON.stringify({
-          receive_id: conversation?.externalConversationId,
-          msg_type: 'text',
-          content: JSON.stringify({
-            text: `${String(text || '')}${tail}`
+    for (const chunk of textChunks) {
+      const response = await this.fetchImpl(
+        'https://open.feishu.cn/open-apis/im/v1/messages?receive_id_type=chat_id',
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json; charset=utf-8',
+            Authorization: `Bearer ${token}`
+          },
+          body: JSON.stringify({
+            receive_id: conversation?.externalConversationId,
+            msg_type: 'text',
+            content: JSON.stringify({
+              text: chunk
+            })
           })
-        })
-      }
-    );
+        }
+      );
 
-    const data = await response.json();
-    if (!response.ok || Number(data?.code) !== 0) {
-      throw new Error(data?.msg || 'Failed to send Feishu message');
+      const data = await response.json();
+      if (!response.ok || Number(data?.code) !== 0) {
+        throw new Error(data?.msg || 'Failed to send Feishu message');
+      }
+
+      result = data;
     }
 
     return {
-      messageId: String(data?.data?.message_id || '')
+      messageId: String(result?.data?.message_id || '')
     };
   }
 

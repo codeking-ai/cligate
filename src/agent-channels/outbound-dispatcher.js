@@ -75,9 +75,10 @@ export class AgentChannelOutboundDispatcher {
       }
 
       try {
+        const outboundText = formatted.fullText || formatted.text || '';
         const result = await provider.sendMessage({
           conversation,
-          text: formatted.text,
+          text: outboundText,
           buttons: formatted.buttons || [],
           session,
           event
@@ -90,7 +91,10 @@ export class AgentChannelOutboundDispatcher {
           eventSeq: event.seq,
           externalMessageId: result?.messageId || '',
           status: 'sent',
-          payload: formatted
+          payload: {
+            ...formatted,
+            fullText: outboundText
+          }
         });
 
         if (event.type === AGENT_EVENT_TYPE.APPROVAL_REQUEST) {
@@ -124,7 +128,10 @@ export class AgentChannelOutboundDispatcher {
           eventSeq: event.seq,
           status: 'failed',
           error: error.message,
-          payload: formatted
+          payload: {
+            ...formatted,
+            fullText: outboundText
+          }
         });
       }
     }

@@ -575,6 +575,66 @@ test('completed runtime events keep channel conversations attached to the same s
   assert.equal(followUp.session.id, started.session.id);
 });
 
+test('outbound dispatcher sends full completed result text to channel providers', async () => {
+  const runtimeSessionManager = createRuntimeManager();
+  const conversationStore = new AgentChannelConversationStore({
+    configDir: createTempDir('cligate-agent-channels-fulltext-conv-')
+  });
+  const deliveryStore = new AgentChannelDeliveryStore({
+    configDir: createTempDir('cligate-agent-channels-fulltext-delivery-')
+  });
+  const router = new AgentChannelRouter({
+    conversationStore,
+    deliveryStore,
+    pairingStore: new AgentChannelPairingStore({
+      configDir: createTempDir('cligate-agent-channels-fulltext-pairing-')
+    }),
+    messageService: new AgentOrchestratorMessageService({ runtimeSessionManager })
+  });
+
+  const sent = [];
+  const dispatcher = new AgentChannelOutboundDispatcher({
+    runtimeSessionManager,
+    conversationStore,
+    deliveryStore,
+    registry: {
+      get() {
+        return {
+          async sendMessage(payload) {
+            sent.push(payload);
+            return { messageId: 'outbound_full_1' };
+          }
+        };
+      }
+    }
+  });
+
+  const started = await router.routeInboundMessage({
+    channel: 'telegram',
+    accountId: 'default',
+    externalMessageId: 'm_full_1',
+    externalConversationId: 'chat_full_1',
+    externalUserId: 'user_full_1',
+    externalUserName: 'alice',
+    text: '/agent codex inspect repo',
+    messageType: 'text'
+  });
+
+  const longResult = `Summary line\n${'x'.repeat(1800)}`;
+  await dispatcher.handleRuntimeEvent({
+    sessionId: started.session.id,
+    seq: 1001,
+    type: AGENT_EVENT_TYPE.COMPLETED,
+    payload: {
+      result: longResult
+    }
+  });
+
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0].text, longResult);
+  assert.equal(deliveryStore.listBySession(started.session.id, { limit: 5 })[0].payload.fullText, longResult);
+});
+
 test('AgentChannelRouter stores fresh-session inbound messages under the new runtime session', async () => {
   const runtimeSessionManager = createRuntimeManager();
   const conversationStore = new AgentChannelConversationStore({
@@ -1930,7 +1990,7 @@ test('channel formatter prefers completed result text over generic completion la
   assert.equal(formatted.text, 'Today in New York it is 18C and cloudy.');
 });
 
-test('channel formatter summarizes oversized completed results for mobile channels', () => {
+test('channel formatter keeps oversized completed results as full text', () => {
   const longResult = [
     'I could not write the requested file because the environment is read-only.',
     'The intended path was D:\\cligatespace\\register.html.',
@@ -1954,11 +2014,84 @@ test('channel formatter summarizes oversized completed results for mobile channe
     }
   });
 
-  assert.match(formatted.text, /codex task completed\./i);
-  assert.match(formatted.text, /read-only/i);
-  assert.match(formatted.text, /D:\\cligatespace\\register\.html/i);
-  assert.match(formatted.text, /Full output is available in CliGate session session_long_1\./);
-  assert.ok(formatted.text.length < longResult.length);
+  assert.equal(formatted.text, longResult);
+  assert.equal(formatted.fullText, longResult);
+});
+
+test('DingTalkChannelProvider splits oversized messages into multiple webhook sends', async () => {
+  const calls = [];
+  const provider = new DingTalkChannelProvider({
+    fetchImpl: async (url, options = {}) => {
+      calls.push({
+        url,
+        body: options.body ? JSON.parse(options.body) : null
+      });
+      return {
+        ok: true,
+        json: async () => ({
+          processQueryKey: `process_${calls.length}`
+        })
+      };
+    }
+  });
+
+  const longText = Array.from({ length: 6 }, (_, index) => `Part ${index + 1}: ${'x'.repeat(900)}`).join('\n');
+  const result = await provider.sendMessage({
+    conversation: {
+      externalConversationId: 'cid_long',
+      metadata: {
+        channelContext: {
+          sessionWebhook: 'https://example.invalid/dingtalk/session-webhook',
+          sessionWebhookExpiredTime: String(Date.now() + 60_000)
+        }
+      }
+    },
+    text: longText
+  });
+
+  assert.equal(result.messageId, `process_${calls.length}`);
+  assert.ok(calls.length > 1);
+  assert.ok(calls.every((entry) => entry.body?.text?.content));
+  assert.ok(calls[0].body.text.content.startsWith('[1/'));
+});
+
+test('FeishuChannelProvider splits oversized messages into multiple sends', async () => {
+  const calls = [];
+  const provider = new FeishuChannelProvider({
+    fetchImpl: async (url, options = {}) => {
+      calls.push({
+        url,
+        body: options.body ? JSON.parse(options.body) : null
+      });
+      return {
+        ok: true,
+        json: async () => ({
+          code: 0,
+          data: {
+            message_id: `msg_${calls.length}`
+          }
+        })
+      };
+    }
+  });
+
+  provider.settings = {
+    appId: 'app_id',
+    appSecret: 'app_secret'
+  };
+
+  const longText = Array.from({ length: 6 }, (_, index) => `Part ${index + 1}: ${'x'.repeat(900)}`).join('\n');
+  const result = await provider.sendMessage({
+    conversation: {
+      externalConversationId: 'oc_feishu_long'
+    },
+    text: longText
+  });
+
+  assert.equal(result.messageId, `msg_${calls.length}`);
+  assert.ok(calls.length > 1);
+  assert.ok(calls.every((entry) => JSON.parse(entry.body.content).text));
+  assert.ok(JSON.parse(calls[0].body.content).text.startsWith('[1/'));
 });
 
 test('session records are grouped by runtime session instead of channel conversation', async () => {

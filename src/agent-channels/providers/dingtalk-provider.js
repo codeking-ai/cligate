@@ -7,6 +7,7 @@ const DINGTALK_TOKEN_CACHE_TTL_MS = 60 * 60 * 1000;
 const DINGTALK_TIMESTAMP_SKEW_MS = 60 * 60 * 1000;
 const DINGTALK_STREAM_CALLBACK_TOPIC = '/v1.0/im/bot/messages/get';
 const DINGTALK_STREAM_RECONNECT_DELAY_MS = 3000;
+const DINGTALK_SAFE_MESSAGE_LIMIT = 3500;
 
 function providerLabel(providerId) {
   if (providerId === 'claude-code') return 'Claude Code';
@@ -94,6 +95,45 @@ function buildGroupTextBody({ robotCode, openConversationId, text }) {
       content: String(text || '')
     })
   };
+}
+
+function splitDingTalkText(text, maxLength = DINGTALK_SAFE_MESSAGE_LIMIT) {
+  const source = String(text || '').replace(/\r\n/g, '\n').trim();
+  if (!source) {
+    return [''];
+  }
+
+  if (source.length <= maxLength) {
+    return [source];
+  }
+
+  const chunks = [];
+  let remaining = source;
+  while (remaining.length > maxLength) {
+    let splitAt = remaining.lastIndexOf('\n', maxLength);
+    if (splitAt <= 0) {
+      splitAt = remaining.lastIndexOf(' ', maxLength);
+    }
+    if (splitAt <= 0) {
+      splitAt = maxLength;
+    }
+
+    const chunk = remaining.slice(0, splitAt).trim();
+    if (chunk) {
+      chunks.push(chunk);
+    }
+    remaining = remaining.slice(splitAt).trim();
+  }
+
+  if (remaining) {
+    chunks.push(remaining);
+  }
+
+  if (chunks.length <= 1) {
+    return chunks;
+  }
+
+  return chunks.map((chunk, index) => `[${index + 1}/${chunks.length}] ${chunk}`);
 }
 
 function coerceTimestamp(value) {
@@ -666,18 +706,27 @@ export class DingTalkChannelProvider {
     const sessionWebhook = String(channelContext.sessionWebhook || '').trim();
     const expiredAt = coerceTimestamp(channelContext.sessionWebhookExpiredTime);
     const now = Date.now();
+    const textChunks = splitDingTalkText(text);
+    let result = null;
 
     if (sessionWebhook && (!expiredAt || expiredAt > now + 15_000)) {
-      return this.sendViaSessionWebhook(sessionWebhook, text);
+      for (const chunk of textChunks) {
+        result = await this.sendViaSessionWebhook(sessionWebhook, chunk);
+      }
+      return result;
     }
 
-    return this.sendViaAppApi({
-      conversationId: conversation?.externalConversationId,
-      text,
-      robotCode: channelContext.robotCode || '',
-      conversationType: channelContext.conversationType || '',
-      senderStaffId: channelContext.senderStaffId || ''
-    });
+    for (const chunk of textChunks) {
+      result = await this.sendViaAppApi({
+        conversationId: conversation?.externalConversationId,
+        text: chunk,
+        robotCode: channelContext.robotCode || '',
+        conversationType: channelContext.conversationType || '',
+        senderStaffId: channelContext.senderStaffId || ''
+      });
+    }
+
+    return result;
   }
 }
 

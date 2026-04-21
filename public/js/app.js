@@ -3278,7 +3278,7 @@ document.addEventListener('alpine:init', () => {
             if (record.direction === 'inbound') {
                 return payload.text || '';
             }
-            return payload.text || payload.summary || '';
+            return payload.fullText || payload.text || payload.summary || '';
         },
 
         channelMessageMeta(record) {

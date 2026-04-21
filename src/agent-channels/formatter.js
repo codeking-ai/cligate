@@ -53,41 +53,16 @@ function detectWriteOutcome(text) {
 function buildCompletedMessage({ providerLabel, session, resultText, summaryText }) {
   const raw = resultText || summaryText;
   if (!raw) {
-    return `${providerLabel} task completed.`;
+    return {
+      text: `${providerLabel} task completed.`,
+      fullText: `${providerLabel} task completed.`
+    };
   }
 
-  if (raw.length <= RAW_RESULT_MAX_LENGTH) {
-    return raw;
-  }
-
-  const snippet = shortenSingleLine(raw);
-  const paths = extractCandidatePaths(raw);
-  const writeOutcome = detectWriteOutcome(raw);
-  const lines = [`${providerLabel} task completed.`];
-
-  if (snippet) {
-    lines.push(`Summary: ${snippet}`);
-  }
-
-  if (writeOutcome === 'write_success' && paths.length > 0) {
-    lines.push(`Files: ${paths.join(', ')}`);
-  } else if (writeOutcome === 'write_blocked') {
-    lines.push('Write status: the runtime reported it could not write files in the current environment.');
-    if (session?.cwd) {
-      lines.push(`Working directory: ${session.cwd}`);
-    }
-    if (paths.length > 0) {
-      lines.push(`Referenced paths: ${paths.join(', ')}`);
-    }
-  } else if (paths.length > 0) {
-    lines.push(`Related paths: ${paths.join(', ')}`);
-  }
-
-  if (session?.id) {
-    lines.push(`Full output is available in CliGate session ${session.id}.`);
-  }
-
-  return lines.join('\n');
+  return {
+    text: raw,
+    fullText: raw
+  };
 }
 
 function buildApprovalMessage(providerLabel, payload = {}) {
@@ -129,21 +104,23 @@ export function formatAgentRuntimeEventForChannel({ event, session } = {}) {
       {
         const resultText = String(event?.payload?.result || '').trim();
         const summaryText = String(event?.payload?.summary || session?.summary || '').trim();
-        const finalText = buildCompletedMessage({
+        const completed = buildCompletedMessage({
           providerLabel,
           session,
           resultText,
           summaryText
         });
-        if (finalText) {
+        if (completed?.text) {
           return {
-            text: finalText,
+            text: completed.text,
+            fullText: completed.fullText || completed.text,
             buttons: []
           };
         }
       }
       return {
         text: `${providerLabel} task completed.`,
+        fullText: `${providerLabel} task completed.`,
         buttons: []
       };
     case AGENT_EVENT_TYPE.FAILED:

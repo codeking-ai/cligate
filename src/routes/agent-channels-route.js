@@ -21,7 +21,7 @@ function summarizeDelivery(delivery) {
     };
   }
 
-  const text = String(delivery?.payload?.text || delivery?.payload?.summary || '').trim();
+  const text = String(delivery?.payload?.fullText || delivery?.payload?.text || delivery?.payload?.summary || '').trim();
   return {
     lastMessageAt: delivery.updatedAt || delivery.createdAt || null,
     lastMessagePreview: text.slice(0, 160),
