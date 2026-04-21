@@ -5,6 +5,7 @@ import agentChannelConversationStore from '../../src/agent-channels/conversation
 import agentChannelManager from '../../src/agent-channels/manager.js';
 import agentChannelPairingStore from '../../src/agent-channels/pairing-store.js';
 import {
+  handleCreateAgentChannelInstance,
   handleGetAgentChannelCatalog,
   handleGetAgentChannelSettings,
   handleListAgentChannelConversations,
@@ -96,12 +97,12 @@ test('agent channel route decorates conversations with pairing status', async ()
   });
 });
 
-test('agent channel route updates channel settings through manager', async () => {
+test('agent channel route creates channel instance through manager', async () => {
   await withOverrides([
     {
       target: agentChannelManager,
-      key: 'updateChannelSettings',
-      value: () => ({ enabled: true, botToken: 'token' })
+      key: 'createChannelInstance',
+      value: () => ({ id: 'bot-2', enabled: true, botToken: 'token' })
     },
     {
       target: agentChannelManager,
@@ -110,14 +111,40 @@ test('agent channel route updates channel settings through manager', async () =>
     }
   ], async () => {
     const res = mockRes();
-    await handleUpdateAgentChannelSettings(
-      mockReq({ params: { channel: 'telegram' }, body: { enabled: true, botToken: 'token' } }),
+    await handleCreateAgentChannelInstance(
+      mockReq({ params: { channel: 'telegram' }, body: { id: 'bot-2', enabled: true, botToken: 'token' } }),
       res
     );
 
     assert.equal(res._status, 200);
     assert.equal(res._body.success, true);
-    assert.equal(res._body.channel.enabled, true);
+    assert.equal(res._body.instance.enabled, true);
+    assert.equal(res._body.instance.id, 'bot-2');
+  });
+});
+
+test('agent channel route updates channel instance settings through manager', async () => {
+  await withOverrides([
+    {
+      target: agentChannelManager,
+      key: 'updateChannelInstanceSettings',
+      value: () => ({ id: 'default', enabled: true, botToken: 'token' })
+    },
+    {
+      target: agentChannelManager,
+      key: 'refresh',
+      value: async () => [{ id: 'telegram', instanceId: 'default', status: { running: true } }]
+    }
+  ], async () => {
+    const res = mockRes();
+    await handleUpdateAgentChannelSettings(
+      mockReq({ params: { channel: 'telegram', instanceId: 'default' }, body: { enabled: true, botToken: 'token' } }),
+      res
+    );
+
+    assert.equal(res._status, 200);
+    assert.equal(res._body.success, true);
+    assert.equal(res._body.instance.enabled, true);
   });
 });
 

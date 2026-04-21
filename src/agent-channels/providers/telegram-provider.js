@@ -213,7 +213,7 @@ export class TelegramChannelProvider {
       const message = update.message;
       return createNormalizedChannelMessage({
         channel: 'telegram',
-        accountId: 'default',
+        accountId: this.instanceId || 'default',
         deliveryMode: 'polling',
         externalMessageId: String(message.message_id || ''),
         externalConversationId: String(message.chat?.id || ''),
@@ -229,7 +229,7 @@ export class TelegramChannelProvider {
       const callback = update.callback_query;
       return createNormalizedChannelMessage({
         channel: 'telegram',
-        accountId: 'default',
+        accountId: this.instanceId || 'default',
         deliveryMode: 'polling',
         externalMessageId: String(callback.id || ''),
         externalConversationId: String(callback.message?.chat?.id || ''),

@@ -201,7 +201,7 @@ export class FeishuChannelProvider {
     if (eventType === 'im.message.receive_v1' && event?.message?.message_type === 'text') {
       return createNormalizedChannelMessage({
         channel: 'feishu',
-        accountId: 'default',
+        accountId: this.instanceId || 'default',
         deliveryMode: 'webhook',
         externalMessageId: String(event.message?.message_id || ''),
         externalConversationId: String(event.message?.chat_id || ''),

@@ -49,7 +49,9 @@ import {
   handleListAgentChannelProviders,
   handleGetAgentChannelCatalog,
   handleGetAgentChannelSettings,
+  handleCreateAgentChannelInstance,
   handleUpdateAgentChannelSettings,
+  handleDeleteAgentChannelInstance,
   handleRefreshAgentChannels,
   handleFeishuChannelWebhook,
   handleDingTalkChannelWebhook,
@@ -324,7 +326,9 @@ export function registerApiRoutes(app, { port }) {
   app.get('/api/agent-channels/providers', handleListAgentChannelProviders);
   app.get('/api/agent-channels/catalog', handleGetAgentChannelCatalog);
   app.get('/api/agent-channels/settings', handleGetAgentChannelSettings);
-  app.put('/api/agent-channels/settings/:channel', handleUpdateAgentChannelSettings);
+  app.post('/api/agent-channels/settings/:channel', handleCreateAgentChannelInstance);
+  app.put('/api/agent-channels/settings/:channel/:instanceId', handleUpdateAgentChannelSettings);
+  app.delete('/api/agent-channels/settings/:channel/:instanceId', handleDeleteAgentChannelInstance);
   app.post('/api/agent-channels/refresh', handleRefreshAgentChannels);
   app.post('/api/agent-channels/feishu/webhook', handleFeishuChannelWebhook);
   app.post('/api/agent-channels/dingtalk/webhook', handleDingTalkChannelWebhook);

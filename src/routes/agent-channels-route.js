@@ -212,15 +212,55 @@ export function handleGetAgentChannelSettings(_req, res) {
   });
 }
 
-export async function handleUpdateAgentChannelSettings(req, res) {
+export async function handleCreateAgentChannelInstance(req, res) {
   try {
     const channelId = String(req.params.channel || '');
     if (!channelId) {
       return res.status(400).json({ success: false, error: 'channel is required' });
     }
 
+    const instance = agentChannelManager.createChannelInstance(channelId, req.body || {});
+    await agentChannelManager.refresh();
+
+    return res.json({
+      success: true,
+      instance
+    });
+  } catch (error) {
+    return res.status(400).json({ success: false, error: error.message });
+  }
+}
+
+export async function handleUpdateAgentChannelSettings(req, res) {
+  try {
+    const channelId = String(req.params.channel || '');
+    const instanceId = String(req.params.instanceId || 'default');
+    if (!channelId) {
+      return res.status(400).json({ success: false, error: 'channel is required' });
+    }
+
     const patch = req.body || {};
-    const channel = agentChannelManager.updateChannelSettings(channelId, patch);
+    const instance = agentChannelManager.updateChannelInstanceSettings(channelId, instanceId, patch);
+    await agentChannelManager.refresh();
+
+    return res.json({
+      success: true,
+      instance
+    });
+  } catch (error) {
+    return res.status(400).json({ success: false, error: error.message });
+  }
+}
+
+export async function handleDeleteAgentChannelInstance(req, res) {
+  try {
+    const channelId = String(req.params.channel || '');
+    const instanceId = String(req.params.instanceId || '');
+    if (!channelId || !instanceId) {
+      return res.status(400).json({ success: false, error: 'channel and instanceId are required' });
+    }
+
+    const channel = agentChannelManager.removeChannelInstance(channelId, instanceId);
     await agentChannelManager.refresh();
 
     return res.json({
@@ -242,18 +282,22 @@ export async function handleRefreshAgentChannels(_req, res) {
 
 export async function handleFeishuChannelWebhook(req, res) {
   try {
-    const provider = agentChannelRegistry.get('feishu');
+    const settings = getServerSettings().channels?.feishu || {};
+    const requestedInstanceId = String(req.query.instanceId || req.headers['x-cligate-channel-instance'] || 'default');
+    const provider = agentChannelManager.getInstance('feishu', requestedInstanceId);
     if (!provider) {
-      return res.status(404).json({ success: false, error: 'feishu provider unavailable' });
+      return res.status(404).json({ success: false, error: 'feishu provider instance unavailable' });
     }
 
-    const settings = getServerSettings().channels?.feishu || {};
-    provider.settings = settings;
+    const instance = Array.isArray(settings.instances)
+      ? settings.instances.find((entry) => String(entry?.id || 'default') === requestedInstanceId)
+      : null;
+    provider.settings = instance || provider.settings || {};
     provider.router = agentChannelManager.router;
 
     const result = await provider.handleWebhook(req.body || {}, {
-      cwd: settings.cwd || '',
-      model: settings.model || ''
+      cwd: provider.settings?.cwd || '',
+      model: provider.settings?.model || ''
     });
 
     return res.status(result?.status || 200).json(result?.body || { success: true });
@@ -264,18 +308,22 @@ export async function handleFeishuChannelWebhook(req, res) {
 
 export async function handleDingTalkChannelWebhook(req, res) {
   try {
-    const provider = agentChannelRegistry.get('dingtalk');
+    const settings = getServerSettings().channels?.dingtalk || {};
+    const requestedInstanceId = String(req.query.instanceId || req.headers['x-cligate-channel-instance'] || 'default');
+    const provider = agentChannelManager.getInstance('dingtalk', requestedInstanceId);
     if (!provider) {
-      return res.status(404).json({ success: false, error: 'dingtalk provider unavailable' });
+      return res.status(404).json({ success: false, error: 'dingtalk provider instance unavailable' });
     }
 
-    const settings = getServerSettings().channels?.dingtalk || {};
-    provider.settings = settings;
+    const instance = Array.isArray(settings.instances)
+      ? settings.instances.find((entry) => String(entry?.id || 'default') === requestedInstanceId)
+      : null;
+    provider.settings = instance || provider.settings || {};
     provider.router = agentChannelManager.router;
 
     const result = await provider.handleWebhook(req.body || {}, {
-      cwd: settings.cwd || '',
-      model: settings.model || ''
+      cwd: provider.settings?.cwd || '',
+      model: provider.settings?.model || ''
     });
 
     return res.status(result?.status || 200).json(result?.body || { success: true });
@@ -390,7 +438,9 @@ export default {
   handleListAgentChannelProviders,
   handleGetAgentChannelCatalog,
   handleGetAgentChannelSettings,
+  handleCreateAgentChannelInstance,
   handleUpdateAgentChannelSettings,
+  handleDeleteAgentChannelInstance,
   handleRefreshAgentChannels,
   handleFeishuChannelWebhook,
   handleDingTalkChannelWebhook,

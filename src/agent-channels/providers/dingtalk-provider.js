@@ -460,7 +460,7 @@ export class DingTalkChannelProvider {
 
     return createNormalizedChannelMessage({
       channel: 'dingtalk',
-      accountId: 'default',
+      accountId: this.instanceId || 'default',
       deliveryMode: 'webhook',
       externalMessageId: String(payload?.msgId || payload?.messageId || payload?.eventId || ''),
       externalConversationId: conversationId,

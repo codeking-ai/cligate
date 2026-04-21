@@ -124,7 +124,7 @@ export class AgentChannelOutboundDispatcher {
 
     const session = this.runtimeSessionManager.getSession(event.sessionId);
     for (const conversation of conversations) {
-      const provider = this.registry.get(conversation.channel);
+      const provider = this.registry.get(conversation.channel, conversation.accountId);
       if (!provider?.sendMessage) {
         continue;
       }

@@ -79,12 +79,9 @@ document.addEventListener('alpine:init', () => {
         channelProviders: [],
         channelProvidersLoading: false,
         channelCatalog: [],
-        channelSettings: {
-            telegram: { enabled: false, mode: 'polling', botToken: '', pollingIntervalMs: 2000, defaultRuntimeProvider: 'codex', model: '', cwd: '', requirePairing: false },
-            feishu: { enabled: false, mode: 'websocket', appId: '', appSecret: '', encryptKey: '', verificationToken: '', defaultRuntimeProvider: 'codex', model: '', cwd: '', requirePairing: false },
-            dingtalk: { enabled: false, mode: 'stream', clientId: '', clientSecret: '', robotCode: '', signingSecret: '', defaultRuntimeProvider: 'codex', model: '', cwd: '', requirePairing: false }
-        },
-        channelSettingsSaving: { telegram: false, feishu: false, dingtalk: false },
+        channelSettings: {},
+        channelSettingsSaving: {},
+        channelInstanceExpanded: {},
         channelConversations: [],
         channelConversationsLoading: false,
         selectedChannelConversationId: '',
@@ -1472,6 +1469,108 @@ document.addEventListener('alpine:init', () => {
             if (section === 'runtime') return 'Runtime';
             if (section === 'security') return 'Security';
             return 'Advanced';
+        },
+
+        defaultChannelFieldValue(field) {
+            if (field?.key === 'id') return 'default';
+            if (field?.key === 'label') return 'Default';
+            if (field?.type === 'boolean') return false;
+            if (field?.type === 'number') return 0;
+            if (field?.type === 'select' && Array.isArray(field.options) && field.options[0]) return field.options[0].value;
+            if (field?.type === 'runtime-provider') return this.agentRuntimeProviders?.[0]?.id || 'codex';
+            return '';
+        },
+
+        buildDefaultChannelInstance(provider, overrides = {}) {
+            const instance = {
+                id: 'default',
+                label: 'Default'
+            };
+            for (const field of (provider?.configFields || [])) {
+                instance[field.key] = this.defaultChannelFieldValue(field);
+            }
+            return {
+                ...instance,
+                ...overrides
+            };
+        },
+
+        ensureChannelProviderState(provider) {
+            if (!provider?.id) return;
+            if (!this.channelSettings[provider.id]) {
+                this.channelSettings[provider.id] = { instances: [this.buildDefaultChannelInstance(provider)] };
+            }
+            if (!Array.isArray(this.channelSettings[provider.id].instances) || this.channelSettings[provider.id].instances.length === 0) {
+                this.channelSettings[provider.id].instances = [this.buildDefaultChannelInstance(provider)];
+            }
+            for (const instance of this.channelSettings[provider.id].instances) {
+                if (!instance.id) instance.id = 'default';
+                if (!instance.label) instance.label = instance.id === 'default' ? 'Default' : instance.id;
+                for (const field of (provider.configFields || [])) {
+                    if (instance[field.key] === undefined) {
+                        instance[field.key] = this.defaultChannelFieldValue(field);
+                    }
+                }
+            }
+        },
+
+        channelProviderInstances(provider) {
+            this.ensureChannelProviderState(provider);
+            return this.channelSettings[provider?.id]?.instances || [];
+        },
+
+        channelProviderStatusEntries(provider) {
+            return (this.channelProviders || []).filter((entry) => entry.providerId === provider?.id || entry.id === provider?.id);
+        },
+
+        channelInstanceStatus(providerId, instanceId) {
+            return (this.channelProviders || []).find((entry) => (
+                (entry.providerId || entry.id) === providerId
+                && String(entry.instanceId || 'default') === String(instanceId || 'default')
+            )) || null;
+        },
+
+        channelInstanceKey(providerId, instanceId) {
+            return `${String(providerId || '')}:${String(instanceId || 'default')}`;
+        },
+
+        isChannelInstanceExpanded(providerId, instanceId) {
+            return this.channelInstanceExpanded[this.channelInstanceKey(providerId, instanceId)] === true;
+        },
+
+        toggleChannelInstanceExpanded(providerId, instanceId) {
+            const key = this.channelInstanceKey(providerId, instanceId);
+            this.channelInstanceExpanded[key] = !this.channelInstanceExpanded[key];
+        },
+
+        channelInstanceSummary(provider, instance) {
+            const status = this.channelInstanceStatus(provider?.id, instance?.id);
+            const parts = [];
+            if (instance?.mode) parts.push(instance.mode);
+            if (instance?.enabled === true) {
+                parts.push(this.t('channelStatusEnabled'));
+            } else {
+                parts.push(this.t('channelStatusDisabled'));
+            }
+            if (instance?.defaultRuntimeProvider) {
+                parts.push(this.chatRuntimeProviderLabel(instance.defaultRuntimeProvider));
+            }
+            if (instance?.model) {
+                parts.push(instance.model);
+            }
+            if (status?.status?.lastError) {
+                parts.push(this.t('channelStatusError'));
+            }
+            return parts.filter(Boolean).join(' · ');
+        },
+
+        channelWebhookHint(providerId, instance) {
+            if (!instance || instance.mode !== 'webhook') return '';
+            if (providerId === 'feishu' || providerId === 'dingtalk') {
+                const params = new URLSearchParams({ instanceId: String(instance.id || 'default') });
+                return `/api/agent-channels/${providerId}/webhook?${params.toString()}`;
+            }
+            return '';
         },
 
         channelConversationStatusClass(conversation) {
@@ -3008,25 +3107,7 @@ document.addEventListener('alpine:init', () => {
             if (ok && Array.isArray(data?.providers)) {
                 this.channelCatalog = data.providers;
                 for (const provider of this.channelCatalog) {
-                    if (!this.channelSettings[provider.id]) {
-                        this.channelSettings[provider.id] = {};
-                    }
-                    for (const field of (provider.configFields || [])) {
-                        if (this.channelSettings[provider.id][field.key] === undefined) {
-                            if (field.type === 'boolean') {
-                                this.channelSettings[provider.id][field.key] = false;
-                            } else if (field.type === 'number') {
-                                this.channelSettings[provider.id][field.key] = 0;
-                            } else if (field.type === 'select' && Array.isArray(field.options) && field.options[0]) {
-                                this.channelSettings[provider.id][field.key] = field.options[0].value;
-                            } else {
-                                this.channelSettings[provider.id][field.key] = '';
-                            }
-                        }
-                    }
-                    if (this.channelSettingsSaving[provider.id] === undefined) {
-                        this.channelSettingsSaving[provider.id] = false;
-                    }
+                    this.ensureChannelProviderState(provider);
                 }
             }
         },
@@ -3035,14 +3116,18 @@ document.addEventListener('alpine:init', () => {
             const { ok, data } = await this.api('/api/agent-channels/settings');
             if (!ok || !data?.channels) return;
 
-            const next = { ...this.channelSettings };
+            const next = {};
             for (const [channelId, value] of Object.entries(data.channels || {})) {
                 next[channelId] = {
-                    ...(next[channelId] || {}),
-                    ...(value || {})
+                    instances: Array.isArray(value?.instances)
+                        ? value.instances.map((instance) => ({ ...instance }))
+                        : []
                 };
             }
             this.channelSettings = next;
+            for (const provider of this.channelCatalog) {
+                this.ensureChannelProviderState(provider);
+            }
         },
 
         async loadChannelConversations(options = {}) {
@@ -3209,26 +3294,75 @@ document.addEventListener('alpine:init', () => {
             this.channelProvidersLoading = false;
         },
 
-        async saveChannelSettings(channelId) {
-            if (!channelId || !this.channelSettings[channelId]) return;
-            this.channelSettingsSaving[channelId] = true;
-            const payload = { ...this.channelSettings[channelId] };
-            const { ok, data } = await this.api(`/api/agent-channels/settings/${encodeURIComponent(channelId)}`, {
+        async addChannelInstance(provider) {
+            if (!provider?.id) return;
+            const payload = this.buildDefaultChannelInstance(provider, {
+                id: `${provider.id}-${Date.now().toString(36).slice(-4)}`,
+                label: `Instance ${(this.channelProviderInstances(provider).length || 0) + 1}`,
+                enabled: false
+            });
+            const { ok, data } = await this.api(`/api/agent-channels/settings/${encodeURIComponent(provider.id)}`, {
+                method: 'POST',
+                body: JSON.stringify(payload)
+            });
+
+            if (ok && data?.instance) {
+                this.ensureChannelProviderState(provider);
+                this.channelSettings[provider.id].instances.push({ ...data.instance });
+                this.showToast(this.t('channelSettingsSaved', provider.id), 'success');
+                await this.loadChannelProviders();
+            } else {
+                this.showToast(data?.error || this.t('requestFailed'), 'error');
+            }
+        },
+
+        async removeChannelInstance(provider, instance) {
+            if (!provider?.id || !instance?.id) return;
+            const { ok, data } = await this.api(`/api/agent-channels/settings/${encodeURIComponent(provider.id)}/${encodeURIComponent(instance.id)}`, {
+                method: 'DELETE'
+            });
+
+            if (ok) {
+                this.channelSettings[provider.id] = {
+                    instances: Array.isArray(data?.channel?.instances)
+                        ? data.channel.instances.map((entry) => ({ ...entry }))
+                        : this.channelProviderInstances(provider).filter((entry) => entry.id !== instance.id)
+                };
+                this.showToast(this.t('channelSettingsSaved', provider.id), 'success');
+                await this.loadChannelProviders();
+            } else {
+                this.showToast(data?.error || this.t('requestFailed'), 'error');
+            }
+        },
+
+        async saveChannelSettings(channelId, instanceId) {
+            if (!channelId || !instanceId) return;
+            const providerState = this.channelSettings[channelId];
+            if (!providerState || !Array.isArray(providerState.instances)) return;
+            const target = providerState.instances.find((instance) => String(instance.id || '') === String(instanceId));
+            if (!target) return;
+            const saveKey = `${channelId}:${instanceId}`;
+            this.channelSettingsSaving[saveKey] = true;
+            const payload = { ...target };
+            const { ok, data } = await this.api(`/api/agent-channels/settings/${encodeURIComponent(channelId)}/${encodeURIComponent(instanceId)}`, {
                 method: 'PUT',
                 body: JSON.stringify(payload)
             });
 
-            if (ok && data?.channel) {
-                this.channelSettings[channelId] = {
-                    ...this.channelSettings[channelId],
-                    ...data.channel
-                };
+            if (ok && data?.instance) {
+                const index = providerState.instances.findIndex((instance) => String(instance.id || '') === String(instanceId));
+                if (index >= 0) {
+                    providerState.instances.splice(index, 1, {
+                        ...providerState.instances[index],
+                        ...data.instance
+                    });
+                }
                 await this.loadChannelProviders();
                 this.showToast(this.t('channelSettingsSaved', channelId), 'success');
             } else {
                 this.showToast(data?.error || this.t('channelSettingsSaveFailed', channelId), 'error');
             }
-            this.channelSettingsSaving[channelId] = false;
+            this.channelSettingsSaving[saveKey] = false;
         },
 
         async approveChannelPairing(conversation) {

@@ -59,20 +59,62 @@ const DEFAULT_SETTINGS = {
     }
 };
 
+function slugifyChannelInstanceId(value, fallback = 'default') {
+    const normalized = String(value || '')
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, '');
+    return normalized || fallback;
+}
+
+function clone(value) {
+    return JSON.parse(JSON.stringify(value));
+}
+
+function buildDefaultChannelInstance(channelId, overrides = {}, index = 0) {
+    const base = {
+        id: index === 0 ? 'default' : `${slugifyChannelInstanceId(channelId, channelId)}-${index + 1}`,
+        label: index === 0 ? 'Default' : `Instance ${index + 1}`,
+        ...clone(DEFAULT_SETTINGS.channels[channelId] || {}),
+        ...(overrides || {})
+    };
+
+    return {
+        ...base,
+        id: slugifyChannelInstanceId(base.id, index === 0 ? 'default' : `${slugifyChannelInstanceId(channelId, channelId)}-${index + 1}`),
+        label: String(base.label || (index === 0 ? 'Default' : `Instance ${index + 1}`))
+    };
+}
+
+function normalizeChannelProviderConfig(channelId, config = {}) {
+    const base = clone(DEFAULT_SETTINGS.channels[channelId] || {});
+    const current = config && typeof config === 'object' ? config : {};
+    const instancesSource = Array.isArray(current.instances)
+        ? current.instances
+        : [current];
+
+    const normalizedInstances = instancesSource.map((instance, index) =>
+        buildDefaultChannelInstance(channelId, {
+            ...base,
+            ...(instance || {})
+        }, index)
+    );
+
+    if (normalizedInstances.length === 0) {
+        normalizedInstances.push(buildDefaultChannelInstance(channelId, base, 0));
+    }
+
+    return {
+        instances: normalizedInstances
+    };
+}
+
 function normalizeChannelsConfig(channels = {}) {
     return {
-        telegram: {
-            ...DEFAULT_SETTINGS.channels.telegram,
-            ...(channels.telegram || {})
-        },
-        feishu: {
-            ...DEFAULT_SETTINGS.channels.feishu,
-            ...(channels.feishu || {})
-        },
-        dingtalk: {
-            ...DEFAULT_SETTINGS.channels.dingtalk,
-            ...(channels.dingtalk || {})
-        }
+        telegram: normalizeChannelProviderConfig('telegram', channels.telegram),
+        feishu: normalizeChannelProviderConfig('feishu', channels.feishu),
+        dingtalk: normalizeChannelProviderConfig('dingtalk', channels.dingtalk)
     };
 }
 
