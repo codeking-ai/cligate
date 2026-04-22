@@ -109,245 +109,11 @@ function getPreferredConversationProvider(conversation, session = null, defaultR
   return String(session?.provider || brief?.provider || defaultRuntimeProvider || 'codex');
 }
 
-function isStatusInquiry(input) {
-  const text = String(input || '').trim().toLowerCase();
-  return /(进展|状态|结果|完成了吗|做到哪|现在到哪|现在怎么样|汇报一下|目前如何|什么情况|status|progress|update|done\??|result)/i.test(text);
-}
-
-function isWrapUpInquiry(input) {
-  const text = String(input || '').trim().toLowerCase();
-  return /(总结一下|总结下|收尾|收个尾|整理一下|整理下|归纳一下|列一下结果|给我结果|给我总结|总结当前产出|wrap up|summarize|summary|recap|final status)/i.test(text);
-}
-
-function hasExecutionIntent(input) {
-  const text = String(input || '').trim().toLowerCase();
-  if (!text) return false;
-
-  // When a message mixes status wording with explicit implementation/debugging asks,
-  // prefer forwarding it to the active runtime instead of answering locally.
-  const directTaskPattern = /(请重新查看代码|重新查看代码|查看代码|检查代码|重新检查|请进行修复|进行修复|继续修复|帮我修复|请修复|修一下|改一下|修改代码|实现一下|排查一下|定位一下|处理一下|提交并推送|提交代码|推送到git|fix|debug|investigate|inspect the code|check the code|review the code|modify the code|implement the fix)/i;
-  if (directTaskPattern.test(text)) {
-    return true;
-  }
-
-  const requestCuePattern = /^(请|帮我|麻烦|继续|重新|再|并|然后|直接|先)\b/i;
-  const actionVerbPattern = /(查看|检查|修复|修改|实现|排查|定位|处理|提交|推送|完善|优化|重构|新增|删除|更新|fix|debug|investigate|inspect|review|modify|implement|update)/i;
-  return requestCuePattern.test(text) && actionVerbPattern.test(text);
-}
-
-function detectProviderSwitchIntent(input) {
-  const text = String(input || '').trim();
-  if (!text) return null;
-  if (/(切到|改用|换成|使用|用)\s*claude\s*code/i.test(text) || /(切到|改用|换成|使用|用)\s*claude/i.test(text)) {
-    return 'claude-code';
-  }
-  if (/(切到|改用|换成|使用|用)\s*codex/i.test(text)) {
-    return 'codex';
-  }
-  if (/^(use|switch to)\s+claude(?:\s*code)?/i.test(text)) {
-    return 'claude-code';
-  }
-  if (/^(use|switch to)\s+codex/i.test(text)) {
-    return 'codex';
-  }
-  return null;
-}
-
 function isPreferenceMemoryIntent(input) {
   const text = String(input || '').trim();
   if (!text) return false;
   return /(记住|以后|后续|默认|总是|prefer|always|default)/i.test(text)
     && /(中文|英文|claude|codex|简洁|详细|最小改动|concise|detailed|minimal)/i.test(text);
-}
-
-function parseSupervisorStartIntent(input, defaultProvider = 'codex') {
-  const text = String(input || '').trim();
-  if (!text) return null;
-
-  const patterns = [
-    /^(开始新任务|新任务|重新开始|新开一个任务|新建任务)\s*[:：]?\s*(.+)$/i,
-    /^(另外再做一个|另外做一个|单独做一个|另起一个|再开一个新任务)\s*[:：]?\s*(.+)$/i,
-    /^(start a new task|new task|start over)\s*[:：]?\s*(.+)$/i
-  ];
-
-  for (const pattern of patterns) {
-    const match = text.match(pattern);
-    if (match) {
-      return {
-        provider: defaultProvider,
-        input: String(match[2] || '').trim()
-      };
-    }
-  }
-
-  return null;
-}
-
-function parseSupervisorRelatedTaskIntent(input, defaultProvider = 'codex') {
-  const text = String(input || '').trim();
-  if (!text) return null;
-
-  const patterns = [
-    /^(基于刚才那个再做一个|基于刚才的结果再做一个|在刚才那个基础上再做一个|基于上一个结果再做一个)\s*[:：]?\s*(.+)$/i,
-    /^(based on (?:that|the previous result),?\s*(?:also )?(?:make|create|do) another)\s*[:：]?\s*(.+)$/i
-  ];
-
-  for (const pattern of patterns) {
-    const match = text.match(pattern);
-    if (match) {
-      return {
-        provider: defaultProvider,
-        input: String(match[2] || '').trim()
-      };
-    }
-  }
-
-  return null;
-}
-
-function detectTaskRevisionIntent(input) {
-  const text = String(input || '').trim();
-  if (!text) return null;
-
-  const patterns = [
-    /^(再加一个|顺便加上|顺便补一个|另外补一个|把.+改成|改成.+|补一个)\s*(.+)?$/i,
-    /^(also add|add another|update it to|change it to|modify it to)\s+(.+)$/i
-  ];
-
-  for (const pattern of patterns) {
-    if (pattern.test(text)) {
-      return text;
-    }
-  }
-
-  return null;
-}
-
-function parseSupervisorContinuationIntent(input, defaultProvider = 'codex') {
-  const text = String(input || '').trim();
-  if (!text) return null;
-
-  const patterns = [
-    /^(继续刚才那个|接着刚才那个|按刚才那个继续|延续刚才那个|在刚才那个基础上继续|在这个基础上继续)\s*[:：]?\s*(.+)$/i,
-    /^(continue the previous task|continue from the previous task|carry on from that)\s*[:：]?\s*(.+)$/i
-  ];
-
-  for (const pattern of patterns) {
-    const match = text.match(pattern);
-    if (match) {
-      return {
-        provider: defaultProvider,
-        input: String(match[2] || '').trim()
-      };
-    }
-  }
-
-  return null;
-}
-
-function detectRetryIntent(input) {
-  const text = String(input || '').trim();
-  if (!text) return false;
-  return /^(重试刚才那个|再试一次|重来一次|retry(?: that| the previous task)?|try again)$/i.test(text);
-}
-
-function detectReturnToSourceIntent(input) {
-  const text = String(input || '').trim();
-  if (!text) return false;
-  return /^(回到上一个任务|回到刚才那个任务|返回上一个任务|返回刚才那个任务|go back to the previous task|return to the previous task)$/i.test(text);
-}
-
-function buildRememberedFollowUpInput(brief, input) {
-  const summary = String(brief?.summary || brief?.result || brief?.error || '').trim();
-  const lines = [
-    'Continue from the remembered conversation context below.',
-    brief?.title ? `Previous task: ${brief.title}` : null,
-    brief?.providerLabel ? `Previous provider: ${brief.providerLabel}` : null,
-    brief?.status ? `Previous status: ${brief.status}` : null,
-    summary ? `Previous summary: ${summary}` : null,
-    `Follow-up request: ${String(input || '').trim()}`
-  ].filter(Boolean);
-  return lines.join('\n');
-}
-
-function buildRetryTaskInput(brief) {
-  const summary = String(brief?.summary || brief?.result || '').trim();
-  const error = String(brief?.error || '').trim();
-  return [
-    'Retry the previous task using the same provider.',
-    brief?.title ? `Previous task: ${brief.title}` : null,
-    brief?.status ? `Previous status: ${brief.status}` : null,
-    error ? `Previous error: ${error}` : null,
-    summary ? `Previous summary: ${summary}` : null,
-    'Retry the task and continue from the latest known context if possible.'
-  ].filter(Boolean).join('\n');
-}
-
-function buildReturnToSourceInput(brief) {
-  return [
-    'Return to the earlier remembered source task.',
-    brief?.sourceTitle ? `Source task: ${brief.sourceTitle}` : null,
-    brief?.sourceStatus ? `Source status: ${brief.sourceStatus}` : null,
-    brief?.title ? `Most recent derived task: ${brief.title}` : null,
-    brief?.error ? `Recent failure: ${brief.error}` : null,
-    'Continue with the earlier source task and treat the failed derived task as context only.'
-  ].filter(Boolean).join('\n');
-}
-
-function buildSupervisorContext({
-  kind,
-  brief = null,
-  title = '',
-  input = ''
-} = {}) {
-  const cleanTitle = String(title || input || '').trim();
-  const base = {
-    kind: String(kind || '').trim() || 'direct',
-    title: cleanTitle,
-    sourceTitle: String(brief?.title || '').trim(),
-    sourceProvider: String(brief?.provider || '').trim(),
-    sourceStatus: String(brief?.status || '').trim()
-  };
-
-  if (!brief || brief.kind === 'empty') {
-    return {
-      ...base,
-      summary: ''
-    };
-  }
-
-  if (base.kind === 'related_sibling') {
-    return {
-      ...base,
-      summary: `Started from remembered task "${base.sourceTitle}" as a related sibling task.`
-    };
-  }
-
-  if (base.kind === 'remembered_follow_up') {
-    return {
-      ...base,
-      summary: `Continuing from remembered task "${base.sourceTitle}" with a follow-up request.`
-    };
-  }
-
-  if (base.kind === 'retry_task') {
-    return {
-      ...base,
-      summary: `Retrying remembered task "${base.sourceTitle || base.title}".`
-    };
-  }
-
-  if (base.kind === 'return_to_source') {
-    return {
-      ...base,
-      summary: `Returning to remembered source task "${base.sourceTitle}".`
-    };
-  }
-
-  return {
-    ...base,
-    summary: ''
-  };
 }
 
 function buildSupervisorStatusResponse(conversation, session = null) {
@@ -372,31 +138,6 @@ function buildSupervisorStatusResponse(conversation, session = null) {
   return {
     type: 'command_error',
     message: 'No remembered task status is available for this conversation yet.'
-  };
-}
-
-function buildSupervisorWrapUpResponse(conversation, session = null) {
-  const brief = getSupervisorBrief(conversation, session);
-
-  if (brief.kind !== 'empty') {
-    return {
-      type: 'supervisor_status',
-      message: [
-        `${brief.kind === 'current' ? 'Current task summary' : 'Task summary'}: ${brief.title || 'Untitled task'}`,
-        `Provider: ${brief.providerLabel || providerLabel(brief.provider)}`,
-        `Status: ${brief.status || 'unknown'}`,
-        brief.summary ? `What is done: ${brief.summary}` : null,
-        brief.result ? `Output: ${String(brief.result).slice(0, 400)}` : null,
-        brief.error ? `Failure reason: ${brief.error}` : null,
-        brief.waitingReason ? `Blocked on: ${brief.waitingReason}` : null,
-        brief.nextSuggestion ? `Suggested next step: ${brief.nextSuggestion}` : null
-      ].filter(Boolean).join('\n')
-    };
-  }
-
-  return {
-    type: 'command_error',
-    message: 'There is no remembered task summary for this conversation yet.'
   };
 }
 
@@ -547,14 +288,6 @@ export class AgentOrchestratorMessageService {
       rememberedBrief: supervisorBrief,
       defaultRuntimeProvider: getPreferredConversationProvider(conversation, activeSession, defaultRuntimeProvider)
     });
-    const inferredProviderSwitch = !parsed?.command ? detectProviderSwitchIntent(text) : null;
-    const inferredFreshTask = !parsed?.command ? parseSupervisorStartIntent(text, preferredProvider) : null;
-    const inferredRelatedTask = !parsed?.command ? parseSupervisorRelatedTaskIntent(text, preferredProvider) : null;
-    const inferredContinuation = !parsed?.command ? parseSupervisorContinuationIntent(text, preferredProvider) : null;
-    const inferredRevision = !parsed?.command ? detectTaskRevisionIntent(text) : null;
-    const inferredRetry = !parsed?.command ? detectRetryIntent(text) : false;
-    const inferredReturnToSource = !parsed?.command ? detectReturnToSourceIntent(text) : false;
-    const inferredExecutionIntent = !parsed?.command ? hasExecutionIntent(text) : false;
 
     if (!parsed?.command && !activeSessionId && conversation?.id && isPreferenceMemoryIntent(text)) {
       const savedPreferences = saveConversationPreferences(conversation, text, {
@@ -567,14 +300,6 @@ export class AgentOrchestratorMessageService {
           message: savedMessage
         };
       }
-    }
-
-    if (!parsed?.command && !inferredExecutionIntent && isWrapUpInquiry(text)) {
-      return buildSupervisorWrapUpResponse(conversation, activeSession);
-    }
-
-    if (!parsed?.command && !inferredExecutionIntent && isStatusInquiry(text)) {
-      return buildSupervisorStatusResponse(conversation, activeSession);
     }
 
     if (activeSessionId && pendingApprovalId && !parsed?.command) {
@@ -787,136 +512,6 @@ export class AgentOrchestratorMessageService {
       };
     }
 
-    if (inferredProviderSwitch) {
-      return {
-        type: 'command_error',
-        message: `To switch this conversation to ${providerLabel(inferredProviderSwitch)}, send /new ${inferredProviderSwitch === 'codex' ? 'cx' : 'cc'} <task>.`
-      };
-    }
-
-    if (inferredFreshTask) {
-      const session = await this.startRuntimeTask({
-        provider: inferredFreshTask.provider,
-        input: inferredFreshTask.input,
-        cwd,
-        model,
-        metadata
-      });
-
-      return {
-        type: 'runtime_started',
-        provider: inferredFreshTask.provider,
-        session,
-        startedFresh: true,
-        replacedSessionId: activeSessionId,
-        message: 'Started a fresh task from your new-task request.',
-        supervisorContext: buildSupervisorContext({
-          kind: 'fresh_task',
-          title: inferredFreshTask.input
-        })
-      };
-    }
-
-    if (inferredRelatedTask) {
-      const session = await this.startRuntimeTask({
-        provider: inferredRelatedTask.provider,
-        input: activeSessionId || supervisorBrief.kind === 'empty'
-          ? inferredRelatedTask.input
-          : buildRememberedFollowUpInput(supervisorBrief, inferredRelatedTask.input),
-        cwd,
-        model,
-        metadata
-      });
-
-      return {
-        type: 'runtime_started',
-        provider: inferredRelatedTask.provider,
-        session,
-        startedFresh: true,
-        replacedSessionId: activeSessionId,
-        message: 'Started a related sibling task based on your previous result.',
-        supervisorContext: buildSupervisorContext({
-          kind: 'related_sibling',
-          brief: supervisorBrief,
-          title: inferredRelatedTask.input
-        })
-      };
-    }
-
-    if (!activeSessionId && supervisorBrief.kind !== 'empty' && inferredRetry && supervisorBrief.status === 'failed') {
-      const session = await this.startRuntimeTask({
-        provider: preferredProvider,
-        input: buildRetryTaskInput(supervisorBrief),
-        cwd,
-        model,
-        metadata
-      });
-
-      return {
-        type: 'runtime_started',
-        provider: preferredProvider,
-        session,
-        startedFresh: true,
-        message: 'Started a retry from the remembered failed task.',
-        supervisorContext: buildSupervisorContext({
-          kind: 'retry_task',
-          brief: supervisorBrief,
-          title: supervisorBrief.title || text
-        })
-      };
-    }
-
-    if (!activeSessionId && supervisorBrief.kind !== 'empty' && inferredReturnToSource && supervisorBrief.sourceTitle) {
-      const provider = supervisorBrief.sourceProvider || preferredProvider;
-      const session = await this.startRuntimeTask({
-        provider,
-        input: buildReturnToSourceInput(supervisorBrief),
-        cwd,
-        model,
-        metadata
-      });
-
-      return {
-        type: 'runtime_started',
-        provider,
-        session,
-        startedFresh: true,
-        message: 'Returned to the remembered source task.',
-        supervisorContext: buildSupervisorContext({
-          kind: 'return_to_source',
-          brief: supervisorBrief,
-          title: supervisorBrief.sourceTitle
-        })
-      };
-    }
-
-    if (!activeSessionId && supervisorBrief.kind !== 'empty' && (inferredContinuation || inferredRevision)) {
-      const followUpTitle = inferredContinuation?.input || text;
-      const session = await this.startRuntimeTask({
-        provider: preferredProvider,
-        input: buildRememberedFollowUpInput(
-          supervisorBrief,
-          followUpTitle
-        ),
-        cwd,
-        model,
-        metadata
-      });
-
-      return {
-        type: 'runtime_started',
-        provider: preferredProvider,
-        session,
-        startedFresh: true,
-        message: 'Started a follow-up task from the remembered conversation context.',
-        supervisorContext: buildSupervisorContext({
-          kind: 'remembered_follow_up',
-          brief: supervisorBrief,
-          title: followUpTitle
-        })
-      };
-    }
-
     if (activeSessionId) {
       if (isSessionBusy(activeSession)) {
         return buildBusyResponse(activeSession, conversation);
@@ -927,10 +522,7 @@ export class AgentOrchestratorMessageService {
       });
       return {
         type: 'runtime_continued',
-        session,
-        message: inferredRevision
-          ? 'I am treating this as an update to the current task and passing it to the active runtime.'
-          : undefined
+        session
       };
     }
 

@@ -785,7 +785,7 @@ test('AgentOrchestratorMessageService returns a friendly busy message while the 
   assert.match(busyResult.message, /permission decision|need your answer|working on the current task/i);
 });
 
-test('AgentOrchestratorMessageService answers natural-language status queries from conversation task memory', async () => {
+test('AgentOrchestratorMessageService starts a runtime for natural-language messages without an active session', async () => {
   const runtimeSessionManager = createRuntimeManager();
   const service = new AgentOrchestratorMessageService({ runtimeSessionManager });
 
@@ -798,28 +798,26 @@ test('AgentOrchestratorMessageService answers natural-language status queries fr
             current: {
               provider: 'claude-code',
               title: 'Create demo page',
-              status: 'waiting_approval',
-              pendingApprovalTitle: 'Claude Code wants to use Bash',
-              summary: 'Created the folder and is about to write files.'
+              status: 'waiting_approval'
             }
           }
         }
       }
-    }
+    },
+    defaultRuntimeProvider: 'codex'
   });
 
-  assert.equal(result.type, 'supervisor_status');
-  assert.match(result.message, /Create demo page/);
-  assert.match(result.message, /waiting_approval/i);
-  assert.match(result.message, /Claude Code wants to use Bash/);
+  assert.equal(result.type, 'runtime_started');
+  assert.equal(result.provider, 'codex');
+  assert.equal(result.session.provider, 'codex');
 });
 
-test('AgentOrchestratorMessageService prefers structured supervisor brief for status replies', async () => {
+test('AgentOrchestratorMessageService keeps explicit /status handling for structured supervisor status replies', async () => {
   const runtimeSessionManager = createRuntimeManager();
   const service = new AgentOrchestratorMessageService({ runtimeSessionManager });
 
   const result = await service.routeUserMessage({
-    message: { text: '进展如何' },
+    message: { text: '/status' },
     conversation: {
       metadata: {
         supervisor: {
@@ -840,39 +838,21 @@ test('AgentOrchestratorMessageService prefers structured supervisor brief for st
     }
   });
 
-  assert.equal(result.type, 'supervisor_status');
-  assert.match(result.message, /Build settings page/);
-  assert.match(result.message, /waiting_approval/i);
-  assert.match(result.message, /Write D:\\tmp\\settings\.html/);
+  assert.equal(result.type, 'runtime_status');
+  assert.equal(result.session, null);
 });
 
-test('AgentOrchestratorMessageService answers wrap-up requests from remembered task context', async () => {
+test('AgentOrchestratorMessageService keeps explicit /status available without starting a runtime', async () => {
   const runtimeSessionManager = createRuntimeManager();
   const service = new AgentOrchestratorMessageService({ runtimeSessionManager });
 
   const result = await service.routeUserMessage({
-    message: { text: '总结一下' },
-    conversation: {
-      metadata: {
-        supervisor: {
-          taskMemory: {
-            current: {
-              provider: 'codex',
-              title: 'Build login page',
-              status: 'completed',
-              summary: 'Created the HTML page and verified the output file.',
-              result: 'The file is available at D:\\tmp\\login.html'
-            }
-          }
-        }
-      }
-    }
+    message: { text: '/status' },
+    conversation: null
   });
 
-  assert.equal(result.type, 'supervisor_status');
-  assert.match(result.message, /Build login page/);
-  assert.match(result.message, /Created the HTML page/);
-  assert.match(result.message, /D:\\tmp\\login\.html/);
+  assert.equal(result.type, 'command_error');
+  assert.match(String(result.message || ''), /No remembered task status is available/i);
 });
 
 test('AgentOrchestratorMessageService forwards mixed status and fix requests to the active runtime', async () => {
@@ -914,7 +894,7 @@ test('AgentOrchestratorMessageService forwards mixed status and fix requests to 
   assert.equal(result.session.turnCount, 2);
 });
 
-test('AgentOrchestratorMessageService treats high-confidence fresh-task phrasing as a new task', async () => {
+test('AgentOrchestratorMessageService continues the active runtime for fresh-task phrasing unless a command is used', async () => {
   const runtimeSessionManager = createRuntimeManager();
   const service = new AgentOrchestratorMessageService({ runtimeSessionManager });
 
@@ -923,20 +903,19 @@ test('AgentOrchestratorMessageService treats high-confidence fresh-task phrasing
     conversation: null
   });
 
-  const fresh = await service.routeUserMessage({
+  const continued = await service.routeUserMessage({
     message: { text: '开始新任务：写一个新的说明文档' },
     conversation: {
       activeRuntimeSessionId: started.session.id
     }
   });
 
-  assert.equal(fresh.type, 'runtime_started');
-  assert.equal(fresh.startedFresh, true);
-  assert.equal(fresh.replacedSessionId, started.session.id);
-  assert.notEqual(fresh.session.id, started.session.id);
+  assert.equal(continued.type, 'runtime_continued');
+  assert.equal(continued.session.id, started.session.id);
+  assert.equal(continued.session.turnCount, 2);
 });
 
-test('AgentOrchestratorMessageService treats sibling-task phrasing as a fresh task', async () => {
+test('AgentOrchestratorMessageService continues the active runtime for sibling-task phrasing unless a command is used', async () => {
   const runtimeSessionManager = createRuntimeManager();
   const service = new AgentOrchestratorMessageService({ runtimeSessionManager });
 
@@ -945,20 +924,19 @@ test('AgentOrchestratorMessageService treats sibling-task phrasing as a fresh ta
     conversation: null
   });
 
-  const fresh = await service.routeUserMessage({
+  const continued = await service.routeUserMessage({
     message: { text: '另外再做一个：生成部署说明' },
     conversation: {
       activeRuntimeSessionId: started.session.id
     }
   });
 
-  assert.equal(fresh.type, 'runtime_started');
-  assert.equal(fresh.startedFresh, true);
-  assert.equal(fresh.replacedSessionId, started.session.id);
-  assert.notEqual(fresh.session.id, started.session.id);
+  assert.equal(continued.type, 'runtime_continued');
+  assert.equal(continued.session.id, started.session.id);
+  assert.equal(continued.session.turnCount, 2);
 });
 
-test('AgentOrchestratorMessageService treats related-task phrasing as a fresh sibling task', async () => {
+test('AgentOrchestratorMessageService continues the active runtime for related-task phrasing unless a command is used', async () => {
   const runtimeSessionManager = createRuntimeManager();
   const service = new AgentOrchestratorMessageService({ runtimeSessionManager });
 
@@ -967,20 +945,19 @@ test('AgentOrchestratorMessageService treats related-task phrasing as a fresh si
     conversation: null
   });
 
-  const fresh = await service.routeUserMessage({
+  const continued = await service.routeUserMessage({
     message: { text: '基于刚才那个再做一个：注册页' },
     conversation: {
       activeRuntimeSessionId: started.session.id
     }
   });
 
-  assert.equal(fresh.type, 'runtime_started');
-  assert.equal(fresh.startedFresh, true);
-  assert.match(String(fresh.message || ''), /related sibling task/i);
-  assert.notEqual(fresh.session.id, started.session.id);
+  assert.equal(continued.type, 'runtime_continued');
+  assert.equal(continued.session.id, started.session.id);
+  assert.equal(continued.session.turnCount, 2);
 });
 
-test('AgentOrchestratorMessageService treats revision phrasing as an update to the current task', async () => {
+test('AgentOrchestratorMessageService continues revision phrasing to the current task', async () => {
   const runtimeSessionManager = createRuntimeManager();
   const service = new AgentOrchestratorMessageService({ runtimeSessionManager });
 
@@ -997,11 +974,10 @@ test('AgentOrchestratorMessageService treats revision phrasing as an update to t
   });
 
   assert.equal(continued.type, 'runtime_continued');
-  assert.match(String(continued.message || ''), /update to the current task/i);
   assert.equal(continued.session.id, started.session.id);
 });
 
-test('AgentOrchestratorMessageService revives remembered task context for follow-up revisions without an active session', async () => {
+test('AgentOrchestratorMessageService starts the preferred provider for follow-up revisions without an active session', async () => {
   const runtimeSessionManager = createHybridRuntimeManager();
   const service = new AgentOrchestratorMessageService({ runtimeSessionManager });
 
@@ -1036,10 +1012,9 @@ test('AgentOrchestratorMessageService revives remembered task context for follow
   assert.equal(followUp.type, 'runtime_started');
   assert.equal(followUp.provider, 'claude-code');
   assert.equal(followUp.startedFresh, true);
-  assert.match(String(followUp.message || ''), /remembered conversation context/i);
 });
 
-test('AgentOrchestratorMessageService prefers remembered provider for related fresh tasks', async () => {
+test('AgentOrchestratorMessageService prefers remembered provider for new natural-language tasks', async () => {
   const runtimeSessionManager = createHybridRuntimeManager();
   const service = new AgentOrchestratorMessageService({ runtimeSessionManager });
 
@@ -1134,7 +1109,7 @@ test('AgentOrchestratorMessageService prefers conversation-saved provider for ne
   assert.equal(response.session.provider, 'claude-code');
 });
 
-test('AgentChannelRouter writes remembered follow-up context into current task memory', async () => {
+test('AgentChannelRouter keeps natural-language follow-up on the preferred provider without synthetic supervisor context', async () => {
   const runtimeSessionManager = createHybridRuntimeManager();
   const conversationStore = new AgentChannelConversationStore({
     configDir: createTempDir('cligate-agent-channels-remembered-followup-conv-')
@@ -1191,13 +1166,10 @@ test('AgentChannelRouter writes remembered follow-up context into current task m
   assert.equal(result.type, 'runtime_started');
   assert.equal(result.session.provider, 'claude-code');
   assert.equal(result.conversation.metadata?.supervisor?.taskMemory?.current?.title, '把按钮改成绿色');
-  assert.equal(result.conversation.metadata?.supervisor?.taskMemory?.current?.originKind, 'remembered_follow_up');
-  assert.equal(result.conversation.metadata?.supervisor?.taskMemory?.current?.sourceTitle, 'Create a login page');
-  assert.match(String(result.conversation.metadata?.supervisor?.brief?.summary || ''), /Continuing remembered task "Create a login page"/i);
-  assert.match(String(result.conversation.metadata?.supervisor?.brief?.nextSuggestion || ''), /wait for completion|status update|\/cancel/i);
+  assert.equal(result.conversation.metadata?.supervisor?.taskMemory?.current?.originKind, 'direct');
 });
 
-test('AgentChannelRouter writes related sibling origin into remembered task memory', async () => {
+test('AgentChannelRouter keeps related-task phrasing as direct runtime input in remembered conversations', async () => {
   const runtimeSessionManager = createHybridRuntimeManager();
   const conversationStore = new AgentChannelConversationStore({
     configDir: createTempDir('cligate-agent-channels-related-origin-conv-')
@@ -1252,14 +1224,11 @@ test('AgentChannelRouter writes related sibling origin into remembered task memo
 
   assert.equal(result.type, 'runtime_started');
   assert.equal(result.session.provider, 'claude-code');
-  assert.equal(result.conversation.metadata?.supervisor?.taskMemory?.current?.title, '注册页');
-  assert.equal(result.conversation.metadata?.supervisor?.taskMemory?.current?.originKind, 'related_sibling');
-  assert.equal(result.conversation.metadata?.supervisor?.taskMemory?.current?.sourceTitle, 'Create a login page');
-  assert.match(String(result.conversation.metadata?.supervisor?.brief?.summary || ''), /Derived from remembered task "Create a login page"/i);
-  assert.match(String(result.conversation.metadata?.supervisor?.brief?.nextSuggestion || ''), /wait for completion|status update|\/cancel/i);
+  assert.equal(result.conversation.metadata?.supervisor?.taskMemory?.current?.title, '基于刚才那个再做一个：注册页');
+  assert.equal(result.conversation.metadata?.supervisor?.taskMemory?.current?.originKind, 'direct');
 });
 
-test('AgentOrchestratorMessageService uses origin-aware next suggestions for remembered failures', async () => {
+test('AgentOrchestratorMessageService starts a runtime instead of intercepting remembered-failure status phrasing', async () => {
   const runtimeSessionManager = createRuntimeManager();
   const service = new AgentOrchestratorMessageService({ runtimeSessionManager });
 
@@ -1285,12 +1254,11 @@ test('AgentOrchestratorMessageService uses origin-aware next suggestions for rem
     }
   });
 
-  assert.equal(result.type, 'supervisor_status');
-  assert.match(String(result.message || ''), /retry this follow-up task/i);
-  assert.match(String(result.message || ''), /Create a login page/);
+  assert.equal(result.type, 'runtime_started');
+  assert.equal(result.provider, 'claude-code');
 });
 
-test('AgentOrchestratorMessageService retries a remembered failed task from natural language', async () => {
+test('AgentOrchestratorMessageService starts the preferred provider for retry phrasing without special interception', async () => {
   const runtimeSessionManager = createHybridRuntimeManager();
   const service = new AgentOrchestratorMessageService({ runtimeSessionManager });
 
@@ -1322,12 +1290,9 @@ test('AgentOrchestratorMessageService retries a remembered failed task from natu
 
   assert.equal(response.type, 'runtime_started');
   assert.equal(response.provider, 'claude-code');
-  assert.equal(response.supervisorContext?.kind, 'retry_task');
-  assert.equal(response.supervisorContext?.title, 'Polish login page');
-  assert.match(String(response.message || ''), /retry from the remembered failed task/i);
 });
 
-test('AgentOrchestratorMessageService can return to the remembered source task after a failed derived task', async () => {
+test('AgentOrchestratorMessageService starts the default remembered provider for return phrasing without special interception', async () => {
   const runtimeSessionManager = createHybridRuntimeManager();
   const service = new AgentOrchestratorMessageService({ runtimeSessionManager });
 
@@ -1358,13 +1323,10 @@ test('AgentOrchestratorMessageService can return to the remembered source task a
   });
 
   assert.equal(response.type, 'runtime_started');
-  assert.equal(response.provider, 'codex');
-  assert.equal(response.supervisorContext?.kind, 'return_to_source');
-  assert.equal(response.supervisorContext?.title, 'Create a login page');
-  assert.match(String(response.message || ''), /returned to the remembered source task/i);
+  assert.equal(response.provider, 'claude-code');
 });
 
-test('AgentOrchestratorMessageService keeps provider switching explicit when inferred from natural language', async () => {
+test('AgentOrchestratorMessageService forwards provider-switch phrasing to the active runtime unless a command is used', async () => {
   const runtimeSessionManager = createRuntimeManager();
   const service = new AgentOrchestratorMessageService({ runtimeSessionManager });
 
@@ -1380,8 +1342,8 @@ test('AgentOrchestratorMessageService keeps provider switching explicit when inf
     }
   });
 
-  assert.equal(response.type, 'command_error');
-  assert.match(response.message, /\/new cc/i);
+  assert.equal(response.type, 'runtime_continued');
+  assert.equal(response.session.id, started.session.id);
 });
 
 test('TelegramChannelProvider normalizes messages and callback approvals', () => {
