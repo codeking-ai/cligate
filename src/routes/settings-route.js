@@ -259,6 +259,64 @@ export function handleGetLocalModelRoutingEnabled(req, res) {
   });
 }
 
+export function handleGetAssistantAgentConfig(req, res) {
+  const settings = getServerSettings();
+  res.json({
+    success: true,
+    assistantAgent: settings.assistantAgent
+  });
+}
+
+function isBooleanRecord(value) {
+  return value && typeof value === 'object' && !Array.isArray(value);
+}
+
+export function handleSetAssistantAgentConfig(req, res) {
+  const { assistantAgent } = req.body || {};
+  if (!assistantAgent || typeof assistantAgent !== 'object' || Array.isArray(assistantAgent)) {
+    return res.status(400).json({
+      success: false,
+      error: 'assistantAgent is required and must be an object'
+    });
+  }
+
+  if (typeof assistantAgent.enabled !== 'boolean') {
+    return res.status(400).json({
+      success: false,
+      error: 'assistantAgent.enabled is required and must be a boolean'
+    });
+  }
+
+  if (!isBooleanRecord(assistantAgent.sources)) {
+    return res.status(400).json({
+      success: false,
+      error: 'assistantAgent.sources is required and must be an object'
+    });
+  }
+
+  const sourceKeys = [
+    'chatgptAccount',
+    'claudeAccount',
+    'anthropicApiKey',
+    'openaiApiKeyBridge',
+    'azureOpenaiApiKeyBridge'
+  ];
+  for (const key of sourceKeys) {
+    if (typeof assistantAgent.sources[key] !== 'boolean') {
+      return res.status(400).json({
+        success: false,
+        error: `assistantAgent.sources.${key} is required and must be a boolean`
+      });
+    }
+  }
+
+  const settings = setServerSettings({ assistantAgent });
+  res.json({
+    success: true,
+    assistantAgent: settings.assistantAgent
+  });
+}
+
 export function handleSetLocalModelRoutingEnabled(req, res) {
   const { localModelRoutingEnabled } = req.body || {};
 
@@ -352,6 +410,8 @@ export default {
   handleSetStrictTranslatorCompatibility,
   handleGetEnableFreeModels,
   handleSetEnableFreeModels,
+  handleGetAssistantAgentConfig,
+  handleSetAssistantAgentConfig,
   handleGetLocalModelRoutingEnabled,
   handleSetLocalModelRoutingEnabled,
   handleGetDiscoveredModels,

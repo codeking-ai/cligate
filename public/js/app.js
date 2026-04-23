@@ -66,6 +66,24 @@ document.addEventListener('alpine:init', () => {
         appRoutingForm: { enabled: true, fallbackToDefault: true, bindings: [], currentType: null, currentTargetIds: [], targetQuery: '', targetPickerOpen: false },
         enableFreeModels: true,
         freeModelsSaving: false,
+        assistantAgentConfig: {
+            enabled: false,
+            sources: {
+                chatgptAccount: false,
+                claudeAccount: false,
+                anthropicApiKey: true,
+                openaiApiKeyBridge: true,
+                azureOpenaiApiKeyBridge: true
+            }
+        },
+        assistantAgentStatus: {
+            enabled: false,
+            configuredSources: {},
+            statuses: [],
+            resolvedSource: null,
+            fallbackReason: ''
+        },
+        assistantAgentSaving: false,
         localModelRoutingEnabled: false,
         localModelRoutingSaving: false,
         localRuntime: null,
@@ -363,6 +381,7 @@ document.addEventListener('alpine:init', () => {
             this.loadRoutingModeSetting();
             this.loadAppRoutingSettings();
             this.loadFreeModelsSetting();
+            this.loadAssistantAgentConfig();
             this.loadLocalModelRoutingSetting();
             this.loadLocalRuntimeStatus();
             this.loadKiloModels();
@@ -2986,6 +3005,68 @@ document.addEventListener('alpine:init', () => {
             if (ok && typeof data?.enableFreeModels === 'boolean') {
                 this.enableFreeModels = data.enableFreeModels;
             }
+        },
+
+        async loadAssistantAgentConfig() {
+            const { ok, data } = await this.api('/settings/assistant-agent');
+            if (ok && data?.assistantAgent) {
+                this.assistantAgentConfig = {
+                    enabled: data.assistantAgent.enabled === true,
+                    sources: {
+                        chatgptAccount: data.assistantAgent.sources?.chatgptAccount === true,
+                        claudeAccount: data.assistantAgent.sources?.claudeAccount === true,
+                        anthropicApiKey: data.assistantAgent.sources?.anthropicApiKey !== false,
+                        openaiApiKeyBridge: data.assistantAgent.sources?.openaiApiKeyBridge !== false,
+                        azureOpenaiApiKeyBridge: data.assistantAgent.sources?.azureOpenaiApiKeyBridge !== false
+                    }
+                };
+            }
+            await this.loadAssistantAgentStatus();
+        },
+
+        async loadAssistantAgentStatus() {
+            const { ok, data } = await this.api('/api/assistant/agent-status');
+            if (ok && data?.status) {
+                this.assistantAgentStatus = data.status;
+            }
+        },
+
+        async saveAssistantAgentConfig() {
+            if (this.assistantAgentSaving) return;
+            this.assistantAgentSaving = true;
+            const { ok, data } = await this.api('/settings/assistant-agent', {
+                method: 'POST',
+                body: JSON.stringify({
+                    assistantAgent: this.assistantAgentConfig
+                })
+            });
+            this.assistantAgentSaving = false;
+            if (ok && data?.assistantAgent) {
+                this.assistantAgentConfig = data.assistantAgent;
+                await this.loadAssistantAgentStatus();
+                this.showToast(this.t('assistantAgentUpdated'), 'success');
+            } else {
+                this.showToast(data?.error || this.t('assistantAgentUpdateFailed'), 'error');
+            }
+        },
+
+        async toggleAssistantAgentEnabled() {
+            this.assistantAgentConfig = {
+                ...this.assistantAgentConfig,
+                enabled: !this.assistantAgentConfig.enabled
+            };
+            await this.saveAssistantAgentConfig();
+        },
+
+        async toggleAssistantAgentSource(sourceKey) {
+            this.assistantAgentConfig = {
+                ...this.assistantAgentConfig,
+                sources: {
+                    ...(this.assistantAgentConfig.sources || {}),
+                    [sourceKey]: !this.assistantAgentConfig.sources?.[sourceKey]
+                }
+            };
+            await this.saveAssistantAgentConfig();
         },
 
         async toggleFreeModels() {

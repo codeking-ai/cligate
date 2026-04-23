@@ -14,7 +14,7 @@ import { getStatus, ACCOUNTS_FILE } from '../account-manager.js';
 import { handleMessages } from './messages-route.js';
 import { handleChatCompletion, handleCountTokens } from './chat-route.js';
 import { handleListModels, handleAccountModels, handleAccountUsage } from './models-route.js';
-import { handleGetHaikuModel, handleSetHaikuModel, handleGetKiloModels, handleGetAccountStrategy, handleSetAccountStrategy, handleGetRoutingPriority, handleSetRoutingPriority, handleGetRoutingMode, handleSetRoutingMode, handleGetStrictCodexCompatibility, handleSetStrictCodexCompatibility, handleGetStrictTranslatorCompatibility, handleSetStrictTranslatorCompatibility, handleGetAppRouting, handleSetAppRouting, handleGetEnableFreeModels, handleSetEnableFreeModels, handleGetLocalModelRoutingEnabled, handleSetLocalModelRoutingEnabled, handleGetDiscoveredModels, handleRefreshDiscoveredModels } from './settings-route.js';
+import { handleGetHaikuModel, handleSetHaikuModel, handleGetKiloModels, handleGetAccountStrategy, handleSetAccountStrategy, handleGetRoutingPriority, handleSetRoutingPriority, handleGetRoutingMode, handleSetRoutingMode, handleGetStrictCodexCompatibility, handleSetStrictCodexCompatibility, handleGetStrictTranslatorCompatibility, handleSetStrictTranslatorCompatibility, handleGetAppRouting, handleSetAppRouting, handleGetEnableFreeModels, handleSetEnableFreeModels, handleGetAssistantAgentConfig, handleSetAssistantAgentConfig, handleGetLocalModelRoutingEnabled, handleSetLocalModelRoutingEnabled, handleGetDiscoveredModels, handleRefreshDiscoveredModels } from './settings-route.js';
 import { handleGetLogs, handleStreamLogs } from './logs-route.js';
 import { handleGetClaudeConfig, handleSetProxyMode, handleSetDirectMode, handleSetClaudeApiEndpoint } from './claude-config-route.js';
 import { handleListApiKeys, handleGetApiKey, handleAddApiKey, handleRemoveApiKey, handleUpdateApiKey, handleValidateApiKey, handleGetApiKeyStats } from './api-keys-route.js';
@@ -72,6 +72,9 @@ import {
   handleListAssistantTasks,
   handleGetAssistantTask
 } from './assistant-tasks-route.js';
+import {
+  handleGetAssistantAgentStatus
+} from './assistant-agent-route.js';
 import {
   handleListAgentChannelProviders,
   handleGetAgentChannelCatalog,
@@ -186,6 +189,8 @@ export function registerApiRoutes(app, { port }) {
   app.post('/settings/app-routing', handleSetAppRouting);
   app.get('/settings/enable-free-models', handleGetEnableFreeModels);
   app.post('/settings/enable-free-models', handleSetEnableFreeModels);
+  app.get('/settings/assistant-agent', handleGetAssistantAgentConfig);
+  app.post('/settings/assistant-agent', handleSetAssistantAgentConfig);
   app.get('/settings/local-model-routing-enabled', handleGetLocalModelRoutingEnabled);
   app.post('/settings/local-model-routing-enabled', handleSetLocalModelRoutingEnabled);
   app.get('/settings/discovered-models', handleGetDiscoveredModels);
@@ -363,6 +368,7 @@ export function registerApiRoutes(app, { port }) {
   app.get('/api/assistant/tasks/:id', handleGetAssistantTask);
   app.get('/api/assistant/memory', handleGetAssistantMemory);
   app.get('/api/assistant/policies', handleGetAssistantPolicies);
+  app.get('/api/assistant/agent-status', handleGetAssistantAgentStatus);
 
   // ─── Agent Channel Gateway ──────────────────────────────────────────────
   app.get('/api/agent-channels/providers', handleListAgentChannelProviders);

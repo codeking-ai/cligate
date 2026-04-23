@@ -29,9 +29,10 @@ function mockReq(body = {}, params = {}, query = {}) {
 
 // ─── settings-route ───────────────────────────────────────────────────────────
 
-import { handleGetHaikuModel, handleSetHaikuModel, handleGetAppRouting, handleSetAppRouting, handleGetStrictCodexCompatibility, handleSetStrictCodexCompatibility, handleGetStrictTranslatorCompatibility, handleSetStrictTranslatorCompatibility } from '../../src/routes/settings-route.js';
+import { handleGetHaikuModel, handleSetHaikuModel, handleGetAppRouting, handleSetAppRouting, handleGetStrictCodexCompatibility, handleSetStrictCodexCompatibility, handleGetStrictTranslatorCompatibility, handleSetStrictTranslatorCompatibility, handleGetAssistantAgentConfig, handleSetAssistantAgentConfig } from '../../src/routes/settings-route.js';
 import { handleGetPricing, handleUpdatePricing, handleResetPricing } from '../../src/routes/pricing-route.js';
 import { handleGetApiKey } from '../../src/routes/api-keys-route.js';
+import { handleGetAssistantAgentStatus } from '../../src/routes/assistant-agent-route.js';
 
 test('handleGetHaikuModel: returns current haikuKiloModel', () => {
   const req = mockReq();
@@ -102,6 +103,60 @@ test('handleSetStrictTranslatorCompatibility: rejects non-boolean payload', () =
   handleSetStrictTranslatorCompatibility(req, res);
   assert.equal(res._status, 400);
   assert.equal(res._body.success, false);
+});
+
+test('handleGetAssistantAgentConfig: returns current assistant agent settings', () => {
+  const req = mockReq();
+  const res = mockRes();
+  handleGetAssistantAgentConfig(req, res);
+  assert.equal(res._status, 200);
+  assert.equal(res._body.success, true);
+  assert.equal(typeof res._body.assistantAgent?.enabled, 'boolean');
+  assert.equal(typeof res._body.assistantAgent?.sources?.anthropicApiKey, 'boolean');
+});
+
+test('handleSetAssistantAgentConfig: rejects malformed payload', () => {
+  const req = mockReq({
+    assistantAgent: {
+      enabled: 'yes',
+      sources: {}
+    }
+  });
+  const res = mockRes();
+  handleSetAssistantAgentConfig(req, res);
+  assert.equal(res._status, 400);
+  assert.equal(res._body.success, false);
+});
+
+test('handleSetAssistantAgentConfig: accepts complete boolean source map', () => {
+  const req = mockReq({
+    assistantAgent: {
+      enabled: true,
+      sources: {
+        chatgptAccount: false,
+        claudeAccount: false,
+        anthropicApiKey: true,
+        openaiApiKeyBridge: true,
+        azureOpenaiApiKeyBridge: false
+      }
+    }
+  });
+  const res = mockRes();
+  handleSetAssistantAgentConfig(req, res);
+  assert.equal(res._status, 200);
+  assert.equal(res._body.success, true);
+  assert.equal(res._body.assistantAgent.enabled, true);
+  assert.equal(res._body.assistantAgent.sources.azureOpenaiApiKeyBridge, false);
+});
+
+test('handleGetAssistantAgentStatus: returns status payload shape', async () => {
+  const req = mockReq();
+  const res = mockRes();
+  await handleGetAssistantAgentStatus(req, res);
+  assert.equal(res._status, 200);
+  assert.equal(res._body.success, true);
+  assert.equal(typeof res._body.status?.enabled, 'boolean');
+  assert.ok(Array.isArray(res._body.status?.statuses));
 });
 
 test('handleSetHaikuModel: rejects empty body with 400', async () => {

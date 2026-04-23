@@ -19,6 +19,16 @@ const DEFAULT_SETTINGS = {
     enableFreeModels: true,              // Allow routing to system free models (Kilo)
     enableRequestLogging: true,          // Log full request/response content
     requestLogRetentionDays: 7,          // Days to keep request logs
+    assistantAgent: {
+        enabled: false,
+        sources: {
+            chatgptAccount: false,
+            claudeAccount: false,
+            anthropicApiKey: true,
+            openaiApiKeyBridge: true,
+            azureOpenaiApiKeyBridge: true
+        }
+    },
     channels: {
         telegram: {
             enabled: false,
@@ -118,6 +128,24 @@ function normalizeChannelsConfig(channels = {}) {
     };
 }
 
+function normalizeAssistantAgentConfig(config = {}) {
+    const current = config && typeof config === 'object' ? config : {};
+    const sources = current.sources && typeof current.sources === 'object'
+        ? current.sources
+        : {};
+
+    return {
+        enabled: current.enabled === true,
+        sources: {
+            chatgptAccount: sources.chatgptAccount === true,
+            claudeAccount: sources.claudeAccount === true,
+            anthropicApiKey: sources.anthropicApiKey !== false,
+            openaiApiKeyBridge: sources.openaiApiKeyBridge !== false,
+            azureOpenaiApiKeyBridge: sources.azureOpenaiApiKeyBridge !== false
+        }
+    };
+}
+
 function ensureConfigDir() {
     if (!existsSync(CONFIG_DIR)) {
         mkdirSync(CONFIG_DIR, { recursive: true, mode: 0o700 });
@@ -138,6 +166,7 @@ export function getServerSettings() {
             ...data,
             accountStrategy: normalizeStrategyName(data.accountStrategy),
             appRouting: normalizeAppRoutingConfig(data.appRouting),
+            assistantAgent: normalizeAssistantAgentConfig(data.assistantAgent),
             channels: normalizeChannelsConfig(data.channels)
         };
     } catch (error) {
@@ -153,6 +182,7 @@ export function setServerSettings(patch = {}) {
         ...patch,
         accountStrategy: normalizeStrategyName(patch.accountStrategy ?? current.accountStrategy),
         appRouting: normalizeAppRoutingConfig(patch.appRouting || current.appRouting),
+        assistantAgent: normalizeAssistantAgentConfig(patch.assistantAgent || current.assistantAgent),
         channels: normalizeChannelsConfig(patch.channels || current.channels)
     };
 

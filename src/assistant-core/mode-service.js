@@ -5,6 +5,7 @@ import assistantObservationService, { AssistantObservationService } from './obse
 import AssistantRunner from './runner.js';
 import agentOrchestratorMessageService from '../agent-orchestrator/message-service.js';
 import assistantTaskViewService from './task-view-service.js';
+import AssistantDialogueService from '../assistant-agent/dialogue-service.js';
 
 function nowIso() {
   return new Date().toISOString();
@@ -48,7 +49,8 @@ export class AssistantModeService {
     observationService = assistantObservationService,
     messageService = agentOrchestratorMessageService,
     taskViewService = assistantTaskViewService,
-    runner = null
+    runner = null,
+    dialogueService = null
   } = {}) {
     this.conversationStore = conversationStore;
     this.assistantSessionStore = assistantSessionStoreArg instanceof AssistantSessionStore
@@ -67,6 +69,13 @@ export class AssistantModeService {
       observationService: this.observationService,
       messageService: this.messageService,
       taskViewService: this.taskViewService
+    });
+    this.dialogueService = dialogueService || new AssistantDialogueService({
+      runStore: this.assistantRunStore,
+      observationService: this.observationService,
+      taskViewService: this.taskViewService,
+      messageService: this.messageService,
+      fallbackRunner: this.runner
     });
   }
 
@@ -104,29 +113,30 @@ export class AssistantModeService {
   }
 
   async finalizeRunSuccess({ conversation, assistantSession, runText, executed, assistantModeActive } = {}) {
+    const persistedRun = this.assistantRunStore.save(executed.run);
     this.assistantSessionStore.save({
       ...assistantSession,
-      lastRunId: executed.run.id,
+      lastRunId: persistedRun.id,
       lastUserMessage: runText,
       lastAssistantSummary: executed.reply.summary
     });
 
     const nextConversation = this.patchConversation(conversation, {
-      metadata: {
-        assistantCore: buildAssistantMetadata(this.getConversationAssistantState(conversation), {
-          mode: assistantModeActive ? ASSISTANT_CONTROL_MODE.ASSISTANT : ASSISTANT_CONTROL_MODE.DIRECT_RUNTIME,
-          assistantSessionId: assistantSession.id,
-          lastRunId: executed.run.id,
-          lastRunSummary: executed.reply.summary
-        })
-      }
+          metadata: {
+            assistantCore: buildAssistantMetadata(this.getConversationAssistantState(conversation), {
+              mode: assistantModeActive ? ASSISTANT_CONTROL_MODE.ASSISTANT : ASSISTANT_CONTROL_MODE.DIRECT_RUNTIME,
+              assistantSessionId: assistantSession.id,
+              lastRunId: persistedRun.id,
+              lastRunSummary: executed.reply.summary
+            })
+          }
     });
 
     return {
       type: 'assistant_response',
       message: executed.reply.message,
       assistantSession,
-      assistantRun: executed.run,
+      assistantRun: persistedRun,
       toolResults: executed.toolResults,
       conversation: nextConversation
     };
@@ -173,8 +183,8 @@ export class AssistantModeService {
 
   runAcceptedMessage(text) {
     return /[\u3400-\u9fff]/.test(String(text || ''))
-      ? 'CliGate Assistant 已开始处理，我会继续在后台推进。'
-      : 'CliGate Assistant started working on it and will continue in the background.';
+      ? `CliGate Assistant 已在后台开始处理“${String(text || '').trim().slice(0, 80)}”，完成后把结果回给你。`
+      : `CliGate Assistant started working on "${String(text || '').trim().slice(0, 80)}" in the background and will send back the result.`;
   }
 
   async maybeHandleMessage({
@@ -252,7 +262,7 @@ export class AssistantModeService {
     if (executionMode === 'async') {
       Promise.resolve().then(async () => {
         try {
-          const executed = await this.runner.run({
+          const executed = await this.dialogueService.run({
             run,
             conversation,
             text: runText,
@@ -306,7 +316,7 @@ export class AssistantModeService {
     }
 
     try {
-      const executed = await this.runner.run({
+      const executed = await this.dialogueService.run({
         run,
         conversation,
         text: runText,

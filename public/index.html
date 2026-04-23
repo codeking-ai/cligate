@@ -1491,6 +1491,90 @@
 
                 <div class="view-card mt-6">
                     <div class="flex items-center gap-2.5 mb-4">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" class="w-4 h-4 text-cyan-300">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 3a.75.75 0 01.75.75v.443c.794.077 1.56.264 2.287.548l.313-.313a.75.75 0 011.06 0l1.415 1.414a.75.75 0 010 1.061l-.313.313c.284.726.47 1.492.548 2.286h.444a.75.75 0 01.75.75v2a.75.75 0 01-.75.75h-.444a7.479 7.479 0 01-.548 2.287l.313.313a.75.75 0 010 1.06l-1.414 1.415a.75.75 0 01-1.061 0l-.313-.313a7.479 7.479 0 01-2.287.548v.444a.75.75 0 01-.75.75h-2a.75.75 0 01-.75-.75v-.444a7.479 7.479 0 01-2.286-.548l-.313.313a.75.75 0 01-1.061 0L4.42 18.58a.75.75 0 010-1.06l.313-.313A7.479 7.479 0 014.186 14.92h-.443a.75.75 0 01-.75-.75v-2a.75.75 0 01.75-.75h.443c.077-.794.264-1.56.548-2.286l-.313-.313a.75.75 0 010-1.061L5.835 4.35a.75.75 0 011.061 0l.313.313A7.479 7.479 0 019.496 4.12V3.75A.75.75 0 0110.246 3h-.496z"></path>
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9.75A2.25 2.25 0 109 12a2.25 2.25 0 003 2.25"></path>
+                        </svg>
+                        <h3 class="text-xs font-mono text-gray-400 uppercase tracking-widest" x-text="t('assistantAgentTitle')"></h3>
+                    </div>
+                    <div class="space-y-5">
+                        <div class="flex flex-wrap items-center justify-between gap-4">
+                            <div>
+                                <div class="text-sm text-gray-300" x-text="t('assistantAgentEnabled')"></div>
+                                <div class="text-xs text-gray-500 font-mono" x-text="t('assistantAgentDesc')"></div>
+                            </div>
+                            <div class="inline-flex items-center gap-3">
+                                <span class="text-xs font-mono"
+                                    :class="assistantAgentConfig.enabled ? 'text-neon-green' : 'text-red-400'"
+                                    x-text="assistantAgentConfig.enabled ? t('enabled') : t('disabled')"></span>
+                                <button class="relative inline-flex h-6 w-11 items-center rounded-full transition-colors duration-200 focus:outline-none"
+                                    :class="assistantAgentConfig.enabled ? 'bg-neon-green' : 'bg-space-700'"
+                                    :disabled="assistantAgentSaving"
+                                    @click="toggleAssistantAgentEnabled()">
+                                    <span class="inline-block h-4 w-4 transform rounded-full bg-white transition-transform duration-200"
+                                        :class="assistantAgentConfig.enabled ? 'translate-x-6' : 'translate-x-1'"></span>
+                                </button>
+                            </div>
+                        </div>
+
+                        <div class="space-y-3">
+                            <div class="rounded-lg border border-space-border/50 bg-space-800/30 px-4 py-3">
+                                <div class="flex flex-wrap items-center justify-between gap-3">
+                                    <div>
+                                        <div class="text-xs font-mono text-gray-500 uppercase tracking-widest" x-text="t('assistantAgentRuntime')"></div>
+                                        <div class="mt-1 text-sm text-white"
+                                            x-text="assistantAgentStatus.resolvedSource ? `${assistantAgentStatus.resolvedSource.label} / ${assistantAgentStatus.resolvedSource.model}` : t('assistantAgentNoResolvedSource')"></div>
+                                    </div>
+                                    <button class="btn btn-xs btn-outline text-gray-400"
+                                        @click="loadAssistantAgentStatus()"
+                                        :disabled="assistantAgentSaving"
+                                        x-text="t('refresh')"></button>
+                                </div>
+                                <div class="mt-2 text-xs font-mono"
+                                    :class="assistantAgentStatus.resolvedSource ? 'text-neon-green' : 'text-yellow-400'"
+                                    x-text="assistantAgentStatus.resolvedSource ? t('assistantAgentResolvedReady') : (assistantAgentStatus.fallbackReason || t('assistantAgentFallbackRunner'))"></div>
+                            </div>
+
+                            <div class="text-xs font-mono text-gray-500 uppercase tracking-widest" x-text="t('assistantAgentSources')"></div>
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                <template x-for="source in [
+                                    { key: 'anthropicApiKey', label: t('assistantAgentSourceAnthropicApiKey') },
+                                    { key: 'openaiApiKeyBridge', label: t('assistantAgentSourceOpenAiBridge') },
+                                    { key: 'azureOpenaiApiKeyBridge', label: t('assistantAgentSourceAzureBridge') },
+                                    { key: 'chatgptAccount', label: t('assistantAgentSourceChatgptAccount') },
+                                    { key: 'claudeAccount', label: t('assistantAgentSourceClaudeAccount') }
+                                ]" :key="source.key">
+                                    <button class="w-full rounded-lg border px-4 py-3 text-left transition-colors"
+                                        :class="assistantAgentConfig.sources?.[source.key]
+                                            ? 'border-neon-cyan/40 bg-neon-cyan/10 text-white'
+                                            : 'border-space-border/50 bg-space-800/40 text-gray-400'"
+                                        :disabled="assistantAgentSaving"
+                                        @click="toggleAssistantAgentSource(source.key)">
+                                        <div class="flex items-start justify-between gap-3">
+                                            <div class="min-w-0">
+                                                <div class="text-sm" x-text="source.label"></div>
+                                                <div class="mt-1 text-[10px] font-mono"
+                                                    :class="(assistantAgentStatus.statuses.find(entry => entry.key === source.key)?.available) ? 'text-neon-green' : 'text-gray-500'"
+                                                    x-text="assistantAgentStatus.statuses.find(entry => entry.key === source.key)?.detail || ''"></div>
+                                            </div>
+                                            <div class="flex flex-col items-end gap-1">
+                                                <span class="text-[10px] font-mono uppercase tracking-widest"
+                                                    x-text="assistantAgentConfig.sources?.[source.key] ? t('enabled') : t('disabled')"></span>
+                                                <span class="text-[10px] font-mono uppercase tracking-widest"
+                                                    :class="assistantAgentStatus.statuses.find(entry => entry.key === source.key)?.selected ? 'text-neon-cyan' : ((assistantAgentStatus.statuses.find(entry => entry.key === source.key)?.available) ? 'text-neon-green' : 'text-gray-500')"
+                                                    x-text="assistantAgentStatus.statuses.find(entry => entry.key === source.key)?.selected ? t('assistantAgentSelected') : ((assistantAgentStatus.statuses.find(entry => entry.key === source.key)?.available) ? t('assistantAgentAvailable') : t('assistantAgentUnavailable'))"></span>
+                                            </div>
+                                        </div>
+                                    </button>
+                                </template>
+                            </div>
+                            <div class="text-xs text-gray-500 font-mono" x-text="t('assistantAgentSourceHint')"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="view-card mt-6">
+                    <div class="flex items-center gap-2.5 mb-4">
                         <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" class="w-4 h-4 text-neon-yellow">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path>
                         </svg>
