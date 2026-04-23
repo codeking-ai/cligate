@@ -51,7 +51,8 @@ export class ChatUiConversationService {
     cwd,
     model = '',
     metadata = {},
-    assistantExecutionMode = 'sync'
+    assistantExecutionMode = 'sync',
+    onBackgroundResult = null
   } = {}) {
     const conversation = this.getConversation(sessionId, metadata);
     const assistantResult = await this.assistantModeService.maybeHandleMessage({
@@ -60,7 +61,8 @@ export class ChatUiConversationService {
       defaultRuntimeProvider,
       cwd,
       model,
-      executionMode: assistantExecutionMode
+      executionMode: assistantExecutionMode,
+      onBackgroundResult
     });
     if (assistantResult) {
       return {

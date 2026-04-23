@@ -47,6 +47,9 @@ export class AssistantToolExecutor {
     if (policy && policy.allowed === false) {
       throw new Error(`Assistant policy blocked tool ${call.toolName}: ${policy.reason}`);
     }
+    if (policy?.requiresConfirmation) {
+      throw new Error(`Assistant policy requires confirmation for tool ${call.toolName}: ${policy.reason}`);
+    }
 
     const startedAt = nowIso();
     const result = await tool.execute({

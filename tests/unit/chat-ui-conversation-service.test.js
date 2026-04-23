@@ -443,3 +443,42 @@ test('ChatUiConversationService can accept assistant runs for background executi
 
   assert.equal(completed?.status, 'completed');
 });
+
+test('ChatUiConversationService invokes onBackgroundResult for async assistant runs', async () => {
+  const runtimeSessionManager = createHybridRuntimeManager();
+  const conversationStore = new ChatUiConversationStore({
+    configDir: createTempDir('cligate-chat-ui-conv-assistant-async-callback-')
+  });
+  const taskStore = new AgentTaskStore({
+    configDir: createTempDir('cligate-chat-ui-task-assistant-async-callback-')
+  });
+  const service = new ChatUiConversationService({
+    conversationStore,
+    messageService: new AgentOrchestratorMessageService({ runtimeSessionManager }),
+    taskStore
+  });
+
+  let backgroundResult = null;
+  const accepted = await service.routeMessage({
+    sessionId: 'chat-ui-assistant-async-callback-1',
+    text: '/cligate start codex inspect repo',
+    assistantExecutionMode: 'async',
+    onBackgroundResult: async (result) => {
+      backgroundResult = result;
+    }
+  });
+
+  assert.equal(accepted.type, 'assistant_run_accepted');
+
+  for (let index = 0; index < 20; index += 1) {
+    if (backgroundResult?.assistantRun?.status === 'completed') {
+      break;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+
+  assert.equal(backgroundResult?.assistantRun?.status, 'completed');
+  assert.match(String(backgroundResult?.message || ''), /Started a new task|已通过 assistant tool 发起新任务/i);
+  assert.equal(backgroundResult?.observability?.mode, 'fallback');
+  assert.equal(backgroundResult?.observability?.stopPolicy?.closure, 'assistant_done');
+});

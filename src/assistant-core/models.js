@@ -15,6 +15,17 @@ export const ASSISTANT_RUN_STATUS = Object.freeze({
   CANCELLED: 'cancelled'
 });
 
+export const ASSISTANT_RUN_CLOSURE_STATE = Object.freeze({
+  ASSISTANT_DONE: 'assistant_done',
+  EXECUTOR_DONE: 'executor_done',
+  AWAITING_SUMMARY: 'awaiting_summary',
+  WAITING_RUNTIME: 'waiting_runtime',
+  WAITING_USER: 'waiting_user',
+  PARTIAL: 'partial',
+  FAILED: 'failed',
+  CANCELLED: 'cancelled'
+});
+
 function nowIso() {
   return new Date().toISOString();
 }
@@ -65,5 +76,22 @@ export function createAssistantRun({
     metadata: metadata && typeof metadata === 'object' ? metadata : {},
     createdAt: now,
     updatedAt: now
+  };
+}
+
+export function createAssistantRunCheckpoint({
+  plan = null,
+  completedStepCount = 0,
+  toolResults = [],
+  lastCompletedStep = null,
+  resumable = false
+} = {}) {
+  return {
+    resumable: resumable === true,
+    completedStepCount: Number(completedStepCount || 0),
+    pendingStepCount: Math.max(0, Number(plan?.steps?.length || 0) - Number(completedStepCount || 0)),
+    lastCompletedStep: lastCompletedStep && typeof lastCompletedStep === 'object' ? lastCompletedStep : null,
+    toolResults: Array.isArray(toolResults) ? toolResults : [],
+    updatedAt: nowIso()
   };
 }

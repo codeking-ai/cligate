@@ -20,7 +20,7 @@ const DEFAULT_SETTINGS = {
     enableRequestLogging: true,          // Log full request/response content
     requestLogRetentionDays: 7,          // Days to keep request logs
     assistantAgent: {
-        enabled: false,
+        enabled: true,
         sources: {
             chatgptAccount: false,
             claudeAccount: false,

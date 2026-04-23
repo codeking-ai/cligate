@@ -84,6 +84,7 @@ document.addEventListener('alpine:init', () => {
             fallbackReason: ''
         },
         assistantAgentSaving: false,
+        chatAssistantRunPoller: null,
         localModelRoutingEnabled: false,
         localModelRoutingSaving: false,
         localRuntime: null,
@@ -114,6 +115,7 @@ document.addEventListener('alpine:init', () => {
         selectedAssistantTaskId: '',
         selectedAssistantTask: null,
         assistantTaskLoading: false,
+        assistantTaskResuming: false,
         assistantTaskTurnDetail: null,
         assistantTaskTurnLoading: false,
         assistantTaskQuery: '',
@@ -1701,6 +1703,7 @@ document.addEventListener('alpine:init', () => {
             if (!session) return;
 
             this.closeAgentRuntimeStream();
+            this.stopAssistantRunPolling();
             this.activeChatSessionId = session.id;
             this.chatMode = session.mode || 'assistant';
             this.chatSourceId = session.sourceId || this.chatSources[0]?.id || '';
@@ -1751,6 +1754,13 @@ document.addEventListener('alpine:init', () => {
             }
         },
 
+        stopAssistantRunPolling() {
+            if (this.chatAssistantRunPoller) {
+                clearTimeout(this.chatAssistantRunPoller);
+                this.chatAssistantRunPoller = null;
+            }
+        },
+
         connectAgentRuntimeStream(session) {
             if (!session?.runtimeSessionId) return;
 
@@ -1791,10 +1801,51 @@ document.addEventListener('alpine:init', () => {
             session.runtimeStatus = session.runtimeStatus || '';
             session.runtimeLastEventSeq = Number(session.runtimeLastEventSeq || 0);
             session.runtimePendingQuestion = session.runtimePendingQuestion || null;
+            session.pendingAssistantRunId = session.pendingAssistantRunId || '';
             session.runtimeUnread = session.runtimeUnread === true;
             if (!Array.isArray(session.runtimePendingApprovals)) {
                 session.runtimePendingApprovals = [];
             }
+        },
+
+        async pollAssistantRunUntilFinal(sessionId, runId, attempts = 0) {
+            const session = this.chatSessions.find((item) => item.id === sessionId);
+            if (!session || !runId || session.pendingAssistantRunId !== runId) {
+                return;
+            }
+
+            const { ok, data } = await this.api(`/api/assistant/runs/${encodeURIComponent(runId)}`);
+            const run = ok ? data?.run : null;
+            const terminal = ['completed', 'failed', 'cancelled'];
+
+            if (run && terminal.includes(String(run.status || ''))) {
+                session.pendingAssistantRunId = '';
+                this.appendAgentRuntimeMessage(session.id, {
+                    kind: 'agent-status',
+                    content: run.result || run.summary || this.t('requestFailed'),
+                    isError: run.status === 'failed',
+                    assistantRunId: run.id,
+                    runStatus: run.status,
+                    observability: run.metadata?.stopPolicy || run.metadata?.agent || run.metadata?.assistantAgent
+                        ? {
+                            mode: run.metadata?.assistantAgent?.mode === 'fallback' ? 'fallback' : 'agent',
+                            resolvedSource: run.metadata?.agent?.llmSource || null,
+                            fallbackReason: run.metadata?.assistantAgent?.reason || '',
+                            stopPolicy: run.metadata?.stopPolicy || null
+                        }
+                        : null
+                });
+                this.syncActiveChatSession();
+                return;
+            }
+
+            if (attempts >= 60) {
+                return;
+            }
+
+            this.chatAssistantRunPoller = setTimeout(() => {
+                this.pollAssistantRunUntilFinal(sessionId, runId, attempts + 1);
+            }, 1000);
         },
 
         appendAgentRuntimeMessage(sessionId, message) {
@@ -1811,6 +1862,50 @@ document.addEventListener('alpine:init', () => {
                 this.chatMessages = [...session.messages];
                 this.scrollChatToBottom(true);
             }
+        },
+
+        formatAssistantRunObservability(observability, runStatus = '') {
+            const meta = observability && typeof observability === 'object' ? observability : null;
+            if (!meta) return '';
+
+            const lines = [];
+            const mode = String(meta.mode || '').trim();
+            const resolvedSource = meta.resolvedSource && typeof meta.resolvedSource === 'object'
+                ? meta.resolvedSource
+                : null;
+            const fallbackReason = String(meta.fallbackReason || '').trim();
+            const stopPolicy = meta.stopPolicy && typeof meta.stopPolicy === 'object'
+                ? meta.stopPolicy
+                : null;
+
+            if (mode === 'fallback') {
+                lines.push(`mode: fallback${fallbackReason ? ` (${fallbackReason})` : ''}`);
+            } else if (mode) {
+                lines.push(`mode: ${mode}`);
+            }
+
+            if (resolvedSource) {
+                const sourceParts = [
+                    resolvedSource.label || '',
+                    resolvedSource.model || ''
+                ].filter(Boolean);
+                lines.push(`source: ${sourceParts.join(' / ') || (resolvedSource.kind || 'resolved')}`);
+            }
+
+            if (runStatus) {
+                lines.push(`run: ${String(runStatus).trim()}`);
+            }
+
+            if (stopPolicy) {
+                const closure = String(stopPolicy.closure || '').trim();
+                const reason = String(stopPolicy.reason || '').trim();
+                const label = closure || String(stopPolicy.status || '').trim();
+                if (label) {
+                    lines.push(`closure: ${label}${reason ? ` (${reason})` : ''}`);
+                }
+            }
+
+            return lines.join('\n');
         },
 
         updateAgentRuntimeMessage(sessionId, predicate, updater) {
@@ -2230,14 +2325,30 @@ document.addEventListener('alpine:init', () => {
                     || result.type === 'assistant_mode_exited'
                     || result.type === 'assistant_response'
                 ) {
+                this.appendAgentRuntimeMessage(session.id, {
+                    kind: 'agent-status',
+                    content: result.message || this.t('requestFailed'),
+                    isError: result.type === 'command_error',
+                    observability: result.observability || null,
+                    runStatus: result.assistantRun?.status || ''
+                });
+                if (result.type === 'command_error') {
+                    this.showToast(result.message || this.t('requestFailed'), 'warning');
+                }
+            }
+
+                if (result.type === 'assistant_run_accepted' && result.assistantRun?.id) {
+                    session.pendingAssistantRunId = result.assistantRun.id;
                     this.appendAgentRuntimeMessage(session.id, {
                         kind: 'agent-status',
-                        content: result.message || this.t('requestFailed'),
-                        isError: result.type === 'command_error'
+                        content: result.message || '',
+                        isError: false,
+                        assistantRunId: result.assistantRun.id,
+                        runStatus: result.assistantRun.status || 'queued',
+                        observability: result.observability || null
                     });
-                    if (result.type === 'command_error') {
-                        this.showToast(result.message || this.t('requestFailed'), 'warning');
-                    }
+                    this.stopAssistantRunPolling();
+                    this.pollAssistantRunUntilFinal(session.id, result.assistantRun.id);
                 }
 
                 if (result.type === 'conversation_reset') {
@@ -3555,6 +3666,33 @@ document.addEventListener('alpine:init', () => {
                 { label: 'runtime', value: task?.runtimeSession?.id || '' },
                 { label: 'turn', value: task?.latestTurn?.id || '' }
             ].filter((entry) => entry.value);
+        },
+
+        canResumeAssistantRun(task = this.selectedAssistantTask) {
+            return task?.assistantRun?.checkpoint?.resumable === true && task?.assistantRun?.status === 'failed';
+        },
+
+        assistantRunCheckpointLabel(task = this.selectedAssistantTask) {
+            const checkpoint = task?.assistantRun?.checkpoint;
+            if (!checkpoint) return '';
+            return `steps ${checkpoint.completedStepCount || 0} done / ${checkpoint.pendingStepCount || 0} pending`;
+        },
+
+        async resumeAssistantRun(task = this.selectedAssistantTask) {
+            const runId = String(task?.assistantRun?.id || '');
+            if (!runId || this.assistantTaskResuming) return;
+            this.assistantTaskResuming = true;
+            const { ok, data } = await this.api(`/api/assistant/runs/${encodeURIComponent(runId)}/resume`, {
+                method: 'POST'
+            });
+            this.assistantTaskResuming = false;
+            if (!ok || !data?.run) {
+                this.showToast(data?.error || this.t('requestFailed'), 'error');
+                return;
+            }
+            this.showToast('Assistant run resumed.', 'success');
+            await this.loadAssistantTasks({ silent: true });
+            await this.loadAssistantTaskDetail(this.selectedAssistantTaskId || task?.id, { silent: true });
         },
 
         assistantTaskPendingItems(task = this.selectedAssistantTask, turnDetail = this.assistantTaskTurnDetail) {

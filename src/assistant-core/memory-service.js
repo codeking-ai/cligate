@@ -8,6 +8,9 @@ import {
   buildScopeCandidates,
   normalizeScope
 } from './scope-resolver.js';
+import assistantWorkspaceStore from './workspace-store.js';
+import assistantRuntimeSessionMemoryStore from './runtime-session-memory-store.js';
+import assistantPolicyService from './policy-service.js';
 
 function normalizeText(value) {
   return String(value || '').trim();
@@ -34,9 +37,15 @@ function detectSaveScope(text, scopeRefs = {}) {
 
 export class AssistantMemoryService {
   constructor({
-    preferenceStore = agentPreferenceStore
+    preferenceStore = agentPreferenceStore,
+    workspaceStore = assistantWorkspaceStore,
+    runtimeSessionMemoryStore = assistantRuntimeSessionMemoryStore,
+    policyService = assistantPolicyService
   } = {}) {
     this.preferenceStore = preferenceStore;
+    this.workspaceStore = workspaceStore;
+    this.runtimeSessionMemoryStore = runtimeSessionMemoryStore;
+    this.policyService = policyService;
   }
 
   buildScopeRefs(context = {}) {
@@ -48,13 +57,46 @@ export class AssistantMemoryService {
   }
 
   listMemory({ scope, scopeRef } = {}, { store = this.preferenceStore } = {}) {
-    return store.listPreferences({
-      scope: normalizeScope(scope),
-      scopeRef: normalizeText(scopeRef)
+    const normalizedScope = normalizeScope(scope);
+    const normalizedScopeRef = normalizeText(scopeRef);
+    const preferences = store.listPreferences({
+      scope: normalizedScope,
+      scopeRef: normalizedScopeRef
     });
+    if (normalizedScope !== 'runtime_session') {
+      return preferences;
+    }
+    const sessionEntries = this.listRuntimeSessionMemory({
+      sessionId: normalizedScopeRef
+    });
+    return [
+      ...preferences,
+      ...sessionEntries.map((entry) => ({
+        scope: 'runtime_session',
+        scopeRef: normalizedScopeRef,
+        key: entry.key,
+        value: entry.value,
+        kind: entry.kind,
+        metadata: entry.metadata || {},
+        updatedAt: entry.updatedAt || '',
+        createdAt: entry.createdAt || ''
+      }))
+    ];
   }
 
   resolvePreferences(context = {}, { store = this.preferenceStore } = {}) {
+    const workspaceRef = this.buildScopeRefs(context).workspace || '';
+    if (workspaceRef) {
+      this.workspaceStore.upsert({
+        workspaceRef,
+        patch: {
+          metadata: {
+            source: 'memory_resolve'
+          }
+        }
+      });
+    }
+
     const candidates = this.buildScopeCandidates(context);
     const layers = [];
     const merged = {};
@@ -94,6 +136,17 @@ export class AssistantMemoryService {
       return [];
     }
 
+    if (target.scope === 'workspace') {
+      this.workspaceStore.upsert({
+        workspaceRef: target.scopeRef,
+        patch: {
+          metadata: {
+            source: 'explicit_user_preference'
+          }
+        }
+      });
+    }
+
     return entries.map((entry) => store.upsertPreference({
       scope: target.scope,
       scopeRef: target.scopeRef,
@@ -111,6 +164,121 @@ export class AssistantMemoryService {
 
   buildSavedMessage(saved = []) {
     return buildPreferenceSavedMessage(saved);
+  }
+
+  rememberRuntimeSessionState({
+    runtimeSession = null,
+    sessionId = '',
+    detail = null,
+    metadata = {}
+  } = {}) {
+    const normalizedSessionId = normalizeText(sessionId || runtimeSession?.id);
+    if (!normalizedSessionId) {
+      return [];
+    }
+
+    const session = detail?.session || runtimeSession || {};
+    const turns = Array.isArray(detail?.turns) ? detail.turns : [];
+    const pendingApprovals = Array.isArray(detail?.pendingApprovals) ? detail.pendingApprovals : [];
+    const pendingQuestions = Array.isArray(detail?.pendingQuestions) ? detail.pendingQuestions : [];
+    const records = [];
+
+    const pushRecord = (kind, key, value, extra = {}) => {
+      const saved = this.runtimeSessionMemoryStore.upsert({
+        sessionId: normalizedSessionId,
+        kind,
+        key,
+        value,
+        metadata: {
+          source: 'runtime_session_observation',
+          ...metadata,
+          ...extra
+        }
+      });
+      if (saved) {
+        records.push(saved);
+      }
+    };
+
+    pushRecord('session', 'session:status', {
+      status: normalizeText(session?.status),
+      provider: normalizeText(session?.provider),
+      title: normalizeText(session?.title),
+      summary: normalizeText(session?.summary),
+      error: normalizeText(session?.error),
+      currentTurnId: normalizeText(runtimeSession?.currentTurnId || session?.currentTurnId),
+      updatedAt: normalizeText(session?.updatedAt)
+    });
+
+    const latestTurn = turns[0] || detail?.session?.latestTurn || null;
+    if (latestTurn?.id) {
+      pushRecord('turn', 'turn:current', {
+        turnId: latestTurn.id,
+        status: normalizeText(latestTurn.status),
+        input: normalizeText(latestTurn.input),
+        summary: normalizeText(latestTurn.summary),
+        error: normalizeText(latestTurn.error),
+        stats: latestTurn.stats || {},
+        startedAt: normalizeText(latestTurn.startedAt),
+        completedAt: normalizeText(latestTurn.completedAt)
+      }, {
+        turnId: latestTurn.id
+      });
+    }
+
+    pushRecord('turn', 'turn:list', turns.map((turn) => ({
+      turnId: normalizeText(turn?.id),
+      status: normalizeText(turn?.status),
+      summary: normalizeText(turn?.summary),
+      input: normalizeText(turn?.input),
+      completedAt: normalizeText(turn?.completedAt),
+      updatedAt: normalizeText(turn?.updatedAt)
+    })));
+
+    pushRecord('approval', 'approval:pending', pendingApprovals.map((entry) => ({
+      approvalId: normalizeText(entry?.approvalId),
+      turnId: normalizeText(entry?.turnId),
+      title: normalizeText(entry?.title),
+      summary: normalizeText(entry?.summary),
+      createdAt: normalizeText(entry?.createdAt),
+      rawRequest: entry?.rawRequest || null
+    })));
+
+    pushRecord('question', 'question:pending', pendingQuestions.map((entry) => ({
+      questionId: normalizeText(entry?.questionId),
+      turnId: normalizeText(entry?.turnId),
+      text: normalizeText(entry?.text),
+      options: Array.isArray(entry?.options) ? entry.options : [],
+      createdAt: normalizeText(entry?.createdAt),
+      rawRequest: entry?.rawRequest || null
+    })));
+
+    const rememberedPolicies = this.policyService?.listPolicies?.({
+      scope: 'runtime_session',
+      scopeRef: normalizedSessionId
+    }) || [];
+    pushRecord('authorization', 'authorization:remembered_policies', rememberedPolicies.map((entry) => ({
+      policyId: normalizeText(entry?.id),
+      scope: normalizeText(entry?.scope),
+      scopeRef: normalizeText(entry?.scopeRef),
+      provider: normalizeText(entry?.provider),
+      toolName: normalizeText(entry?.toolName),
+      decision: normalizeText(entry?.decision),
+      pathPatterns: Array.isArray(entry?.pathPatterns) ? entry.pathPatterns : [],
+      commandPrefixes: Array.isArray(entry?.commandPrefixes) ? entry.commandPrefixes : [],
+      createdAt: normalizeText(entry?.createdAt),
+      updatedAt: normalizeText(entry?.updatedAt),
+      metadata: entry?.metadata || {}
+    })));
+
+    return records;
+  }
+
+  listRuntimeSessionMemory({ sessionId = '', kind = '', limit = 50 } = {}) {
+    return this.runtimeSessionMemoryStore.listBySession(sessionId, {
+      kind,
+      limit
+    });
   }
 }
 

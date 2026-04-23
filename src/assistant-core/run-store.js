@@ -3,6 +3,7 @@ import { join } from 'path';
 
 import { CONFIG_DIR } from '../account-manager.js';
 import { createAssistantRun } from './models.js';
+import { mergeJsonRecords } from './merge-json-records.js';
 
 function nowIso() {
   return new Date().toISOString();
@@ -35,6 +36,20 @@ export class AssistantRunStore {
 
   _save() {
     this.ensureDirs();
+    let diskRuns = [];
+    if (existsSync(this.file)) {
+      try {
+        const parsed = JSON.parse(readFileSync(this.file, 'utf8'));
+        diskRuns = Array.isArray(parsed?.runs) ? parsed.runs : [];
+      } catch {
+        diskRuns = [];
+      }
+    }
+    this.records = mergeJsonRecords({
+      currentRecords: this.records,
+      diskRecords: diskRuns,
+      keyOf: (entry) => entry?.id
+    });
     writeFileSync(
       this.file,
       JSON.stringify({ runs: this.records }, null, 2),
@@ -58,6 +73,12 @@ export class AssistantRunStore {
 
   get(runId) {
     return this.records.find((entry) => entry.id === String(runId || '')) || null;
+  }
+
+  canResume(runId) {
+    const run = this.get(runId);
+    if (!run) return false;
+    return run.status === 'failed' && run?.metadata?.checkpoint?.resumable === true;
   }
 
   save(run) {

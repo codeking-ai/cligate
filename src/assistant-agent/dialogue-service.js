@@ -47,13 +47,14 @@ export class AssistantDialogueService {
   async run({ run, conversation, text, defaultRuntimeProvider = 'codex', cwd = '', model = '' } = {}) {
     const hasSource = await this.llmClient?.hasAvailableSource?.();
     if (!hasSource) {
+      const fallbackReason = this.llmClient?.getFallbackReason?.() || 'no_available_llm_source';
       const fallbackRun = this.runStore.save({
         ...run,
         metadata: {
           ...(run.metadata || {}),
           assistantAgent: {
             mode: 'fallback',
-            reason: 'no_available_llm_source'
+            reason: fallbackReason
           }
         }
       });

@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
 import { join } from 'path';
 
 import { CONFIG_DIR } from '../account-manager.js';
+import { mergeJsonRecords } from '../assistant-core/merge-json-records.js';
 
 function nowIso() {
   return new Date().toISOString();
@@ -35,6 +36,20 @@ export class AgentTaskStore {
 
   _save() {
     this.ensureDirs();
+    let diskTasks = [];
+    if (existsSync(this.file)) {
+      try {
+        const parsed = JSON.parse(readFileSync(this.file, 'utf8'));
+        diskTasks = Array.isArray(parsed?.tasks) ? parsed.tasks : [];
+      } catch {
+        diskTasks = [];
+      }
+    }
+    this.records = mergeJsonRecords({
+      currentRecords: this.records,
+      diskRecords: diskTasks,
+      keyOf: (entry) => entry?.id
+    });
     writeFileSync(
       this.file,
       JSON.stringify({ tasks: this.records }, null, 2),

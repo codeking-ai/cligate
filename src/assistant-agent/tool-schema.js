@@ -51,6 +51,14 @@ const TOOL_SCHEMAS = Object.freeze({
     },
     required: ['taskId']
   },
+  search_task_and_conversation_memory: {
+    type: 'object',
+    properties: {
+      query: { type: 'string' },
+      limit: { type: 'integer', minimum: 1, maximum: 20 }
+    },
+    required: ['query']
+  },
   search_project_memory: {
     type: 'object',
     properties: {

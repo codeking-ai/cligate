@@ -143,6 +143,16 @@ class FailingLlmClient {
   }
 }
 
+class DisabledLlmClient {
+  async hasAvailableSource() {
+    return false;
+  }
+
+  getFallbackReason() {
+    return 'assistant_agent_disabled';
+  }
+}
+
 function createAssistantService({ llmResponses }) {
   const fixture = createFixture();
   const llmClient = new FakeLlmClient(llmResponses);
@@ -228,6 +238,10 @@ test('Assistant ReAct loop can answer directly in natural language for simple /c
   assert.match(String(result.message || ''), /CliGate Assistant/);
   assert.equal(result.assistantRun.status, 'completed');
   assert.equal(result.assistantRun.steps[0]?.kind, 'assistant_turn');
+  assert.equal(result.observability?.mode, 'agent');
+  assert.equal(result.observability?.resolvedSource?.label, 'fake-llm');
+  assert.equal(result.observability?.resolvedSource?.model, 'fake-model');
+  assert.equal(result.observability?.stopPolicy?.closure, 'assistant_done');
 });
 
 test('Assistant ReAct loop can inspect task state through structured tool calls', async () => {
@@ -301,5 +315,62 @@ test('Assistant dialogue fallback records the underlying LLM failure reason', as
   assert.equal(result.type, 'assistant_response');
   assert.equal(result.assistantRun.metadata.assistantAgent.mode, 'fallback');
   assert.match(String(result.assistantRun.metadata.assistantAgent.reason || ''), /assistant llm failed/);
-  assert.equal(result.assistantRun.metadata.plan.version, 'phase7-v1');
+  assert.equal(result.assistantRun.metadata.plan.version, 'phase7-fallback-v1');
+  assert.match(String(result.message || ''), /回退|fell back/i);
+  assert.equal(result.observability?.mode, 'fallback');
+  assert.match(String(result.observability?.fallbackReason || ''), /assistant llm failed/);
+});
+
+test('Assistant fallback safety rail does not guess free-form requests when the agent path is unavailable', async () => {
+  const service = createAssistantServiceWithLlmClient(new DisabledLlmClient());
+
+  const result = await service.chatService.routeMessage({
+    sessionId: 'assistant-react-disabled-fallback-1',
+    text: '/cligate 你是谁'
+  });
+
+  assert.equal(result.type, 'assistant_response');
+  assert.equal(result.assistantRun.metadata.assistantAgent.mode, 'fallback');
+  assert.equal(result.assistantRun.metadata.assistantAgent.reason, 'assistant_agent_disabled');
+  assert.equal(result.assistantRun.metadata.plan.summaryIntent, 'fallback_unhandled');
+  assert.match(String(result.message || ''), /当前没有可用的 LLM assistant 主路径|LLM-driven assistant path/i);
+});
+
+test('Assistant fallback safety rail still supports explicit control commands', async () => {
+  const service = createAssistantServiceWithLlmClient(new DisabledLlmClient());
+
+  const result = await service.chatService.routeMessage({
+    sessionId: 'assistant-react-disabled-fallback-2',
+    text: '/cligate status'
+  });
+
+  assert.equal(result.type, 'assistant_response');
+  assert.notEqual(result.assistantRun.metadata.plan.summaryIntent, 'fallback_unhandled');
+});
+
+test('Assistant ReAct tool registry supports the task-and-conversation memory alias', async () => {
+  const service = createAssistantService({
+    llmResponses: [
+      {
+        toolCalls: [{
+          id: 'tool_memory_1',
+          name: 'search_task_and_conversation_memory',
+          input: {
+            query: 'inspect'
+          }
+        }]
+      },
+      {
+        text: '我已经搜索了现有任务与对话摘要，目前没有更多匹配项。'
+      }
+    ]
+  });
+
+  const result = await service.chatService.routeMessage({
+    sessionId: 'assistant-react-memory-alias-1',
+    text: '/cligate 搜索一下现有任务摘要'
+  });
+
+  assert.equal(result.type, 'assistant_response');
+  assert.ok(result.assistantRun.steps.some((entry) => entry.toolName === 'search_task_and_conversation_memory'));
 });

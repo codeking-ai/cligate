@@ -1,7 +1,7 @@
 import { ASSISTANT_RUN_STATUS } from '../assistant-core/models.js';
 import { buildAnthropicToolDefinitions } from './tool-schema.js';
 import { buildInitialAnthropicMessages } from './prompt-builder.js';
-import { deriveAssistantRunStatus } from './stop-policy.js';
+import { deriveAssistantRunStopState } from './stop-policy.js';
 import { composeAssistantReply } from './response-composer.js';
 import assistantReflectionService, { AssistantReflectionService } from './reflection-service.js';
 
@@ -109,6 +109,7 @@ export class AssistantReactEngine {
     const relatedRuntimeSessionIds = new Set(run?.relatedRuntimeSessionIds || []);
     let llmSource = null;
     let finalText = '';
+    let maxIterationsReached = true;
 
     let workingRun = this.toolExecutor.policyService ? run : run;
     workingRun = {
@@ -157,6 +158,7 @@ export class AssistantReactEngine {
 
       if (!completion.toolCalls || completion.toolCalls.length === 0) {
         finalText = String(completion.text || '').trim();
+        maxIterationsReached = false;
         break;
       }
 
@@ -200,9 +202,12 @@ export class AssistantReactEngine {
       }
     }
 
-    const finalStatus = finalText
-      ? deriveAssistantRunStatus({ toolResults })
-      : deriveAssistantRunStatus({ toolResults });
+    const stopState = deriveAssistantRunStopState({
+      toolResults,
+      assistantText: finalText,
+      maxIterationsReached
+    });
+    const finalStatus = stopState.status;
     const reply = composeAssistantReply({
       language,
       assistantText: finalText,
@@ -215,7 +220,11 @@ export class AssistantReactEngine {
       relatedRuntimeSessionIds: [...relatedRuntimeSessionIds],
       status: finalStatus,
       summary: reply.summary,
-      result: reply.message
+      result: reply.message,
+      metadata: {
+        ...(workingRun.metadata || {}),
+        stopPolicy: stopState
+      }
     };
 
     return {

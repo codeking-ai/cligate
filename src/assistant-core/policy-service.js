@@ -6,11 +6,22 @@ import {
 import {
   buildScopeRefs,
   buildScopeCandidates,
-  normalizeScope
+  normalizeScope,
+  resolveWorkspaceScopeRef
 } from './scope-resolver.js';
 
 function normalizeText(value) {
   return String(value || '').trim();
+}
+
+function buildPolicyDecision({ allowed, reason, riskLevel = 'low', requiresConfirmation = false, scopeExpanded = false } = {}) {
+  return {
+    allowed,
+    reason,
+    riskLevel,
+    requiresConfirmation,
+    scopeExpanded
+  };
 }
 
 export class AssistantPolicyService {
@@ -134,6 +145,17 @@ export class AssistantPolicyService {
     return Boolean(refs.conversation || refs.workspace);
   }
 
+  canAssistantExpandScope({ conversation = null, runtimeSession = null, cwd = '', metadata = {}, input = {} } = {}) {
+    const currentWorkspace = resolveWorkspaceScopeRef({ conversation, runtimeSession, cwd, metadata });
+    const requestedWorkspace = normalizeText(
+      input.workspaceId
+      || input.workspaceRef
+      || input.cwd
+    );
+    if (!currentWorkspace || !requestedWorkspace) return false;
+    return currentWorkspace !== requestedWorkspace;
+  }
+
   canExecuteToolCall({
     toolName = '',
     conversation = null,
@@ -144,10 +166,11 @@ export class AssistantPolicyService {
   } = {}) {
     const normalizedTool = normalizeText(toolName);
     if (!normalizedTool) {
-      return {
+      return buildPolicyDecision({
         allowed: false,
-        reason: 'tool_name_required'
-      };
+        reason: 'tool_name_required',
+        riskLevel: 'high'
+      });
     }
 
     const safeTools = new Set([
@@ -160,40 +183,56 @@ export class AssistantPolicyService {
       'list_tasks',
       'get_task',
       'list_project_artifacts',
+      'search_task_and_conversation_memory',
       'search_project_memory'
     ]);
     if (safeTools.has(normalizedTool)) {
-      return {
+      return buildPolicyDecision({
         allowed: true,
-        reason: 'safe_read_only_tool'
-      };
+        reason: 'safe_read_only_tool',
+        riskLevel: 'low'
+      });
     }
 
     if (normalizedTool === 'reset_conversation_binding') {
-      return {
+      return buildPolicyDecision({
         allowed: Boolean(conversation?.id || input.conversationId),
-        reason: conversation?.id || input.conversationId ? 'conversation_scope_available' : 'conversation_scope_required'
-      };
+        reason: conversation?.id || input.conversationId ? 'conversation_scope_available' : 'conversation_scope_required',
+        riskLevel: 'medium'
+      });
     }
 
     if (['delegate_to_codex', 'delegate_to_claude_code', 'delegate_to_runtime', 'start_runtime_task', 'reuse_or_delegate'].includes(normalizedTool)) {
-      return {
-        allowed: Boolean(this.canAutoApproveAssistantAction({ conversation, cwd, metadata })),
-        reason: 'assistant_delegation_within_scope'
-      };
+      const scopeExpanded = this.canAssistantExpandScope({
+        conversation,
+        runtimeSession,
+        cwd,
+        metadata,
+        input
+      });
+      const allowed = Boolean(this.canAutoApproveAssistantAction({ conversation, cwd, metadata }));
+      return buildPolicyDecision({
+        allowed,
+        reason: allowed ? 'assistant_delegation_within_scope' : 'assistant_scope_required',
+        riskLevel: scopeExpanded ? 'high' : 'medium',
+        requiresConfirmation: scopeExpanded,
+        scopeExpanded
+      });
     }
 
     if (['send_runtime_input', 'cancel_runtime_session', 'resolve_runtime_approval', 'answer_runtime_question'].includes(normalizedTool)) {
-      return {
+      return buildPolicyDecision({
         allowed: Boolean(runtimeSession?.id || input.sessionId),
-        reason: runtimeSession?.id || input.sessionId ? 'runtime_scope_available' : 'runtime_scope_required'
-      };
+        reason: runtimeSession?.id || input.sessionId ? 'runtime_scope_available' : 'runtime_scope_required',
+        riskLevel: normalizedTool === 'cancel_runtime_session' ? 'medium' : 'low'
+      });
     }
 
-    return {
+    return buildPolicyDecision({
       allowed: false,
-      reason: 'tool_not_permitted_by_policy'
-    };
+      reason: 'tool_not_permitted_by_policy',
+      riskLevel: 'high'
+    });
   }
 }
 

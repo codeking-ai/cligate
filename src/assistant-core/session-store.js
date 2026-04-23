@@ -3,6 +3,7 @@ import { join } from 'path';
 
 import { CONFIG_DIR } from '../account-manager.js';
 import { createAssistantSession } from './models.js';
+import { mergeJsonRecords } from './merge-json-records.js';
 
 function nowIso() {
   return new Date().toISOString();
@@ -35,6 +36,20 @@ export class AssistantSessionStore {
 
   _save() {
     this.ensureDirs();
+    let diskSessions = [];
+    if (existsSync(this.file)) {
+      try {
+        const parsed = JSON.parse(readFileSync(this.file, 'utf8'));
+        diskSessions = Array.isArray(parsed?.sessions) ? parsed.sessions : [];
+      } catch {
+        diskSessions = [];
+      }
+    }
+    this.records = mergeJsonRecords({
+      currentRecords: this.records,
+      diskRecords: diskSessions,
+      keyOf: (entry) => entry?.id
+    });
     writeFileSync(
       this.file,
       JSON.stringify({ sessions: this.records }, null, 2),

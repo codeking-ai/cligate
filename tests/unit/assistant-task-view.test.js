@@ -111,7 +111,15 @@ test('AssistantTaskViewService returns unified task records for assistant conver
     status: 'completed',
     summary: 'assistant summarized the runtime result',
     result: 'Workspace looks healthy.',
-    relatedRuntimeSessionIds: [session.id]
+    relatedRuntimeSessionIds: [session.id],
+    metadata: {
+      checkpoint: {
+        resumable: false,
+        completedStepCount: 2,
+        pendingStepCount: 0,
+        updatedAt: new Date().toISOString()
+      }
+    }
   });
   conversationStore.bindRuntimeSession(conversation.id, session.id, {
     metadata: {
@@ -152,6 +160,8 @@ test('AssistantTaskViewService returns unified task records for assistant conver
   assert.equal(tasks.length, 1);
   assert.equal(tasks[0].conversation.id, conversation.id);
   assert.equal(tasks[0].assistantRun.id, run.id);
+  assert.equal(tasks[0].assistantRun.checkpoint.resumable, false);
+  assert.equal(tasks[0].assistantRun.checkpoint.completedStepCount, 2);
   assert.equal(tasks[0].runtimeSession.id, session.id);
   assert.equal(tasks[0].latestTurn.input, 'inspect repo');
   assert.equal(tasks[0].state, 'completed');
@@ -163,4 +173,67 @@ test('AssistantTaskViewService returns unified task records for assistant conver
   assert.equal(detail.id, tasks[0].id);
   assert.equal(detail.pending.approvalCount, 0);
   assert.equal(detail.pending.questionCount, 0);
+});
+
+test('AssistantTaskViewService builds latest assistant run lookup once instead of scanning runs per conversation', async () => {
+  const {
+    conversationStore,
+    taskStore,
+    deliveryStore,
+    assistantRunStore,
+    runtimeSessionManager
+  } = createFixture();
+
+  const session = await runtimeSessionManager.createSession({
+    provider: 'codex',
+    input: 'inspect repo'
+  });
+  const conversation = conversationStore.findOrCreateBySessionId('task-view-chat-lookup-1');
+  conversationStore.bindRuntimeSession(conversation.id, session.id);
+  assistantRunStore.create({
+    assistantSessionId: 'assistant-session-lookup-1',
+    conversationId: conversation.id,
+    triggerText: '/cligate inspect repo',
+    status: 'completed',
+    summary: 'done'
+  });
+  taskStore.create({
+    conversationId: conversation.id,
+    runtimeSessionId: session.id,
+    provider: session.provider,
+    title: 'inspect repo',
+    status: 'completed'
+  });
+  deliveryStore.saveOutbound({
+    channel: 'chat-ui',
+    conversationId: conversation.id,
+    sessionId: session.id,
+    payload: { text: 'done' }
+  });
+
+  let listCalls = 0;
+  const originalList = assistantRunStore.list.bind(assistantRunStore);
+  const originalListByConversationId = assistantRunStore.listByConversationId.bind(assistantRunStore);
+  assistantRunStore.list = (...args) => {
+    listCalls += 1;
+    return originalList(...args);
+  };
+  assistantRunStore.listByConversationId = () => {
+    throw new Error('listByConversationId should not be used in bulk task listing');
+  };
+
+  const taskViewService = new AssistantTaskViewService({
+    conversationStore,
+    runtimeSessionManager,
+    taskStore,
+    deliveryStore,
+    assistantRunStore
+  });
+
+  const tasks = taskViewService.listTasks({ limit: 10 });
+  assert.equal(tasks.length, 1);
+  assert.equal(listCalls, 1);
+
+  assistantRunStore.list = originalList;
+  assistantRunStore.listByConversationId = originalListByConversationId;
 });

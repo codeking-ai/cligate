@@ -113,6 +113,7 @@ test('handleGetAssistantAgentConfig: returns current assistant agent settings', 
   assert.equal(res._body.success, true);
   assert.equal(typeof res._body.assistantAgent?.enabled, 'boolean');
   assert.equal(typeof res._body.assistantAgent?.sources?.anthropicApiKey, 'boolean');
+  assert.equal(res._body.assistantAgent.enabled, true);
 });
 
 test('handleSetAssistantAgentConfig: rejects malformed payload', () => {

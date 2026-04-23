@@ -235,12 +235,18 @@ export function createDefaultAssistantToolRegistry({
   });
 
   registry.register({
-    name: 'search_project_memory',
+    name: 'search_task_and_conversation_memory',
     description: 'Search task and conversation summaries in the current workspace.',
     execute: async ({ input = {} } = {}) => observationService.searchProjectMemory({
       query: input.query,
       limit: input.limit || 10
     })
+  });
+
+  registry.register({
+    name: 'search_project_memory',
+    description: 'Deprecated alias for search_task_and_conversation_memory.',
+    execute: async ({ input = {} } = {}) => registry.get('search_task_and_conversation_memory').execute({ input })
   });
 
   return registry;

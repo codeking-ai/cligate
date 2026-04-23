@@ -14,6 +14,7 @@ import { logger } from '../utils/logger.js';
 import { prepareAssistantRequest } from '../assistant/assistant-chat-service.js';
 import { createPendingAssistantAction, executePendingAssistantAction } from '../assistant/tool-executor.js';
 import chatUiConversationService from '../chat-ui/conversation-service.js';
+import chatUiConversationStore from '../chat-ui/conversation-store.js';
 
 export async function handleListChatSources(_req, res) {
   const chatgptSources = listAccounts().accounts
@@ -781,6 +782,29 @@ export async function handleRouteChatAgentMessage(req, res) {
         ui: {
           origin: 'chat-ui'
         }
+      },
+      onBackgroundResult: async (backgroundResult) => {
+        const conversation = chatUiConversationStore.findOrCreateBySessionId(sessionId);
+        const messages = Array.isArray(conversation?.metadata?.uiChatMessages)
+          ? conversation.metadata.uiChatMessages
+          : [];
+        conversation?.metadata && chatUiConversationStore.patch(conversation.id, {
+          metadata: {
+            ...(conversation.metadata || {}),
+            uiChatMessages: [
+              ...messages,
+              {
+                role: 'assistant',
+                kind: 'agent-message',
+                content: String(backgroundResult?.message || '').trim(),
+                assistantRunId: backgroundResult?.assistantRun?.id || '',
+                runStatus: backgroundResult?.assistantRun?.status || '',
+                observability: backgroundResult?.observability || null,
+                createdAt: new Date().toISOString()
+              }
+            ]
+          }
+        });
       }
     });
 

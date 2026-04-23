@@ -41,6 +41,61 @@ function buildAssistantMetadata(current = {}, patch = {}) {
   };
 }
 
+function buildFallbackMessage(reason, text) {
+  const source = String(text || '');
+  const zh = /[\u3400-\u9fff]/.test(source);
+  if (reason === 'assistant_agent_disabled') {
+    return zh
+      ? 'CliGate Assistant 的 LLM supervisor 当前已关闭，因此已回退到基础 assistant 流程。'
+      : 'CliGate Assistant supervisor is currently disabled, so the request fell back to the basic assistant flow.';
+  }
+  if (reason === 'no_available_llm_source') {
+    return zh
+      ? 'CliGate Assistant 当前没有可用的模型来源，因此已回退到基础 assistant 流程。'
+      : 'CliGate Assistant could not find an available model source, so the request fell back to the basic assistant flow.';
+  }
+  if (reason === 'assistant llm failed' || String(reason || '').includes('assistant llm failed')) {
+    return zh
+      ? 'CliGate Assistant 在本轮执行中调用模型失败，因此已回退到基础 assistant 流程。'
+      : 'CliGate Assistant failed during model execution for this turn, so the request fell back to the basic assistant flow.';
+  }
+  return zh
+    ? 'CliGate Assistant 当前已回退到基础 assistant 流程。'
+    : 'CliGate Assistant is currently running in the basic fallback assistant flow.';
+}
+
+function normalizeText(value) {
+  return String(value || '').trim();
+}
+
+function buildAssistantRunObservability(run = null) {
+  if (!run || typeof run !== 'object') return null;
+  const assistantAgent = run?.metadata?.assistantAgent || {};
+  const agentMeta = run?.metadata?.agent || {};
+  const llmSource = agentMeta?.llmSource || null;
+  const stopPolicy = run?.metadata?.stopPolicy || null;
+  const fallbackMode = assistantAgent?.mode === 'fallback';
+
+  return {
+    mode: fallbackMode ? 'fallback' : 'agent',
+    resolvedSource: llmSource
+      ? {
+          kind: normalizeText(llmSource.kind),
+          label: normalizeText(llmSource.label),
+          model: normalizeText(llmSource.model)
+        }
+      : null,
+    fallbackReason: normalizeText(assistantAgent?.reason),
+    stopPolicy: stopPolicy && typeof stopPolicy === 'object'
+      ? {
+          status: normalizeText(stopPolicy.status),
+          closure: normalizeText(stopPolicy.closure),
+          reason: normalizeText(stopPolicy.reason)
+        }
+      : null
+  };
+}
+
 export class AssistantModeService {
   constructor({
     conversationStore,
@@ -134,9 +189,15 @@ export class AssistantModeService {
 
     return {
       type: 'assistant_response',
-      message: executed.reply.message,
+      message: [
+        executed.run?.metadata?.assistantAgent?.mode === 'fallback'
+          ? buildFallbackMessage(executed.run?.metadata?.assistantAgent?.reason, runText)
+          : '',
+        executed.reply.message
+      ].filter(Boolean).join('\n\n'),
       assistantSession,
       assistantRun: persistedRun,
+      observability: buildAssistantRunObservability(persistedRun),
       toolResults: executed.toolResults,
       conversation: nextConversation
     };
@@ -177,6 +238,7 @@ export class AssistantModeService {
       isError: true,
       assistantSession,
       assistantRun: failedRun,
+      observability: buildAssistantRunObservability(failedRun),
       conversation: nextConversation
     };
   }
@@ -311,6 +373,7 @@ export class AssistantModeService {
         message: this.runAcceptedMessage(runText),
         assistantSession,
         assistantRun: this.assistantRunStore.get(run.id) || run,
+        observability: buildAssistantRunObservability(this.assistantRunStore.get(run.id) || run),
         conversation: nextConversation
       };
     }

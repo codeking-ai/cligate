@@ -3,7 +3,7 @@ import assistantObservationService from './observation-service.js';
 import assistantRunStore, { AssistantRunStore } from './run-store.js';
 import createDefaultAssistantToolRegistry from './tool-registry.js';
 import AssistantToolExecutor from './tool-executor.js';
-import { ASSISTANT_RUN_STATUS } from './models.js';
+import { ASSISTANT_RUN_CLOSURE_STATE, ASSISTANT_RUN_STATUS, createAssistantRunCheckpoint } from './models.js';
 import assistantPlanner, { AssistantPlanner } from './planner.js';
 import assistantTaskViewService from './task-view-service.js';
 
@@ -148,6 +148,15 @@ function buildRunnerReply({ text, plan, toolResults, conversation } = {}) {
     };
   }
 
+  if (plan.summaryIntent === 'fallback_unhandled') {
+    return {
+      summary: zh ? 'fallback assistant 无法安全处理该自由输入。' : 'The fallback assistant could not safely handle the free-form request.',
+      message: zh
+        ? '当前没有可用的 LLM assistant 主路径，因此这条自由输入不会由规则 planner 猜测执行。你仍然可以使用明确的控制类指令，例如：start、continue、cancel、status、task list。'
+        : 'The LLM-driven assistant path is not currently available, so this free-form request will not be guessed by the deterministic fallback planner. You can still use explicit control commands such as: start, continue, cancel, status, or task list.'
+    };
+  }
+
   const task = toolResults.find((entry) => ['list_tasks', 'get_task'].includes(entry.toolName))?.result || null;
   const workspace = toolResults.find((entry) => entry.toolName === 'get_workspace_context')?.result || null;
   return {
@@ -191,15 +200,19 @@ export class AssistantRunner {
     text,
     defaultRuntimeProvider = 'codex',
     cwd = '',
-    model = ''
+    model = '',
+    resume = false
   } = {}) {
-    const plan = this.planner.buildPlan({
-      text,
-      conversation,
-      defaultRuntimeProvider,
-      cwd,
-      model
-    });
+    const existingPlan = run?.metadata?.plan || null;
+    const plan = resume && existingPlan
+      ? existingPlan
+      : this.planner.buildPlan({
+          text,
+          conversation,
+          defaultRuntimeProvider,
+          cwd,
+          model
+        });
 
     let currentRun = this.runStore.save({
       ...run,
@@ -207,19 +220,30 @@ export class AssistantRunner {
       metadata: {
         ...(run.metadata || {}),
         plan,
-        executionBudget: plan.execution || null
+        executionBudget: plan.execution || null,
+        checkpoint: createAssistantRunCheckpoint({
+          plan,
+          completedStepCount: Array.isArray(run?.steps) ? run.steps.length : 0,
+          toolResults: Array.isArray(run?.metadata?.toolResults) ? run.metadata.toolResults : [],
+          lastCompletedStep: Array.isArray(run?.steps) && run.steps.length > 0 ? run.steps[run.steps.length - 1] : null,
+          resumable: true
+        })
       }
     });
 
-    const toolResults = [];
-    const steps = [];
+    const toolResults = Array.isArray(currentRun?.metadata?.toolResults)
+      ? [...currentRun.metadata.toolResults]
+      : [];
+    const steps = Array.isArray(currentRun?.steps) ? [...currentRun.steps] : [];
     const relatedRuntimeSessionIds = new Set(currentRun.relatedRuntimeSessionIds || []);
     const startedAt = Date.now();
     const maxToolCalls = Number(plan?.execution?.maxToolCalls || 1);
     const maxDurationMs = Number(plan?.execution?.maxDurationMs || 10_000);
+    const completedStepCount = Number(currentRun?.metadata?.checkpoint?.completedStepCount || steps.length || 0);
+    const remainingSteps = (plan.steps || []).slice(completedStepCount);
 
     try {
-      for (const step of plan.steps || []) {
+      for (const step of remainingSteps) {
         if (toolResults.length >= maxToolCalls) {
           throw new Error('Assistant run exceeded tool call budget');
         }
@@ -268,7 +292,14 @@ export class AssistantRunner {
               summary: entry.summary,
               startedAt: entry.startedAt,
               completedAt: entry.completedAt
-            }))
+            })),
+            checkpoint: createAssistantRunCheckpoint({
+              plan,
+              completedStepCount: steps.length,
+              toolResults,
+              lastCompletedStep: steps[steps.length - 1] || null,
+              resumable: true
+            })
           }
         });
       }
@@ -301,10 +332,23 @@ export class AssistantRunner {
       const pendingApprovals = Array.isArray(runtimeDetail?.pendingApprovals)
         ? runtimeDetail.pendingApprovals.length
         : Number(runtimeDetail?.pendingApprovals || 0);
+      let closure = ASSISTANT_RUN_CLOSURE_STATE.EXECUTOR_DONE;
+      let stopReason = 'tool_phase_finished';
       if (pendingQuestions > 0 || runtimeStatus === 'waiting_user') {
         finalStatus = ASSISTANT_RUN_STATUS.WAITING_USER;
+        closure = ASSISTANT_RUN_CLOSURE_STATE.WAITING_USER;
+        stopReason = 'runtime_waiting_on_user';
       } else if (pendingApprovals > 0 || ['waiting_approval', 'starting', 'running'].includes(runtimeStatus)) {
         finalStatus = ASSISTANT_RUN_STATUS.WAITING_RUNTIME;
+        closure = runtimeStatus === 'waiting_approval'
+          ? ASSISTANT_RUN_CLOSURE_STATE.WAITING_USER
+          : ASSISTANT_RUN_CLOSURE_STATE.WAITING_RUNTIME;
+        stopReason = runtimeStatus === 'waiting_approval'
+          ? 'runtime_waiting_on_approval'
+          : 'runtime_running';
+      } else if (reply.message) {
+        closure = ASSISTANT_RUN_CLOSURE_STATE.ASSISTANT_DONE;
+        stopReason = 'assistant_reply_completed';
       }
 
       const completedRun = this.runStore.save({
@@ -316,7 +360,19 @@ export class AssistantRunner {
         relatedRuntimeSessionIds: [...relatedRuntimeSessionIds],
         metadata: {
           ...(currentRun.metadata || {}),
-          toolCount: toolResults.length
+          toolCount: toolResults.length,
+          checkpoint: createAssistantRunCheckpoint({
+            plan,
+            completedStepCount: steps.length,
+            toolResults,
+            lastCompletedStep: steps[steps.length - 1] || null,
+            resumable: false
+          }),
+          stopPolicy: {
+            status: finalStatus,
+            closure,
+            reason: stopReason
+          }
         }
       });
 
@@ -335,7 +391,14 @@ export class AssistantRunner {
         result: '',
         metadata: {
           ...(currentRun.metadata || {}),
-          error: error.message || 'Assistant run failed'
+          error: error.message || 'Assistant run failed',
+          checkpoint: createAssistantRunCheckpoint({
+            plan,
+            completedStepCount: steps.length,
+            toolResults,
+            lastCompletedStep: steps[steps.length - 1] || null,
+            resumable: true
+          })
         }
       });
       throw Object.assign(error, {

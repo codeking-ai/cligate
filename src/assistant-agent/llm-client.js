@@ -123,7 +123,7 @@ export class AssistantLlmClient {
     defaultClaudeModel = 'claude-sonnet-4-6',
     allowChatGptAccountSource = false,
     allowClaudeAccountSource = false,
-    enabled = process.env.CLIGATE_ENABLE_ASSISTANT_AGENT === '1'
+    enabled = process.env.CLIGATE_ENABLE_ASSISTANT_AGENT !== '0'
   } = {}) {
     this.defaultChatGptModel = defaultChatGptModel;
     this.defaultClaudeModel = defaultClaudeModel;
@@ -163,6 +163,14 @@ export class AssistantLlmClient {
     if (!this.getRuntimeConfig().enabled) return false;
     const candidates = await this.listCandidateSources();
     return candidates.length > 0;
+  }
+
+  getFallbackReason() {
+    const config = this.getRuntimeConfig();
+    if (!config.enabled) {
+      return 'assistant_agent_disabled';
+    }
+    return 'no_available_llm_source';
   }
 
   async listCandidateSources() {

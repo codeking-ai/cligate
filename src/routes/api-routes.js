@@ -62,7 +62,8 @@ import {
 } from './assistant-observation-route.js';
 import {
   handleListAssistantRuns,
-  handleGetAssistantRun
+  handleGetAssistantRun,
+  handleResumeAssistantRun
 } from './assistant-runs-route.js';
 import {
   handleGetAssistantMemory,
@@ -364,6 +365,7 @@ export function registerApiRoutes(app, { port }) {
   app.get('/api/assistant/conversations/:id', handleGetAssistantConversationContext);
   app.get('/api/assistant/runs', handleListAssistantRuns);
   app.get('/api/assistant/runs/:id', handleGetAssistantRun);
+  app.post('/api/assistant/runs/:id/resume', handleResumeAssistantRun);
   app.get('/api/assistant/tasks', handleListAssistantTasks);
   app.get('/api/assistant/tasks/:id', handleGetAssistantTask);
   app.get('/api/assistant/memory', handleGetAssistantMemory);

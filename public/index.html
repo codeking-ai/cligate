@@ -718,6 +718,12 @@
                                             <span class="text-[10px] font-mono text-gray-500" x-show="message.kind === 'agent-file-change'" x-text="t('agentRuntimeFilesChanged')"></span>
                                         </div>
                                         <pre class="whitespace-pre-wrap break-words text-sm font-sans" x-text="message.content"></pre>
+                                        <div class="mt-3 rounded-xl border border-space-border/30 bg-space-950/50 p-3"
+                                            x-show="message.observability && formatAssistantRunObservability(message.observability, message.runStatus)">
+                                            <div class="text-[10px] font-mono uppercase tracking-wider text-gray-500 mb-2">assistant run</div>
+                                            <pre class="whitespace-pre-wrap break-words text-[11px] font-mono text-gray-300"
+                                                x-text="formatAssistantRunObservability(message.observability, message.runStatus)"></pre>
+                                        </div>
                                         <div class="mt-3 rounded-xl border border-space-border/30 bg-space-950/50 p-3" x-show="message.kind === 'agent-command' && message.commandOutput">
                                             <div class="text-[10px] font-mono uppercase tracking-wider text-gray-500 mb-2" x-text="t('agentRuntimeCommandOutput')"></div>
                                             <pre class="whitespace-pre-wrap break-words text-xs font-mono text-gray-300" x-text="message.commandOutput"></pre>
@@ -2472,6 +2478,10 @@
                                     x-show="selectedAssistantTask?.runtimeSession?.id"
                                     @click="openAssistantTaskRuntime(selectedAssistantTask)"
                                     x-text="t('assistantTaskOpenRuntime')"></button>
+                                <button class="btn btn-xs bg-amber-500 hover:bg-amber-400 border-none text-space-950"
+                                    x-show="canResumeAssistantRun(selectedAssistantTask)"
+                                    @click="resumeAssistantRun(selectedAssistantTask)"
+                                    x-text="assistantTaskResuming ? t('loading') : 'resume run'"></button>
                                 <button class="btn btn-xs bg-space-800 hover:bg-space-700 border border-space-border text-white"
                                     x-show="selectedAssistantTaskId"
                                     @click="loadAssistantTaskDetail(selectedAssistantTaskId)"
@@ -2501,9 +2511,17 @@
                                             <div class="text-[11px] font-mono text-gray-500 uppercase tracking-wider mb-2" x-text="t('summary')"></div>
                                             <div class="text-sm text-white whitespace-pre-wrap" x-text="selectedAssistantTask?.summary || '-'"></div>
                                         </div>
-                                        <div class="view-card !p-4">
-                                            <div class="text-[11px] font-mono text-gray-500 uppercase tracking-wider mb-2" x-text="t('assistantTaskResultPreview')"></div>
-                                            <div class="text-sm text-white whitespace-pre-wrap" x-text="selectedAssistantTask?.resultPreview || '-'"></div>
+                                    <div class="view-card !p-4">
+                                        <div class="text-[11px] font-mono text-gray-500 uppercase tracking-wider mb-2" x-text="t('assistantTaskResultPreview')"></div>
+                                        <div class="text-sm text-white whitespace-pre-wrap" x-text="selectedAssistantTask?.resultPreview || '-'"></div>
+                                    </div>
+                                </div>
+
+                                    <div class="view-card !p-4" x-show="selectedAssistantTask?.assistantRun?.checkpoint">
+                                        <div class="text-[11px] font-mono text-gray-500 uppercase tracking-wider mb-3">checkpoint</div>
+                                        <div class="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
+                                            <div><span class="text-gray-500">Resumable: </span><span class="text-white" x-text="selectedAssistantTask?.assistantRun?.checkpoint?.resumable ? 'yes' : 'no'"></span></div>
+                                            <div><span class="text-gray-500">Progress: </span><span class="text-white" x-text="assistantRunCheckpointLabel(selectedAssistantTask) || '-'"></span></div>
                                         </div>
                                     </div>
 

@@ -22,6 +22,18 @@ export function resolveWorkspaceScopeRef({ conversation = null, runtimeSession =
   return explicit || '';
 }
 
+export function buildWorkspaceMetadata({ workspace = null, workspaceRef = '' } = {}) {
+  const ref = normalizeText(workspace?.workspaceRef || workspaceRef);
+  if (!ref) return null;
+  return {
+    id: normalizeText(workspace?.id),
+    workspaceRef: ref,
+    name: normalizeText(workspace?.name) || ref,
+    defaultRuntimeProvider: normalizeText(workspace?.defaultRuntimeProvider),
+    allowedScopeBoundary: normalizeText(workspace?.allowedScopeBoundary) || ref
+  };
+}
+
 export function resolveGlobalUserScopeRef({ conversation = null, metadata = {} } = {}) {
   const explicit = normalizeText(
     metadata?.globalUserId
@@ -66,6 +78,7 @@ export default {
   normalizeScope,
   resolveWorkspaceScopeRef,
   resolveGlobalUserScopeRef,
+  buildWorkspaceMetadata,
   buildScopeRefs,
   buildScopeCandidates
 };

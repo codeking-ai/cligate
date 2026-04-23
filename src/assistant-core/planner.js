@@ -27,6 +27,21 @@ function buildObservationRequest({ conversation } = {}) {
   };
 }
 
+function buildFallbackPlan({ zh, observation } = {}) {
+  return {
+    version: 'phase7-fallback-v1',
+    summaryIntent: 'fallback_unhandled',
+    language: zh ? 'zh' : 'en',
+    observation,
+    execution: {
+      maxSteps: 0,
+      maxToolCalls: 0,
+      maxDurationMs: 5_000
+    },
+    steps: []
+  };
+}
+
 export class AssistantPlanner {
   buildPlan({
     text,
@@ -282,36 +297,7 @@ export class AssistantPlanner {
       };
     }
 
-    return {
-      version: 'phase7-v1',
-      summaryIntent: 'task_summary',
-      language: zh ? 'zh' : 'en',
-      observation,
-      execution: {
-        maxSteps: observation.conversation ? 2 : 1,
-        maxToolCalls: observation.conversation ? 2 : 1,
-        maxDurationMs: 15_000
-      },
-      steps: [
-        {
-          kind: 'observe',
-          toolName: 'list_tasks',
-          input: {
-            ...(conversation?.id ? { conversationId: conversation.id } : {}),
-            limit: conversation?.id ? 1 : 10
-          },
-          reason: 'Gather task-centric summary before responding.'
-        },
-        ...(observation.conversation
-          ? [{
-              kind: 'observe',
-              toolName: 'get_conversation_context',
-              input: observation.conversation,
-              reason: 'Include current conversation summary when available.'
-            }]
-          : [])
-      ]
-    };
+    return buildFallbackPlan({ zh, observation });
   }
 }
 

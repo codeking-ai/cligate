@@ -4,6 +4,8 @@ import agentTaskStore from '../agent-core/task-store.js';
 import agentChannelDeliveryStore from '../agent-channels/delivery-store.js';
 import assistantMemoryService from './memory-service.js';
 import assistantPolicyService from './policy-service.js';
+import assistantWorkspaceStore from './workspace-store.js';
+import { resolveWorkspaceScopeRef, buildWorkspaceMetadata } from './scope-resolver.js';
 
 function providerLabel(providerId) {
   if (providerId === 'claude-code') return 'Claude Code';
@@ -89,7 +91,8 @@ export class AssistantObservationService {
     taskStore = agentTaskStore,
     deliveryStore = agentChannelDeliveryStore,
     memoryService = assistantMemoryService,
-    policyService = assistantPolicyService
+    policyService = assistantPolicyService,
+    workspaceStore = assistantWorkspaceStore
   } = {}) {
     this.conversationStore = conversationStore;
     this.runtimeSessionManager = runtimeSessionManager;
@@ -97,6 +100,7 @@ export class AssistantObservationService {
     this.deliveryStore = deliveryStore;
     this.memoryService = memoryService;
     this.policyService = policyService;
+    this.workspaceStore = workspaceStore;
   }
 
   buildConversationObservation(conversation) {
@@ -145,6 +149,17 @@ export class AssistantObservationService {
       .filter((entry) => !status || String(entry.status || '') === String(status))
       .slice(0, Math.max(1, limit))
       .map((entry) => {
+        if (entry?.cwd) {
+          this.workspaceStore.upsert({
+            workspaceRef: entry.cwd,
+            patch: {
+              defaultRuntimeProvider: entry.provider || '',
+              metadata: {
+                source: 'runtime_session_list'
+              }
+            }
+          });
+        }
         const turns = this.runtimeSessionManager.listTurns(entry.id, { limit: 20 });
         const latestTurn = turns[0] || null;
         return {
@@ -171,7 +186,7 @@ export class AssistantObservationService {
     const deliveries = this.deliveryStore.listBySession(session.id, { limit: 20 });
     const turns = this.runtimeSessionManager.listTurns(session.id, { limit: 20 });
 
-    return {
+    const detail = {
       session: {
         ...summarizeRuntimeSession(session),
         latestTurn: summarizeRuntimeTurn(turns[0] || null),
@@ -214,6 +229,18 @@ export class AssistantObservationService {
         createdAt: entry.createdAt || '',
         updatedAt: entry.updatedAt || ''
       }))
+    };
+    const runtimeSessionMemory = this.memoryService.rememberRuntimeSessionState({
+      runtimeSession: session,
+      detail,
+      metadata: {
+        workspaceRef: session.cwd || '',
+        conversationId: session?.metadata?.conversationId || session?.metadata?.source?.conversationId || ''
+      }
+    });
+    return {
+      ...detail,
+      runtimeSessionMemory
     };
   }
 
@@ -275,6 +302,24 @@ export class AssistantObservationService {
       limit: Math.max(1, deliveryLimit)
     });
 
+    const workspaceRef = resolveWorkspaceScopeRef({
+      conversation,
+      runtimeSession: activeRuntime,
+      cwd: activeRuntime?.cwd || '',
+      metadata: conversation?.metadata || {}
+    });
+    const workspace = workspaceRef
+      ? this.workspaceStore.upsert({
+          workspaceRef,
+          patch: {
+            defaultRuntimeProvider: activeRuntime?.provider || '',
+            metadata: {
+              source: 'conversation_context'
+            }
+          }
+        })
+      : null;
+
     const memory = this.memoryService.resolvePreferences({
       conversation,
       runtimeSession: activeRuntime,
@@ -298,6 +343,15 @@ export class AssistantObservationService {
           })
         : []
     };
+    const runtimeSessionMemory = activeRuntime?.id
+      ? this.memoryService.listRuntimeSessionMemory({
+          sessionId: activeRuntime.id,
+          limit: 20
+        })
+      : [];
+    const runtimeSessionAuthorizations = runtimeSessionMemory
+      .filter((entry) => entry.kind === 'authorization')
+      .flatMap((entry) => Array.isArray(entry.value) ? entry.value : []);
 
     return {
       conversation: summarizeConversation(conversation),
@@ -325,7 +379,10 @@ export class AssistantObservationService {
       })),
       supervisor: conversation?.metadata?.supervisor || null,
       assistantState: conversation?.metadata?.assistantCore || null,
+      workspace: buildWorkspaceMetadata({ workspace, workspaceRef }),
       memory,
+      runtimeSessionMemory,
+      runtimeSessionAuthorizations,
       policy
     };
   }
@@ -334,6 +391,7 @@ export class AssistantObservationService {
     const runtimeSessions = this.listRuntimeSessions({ limit: runtimeLimit });
     const conversations = this.listConversations({ limit: conversationLimit });
     const memory = this.memoryService.resolvePreferences({});
+    const workspaces = this.workspaceStore.list({ limit: 50 }).map((entry) => buildWorkspaceMetadata({ workspace: entry }));
     const policy = {
       globalUser: this.policyService.listPolicies({
         scope: 'global_user',
@@ -372,6 +430,7 @@ export class AssistantObservationService {
       }),
       memory,
       policy,
+      workspaces,
       runtimeSessions,
       conversations
     };

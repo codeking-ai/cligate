@@ -88,6 +88,14 @@ function summarizeAssistantRun(run = null) {
     summary: run.summary || '',
     result: run.result || '',
     relatedRuntimeSessionIds: Array.isArray(run.relatedRuntimeSessionIds) ? run.relatedRuntimeSessionIds : [],
+    checkpoint: run?.metadata?.checkpoint && typeof run.metadata.checkpoint === 'object'
+      ? {
+          resumable: run.metadata.checkpoint.resumable === true,
+          completedStepCount: Number(run.metadata.checkpoint.completedStepCount || 0),
+          pendingStepCount: Number(run.metadata.checkpoint.pendingStepCount || 0),
+          updatedAt: run.metadata.checkpoint.updatedAt || ''
+        }
+      : null,
     updatedAt: run.updatedAt || ''
   };
 }
@@ -189,7 +197,20 @@ export class AssistantTaskViewService {
     this.assistantRunStore = runStore;
   }
 
-  _buildTaskRecord(conversation) {
+  _buildLatestAssistantRunMap() {
+    const runs = this.assistantRunStore.list({ limit: 500 });
+    const latestByConversationId = new Map();
+    for (const run of runs) {
+      const conversationId = String(run?.conversationId || '');
+      if (!conversationId || latestByConversationId.has(conversationId)) {
+        continue;
+      }
+      latestByConversationId.set(conversationId, run);
+    }
+    return latestByConversationId;
+  }
+
+  _buildTaskRecord(conversation, { latestAssistantRunMap = null } = {}) {
     const runtimeSession = conversation?.activeRuntimeSessionId
       ? this.runtimeSessionManager.getSession(conversation.activeRuntimeSessionId)
       : null;
@@ -205,8 +226,7 @@ export class AssistantTaskViewService {
         }
       : { pendingApprovals: [], pendingQuestions: [] };
     const task = this.taskStore.findLatestByConversation(conversation.id);
-    const assistantRuns = this.assistantRunStore.listByConversationId(conversation.id, { limit: 20 });
-    const assistantRun = assistantRuns[0] || null;
+    const assistantRun = latestAssistantRunMap?.get(conversation.id) || this.assistantRunStore.listByConversationId(conversation.id, { limit: 1 })[0] || null;
     const deliveries = this.deliveryStore.listByConversation(conversation.id, { limit: 50 });
     const latestDelivery = deriveLastUserVisibleMessage(deliveries);
     const supervisorBrief = conversation?.metadata?.supervisor?.brief || null;
@@ -261,9 +281,10 @@ export class AssistantTaskViewService {
   }
 
   listTasks({ limit = 20, state = '', conversationId = '' } = {}) {
+    const latestAssistantRunMap = this._buildLatestAssistantRunMap();
     return this.conversationStore.list({ limit: Math.max(limit * 5, 200) })
       .filter((conversation) => !conversationId || conversation.id === String(conversationId))
-      .map((conversation) => this._buildTaskRecord(conversation))
+      .map((conversation) => this._buildTaskRecord(conversation, { latestAssistantRunMap }))
       .filter((record) => !state || String(record.state || '') === String(state))
       .sort((left, right) => String(right.updatedAt || '').localeCompare(String(left.updatedAt || '')))
       .slice(0, Math.max(1, limit));
@@ -272,8 +293,9 @@ export class AssistantTaskViewService {
   getTask(taskId) {
     const normalizedId = String(taskId || '');
     const conversations = this.conversationStore.list({ limit: 500 });
+    const latestAssistantRunMap = this._buildLatestAssistantRunMap();
     for (const conversation of conversations) {
-      const record = this._buildTaskRecord(conversation);
+      const record = this._buildTaskRecord(conversation, { latestAssistantRunMap });
       if (record.id === normalizedId) {
         return record;
       }

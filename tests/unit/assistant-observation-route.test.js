@@ -139,6 +139,8 @@ test('AssistantObservationService returns summary-first workspace and drill-down
   assert.equal(workspace.summary.runtimeCount, 1);
   assert.equal(workspace.summary.conversationCount, 1);
   assert.equal(workspace.summary.turnCount, 1);
+  assert.ok(Array.isArray(workspace.workspaces));
+  assert.ok(workspace.workspaces.length >= 1);
   assert.equal(workspace.turnStats.turnCount, 1);
   assert.equal(workspace.turnStats.messageCount, 1);
   assert.equal(workspace.runtimeSessions[0].id, session.id);
@@ -167,6 +169,8 @@ test('AssistantObservationService returns summary-first workspace and drill-down
   assert.equal(conversationDetail.conversation.id, conversation.id);
   assert.equal(conversationDetail.activeRuntime.id, session.id);
   assert.equal(conversationDetail.latestTask.title, 'inspect repo');
+  assert.ok(conversationDetail.workspace);
+  assert.ok(typeof conversationDetail.workspace.workspaceRef === 'string');
   assert.equal(conversationDetail.deliveries.length, 1);
   assert.ok(conversationDetail.memory);
   assert.ok(conversationDetail.policy);
