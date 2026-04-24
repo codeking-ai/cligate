@@ -341,4 +341,8 @@ test('AssistantTaskViewService exposes task-space-first conversation snapshots',
   assert.equal(taskSpace.recentCompletedTasks.length, 1);
   assert.equal(taskSpace.recentCompletedTasks[0].taskId, 'task-done');
   assert.equal(taskSpace.summary.taskCount, 2);
+  assert.match(String(taskSpace.focusTaskReason || ''), /only waiting task|focus task|focused|supervisor memory/i);
+  assert.equal(taskSpace.decisionHints.preferredAction, 'continue_waiting_task');
+  assert.equal(taskSpace.decisionHints.preferredTaskId, 'task-waiting');
+  assert.match(String(taskSpace.decisionHints.reason || ''), /waiting task/i);
 });

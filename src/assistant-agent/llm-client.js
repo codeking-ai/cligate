@@ -29,6 +29,36 @@ function pickClaudeAccount() {
   return getClaudeAccount(snapshot.activeAccount) || getClaudeAccount(accounts[0].email) || null;
 }
 
+function buildClaudeAccountCandidate(client, claudeAccount) {
+  if (!claudeAccount?.accessToken) return null;
+  return {
+    kind: 'claude-account',
+    label: claudeAccount.email || 'claude',
+    model: client.defaultClaudeModel,
+    send: async (request) => {
+      const result = await sendClaudeMessageWithMeta({
+        ...request,
+        model: mapToClaudeModel(request.model || client.defaultClaudeModel)
+      }, claudeAccount.accessToken);
+      return normalizeAnthropicResponse(result.data);
+    }
+  };
+}
+
+async function buildChatGptAccountCandidate(client, chatAccount) {
+  if (!chatAccount?.email) return null;
+  const creds = await getCredentialsForAccount(chatAccount.email);
+  if (!(creds?.accessToken && creds?.accountId)) {
+    return null;
+  }
+  return {
+    kind: 'chatgpt-account',
+    label: chatAccount.email,
+    model: client.defaultChatGptModel,
+    send: async (request) => sendChatGptAssistantRequest(request, creds, client.defaultChatGptModel)
+  };
+}
+
 function normalizeAnthropicResponse(response = {}) {
   const content = Array.isArray(response?.content) ? response.content : [];
   const text = content
@@ -229,35 +259,27 @@ export class AssistantLlmClient {
     }
 
     if (config.sources.claudeAccount) {
-      const claudeAccount = pickClaudeAccount();
-      if (claudeAccount?.accessToken) {
-        candidates.push({
-          kind: 'claude-account',
-          label: claudeAccount.email || 'claude',
-          model: this.defaultClaudeModel,
-          send: async (request) => {
-            const result = await sendClaudeMessageWithMeta({
-              ...request,
-              model: mapToClaudeModel(request.model || this.defaultClaudeModel)
-            }, claudeAccount.accessToken);
-            return normalizeAnthropicResponse(result.data);
-          }
-        });
+      const claudeCandidate = buildClaudeAccountCandidate(this, pickClaudeAccount());
+      if (claudeCandidate) {
+        candidates.push(claudeCandidate);
       }
     }
 
     if (config.sources.chatgptAccount) {
-      const chatAccount = pickChatGptAccount();
-      if (chatAccount?.email) {
-        const creds = await getCredentialsForAccount(chatAccount.email);
-        if (creds?.accessToken && creds?.accountId) {
-          candidates.push({
-            kind: 'chatgpt-account',
-            label: chatAccount.email,
-            model: this.defaultChatGptModel,
-            send: async (request) => sendChatGptAssistantRequest(request, creds, this.defaultChatGptModel)
-          });
-        }
+      const chatCandidate = await buildChatGptAccountCandidate(this, pickChatGptAccount());
+      if (chatCandidate) {
+        candidates.push(chatCandidate);
+      }
+    }
+
+    if (candidates.length === 0) {
+      const emergencyClaudeCandidate = buildClaudeAccountCandidate(this, pickClaudeAccount());
+      if (emergencyClaudeCandidate) {
+        candidates.push(emergencyClaudeCandidate);
+      }
+      const emergencyChatCandidate = await buildChatGptAccountCandidate(this, pickChatGptAccount());
+      if (emergencyChatCandidate) {
+        candidates.push(emergencyChatCandidate);
       }
     }
 

@@ -1007,6 +1007,34 @@ test('AgentOrchestratorMessageService can remember approval at conversation scop
   assert.equal(approvalPolicyStore.listPolicies({ scope: 'conversation', scopeRef: 'conv_123' }).length, 1);
 });
 
+test('AgentOrchestratorMessageService treats 全部同意 phrasing as remembered approval intent', async () => {
+  const runtimeSessionManager = createInteractiveRuntimeManager();
+  const approvalPolicyStore = new AgentRuntimeApprovalPolicyStore({
+    configDir: createTempDir('cligate-agent-channels-approval-all-yes-')
+  });
+  const service = new AgentOrchestratorMessageService({ runtimeSessionManager, approvalPolicyStore });
+
+  const started = await service.startRuntimeTask({
+    provider: 'claude-code',
+    input: 'interactive task'
+  });
+  const pendingApproval = runtimeSessionManager.approvalService.listPending(started.id)[0];
+
+  const resolved = await service.routeUserMessage({
+    message: { text: '全部同意，别再问了' },
+    conversation: {
+      id: 'conv_all_yes',
+      activeRuntimeSessionId: started.id,
+      lastPendingApprovalId: pendingApproval.approvalId
+    }
+  });
+
+  assert.equal(resolved.type, 'approval_resolved');
+  assert.equal(resolved.approval.status, 'approved');
+  assert.ok(resolved.policy);
+  assert.equal(resolved.policy.scope, 'conversation');
+});
+
 test('AgentOrchestratorMessageService returns a friendly busy message while the active session is still running', async () => {
   const runtimeSessionManager = createInteractiveRuntimeManager();
   const service = new AgentOrchestratorMessageService({ runtimeSessionManager });

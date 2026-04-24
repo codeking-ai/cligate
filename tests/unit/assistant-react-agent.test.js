@@ -25,6 +25,7 @@ import AssistantDialogueService from '../../src/assistant-agent/dialogue-service
 import { SupervisorTaskStore } from '../../src/agent-orchestrator/supervisor-task-store.js';
 import createDefaultAssistantToolRegistry from '../../src/assistant-core/tool-registry.js';
 import { buildAnthropicToolDefinitions } from '../../src/assistant-agent/tool-schema.js';
+import { AssistantLlmClient } from '../../src/assistant-agent/llm-client.js';
 
 function createTempDir(prefix) {
   return mkdtempSync(join(tmpdir(), prefix));
@@ -182,6 +183,12 @@ class DisabledLlmClient {
 
   getFallbackReason() {
     return 'assistant_agent_disabled';
+  }
+}
+
+class ShouldNotBeCalledLlmClient {
+  async hasAvailableSource() {
+    throw new Error('LLM path should not be used for pending runtime interactions');
   }
 }
 
@@ -434,7 +441,10 @@ test('Assistant ReAct prompt includes task-space-first context', async () => {
     status: 'waiting_approval',
     executorStrategy: 'codex',
     primaryExecutionId: waitingSession.id,
+    sourceTaskId: 'task-source-1',
     metadata: {
+      latestExecutionId: waitingSession.id,
+      originKind: 'related_sibling',
       runtimeSessionId: waitingSession.id,
       provider: 'codex'
     }
@@ -454,11 +464,104 @@ test('Assistant ReAct prompt includes task-space-first context', async () => {
 
   const promptText = String(service.llmClient.calls[0]?.messages?.[0]?.content?.[0]?.text || '');
   assert.match(promptText, /<task_space>/);
+  assert.match(promptText, /<routing_hints>/);
   assert.match(promptText, /"focusTask"/);
   assert.match(promptText, /"waitingTasks"/);
+  assert.match(promptText, /"focusTaskReason":/);
+  assert.match(promptText, /"taskRelationshipSummary":/);
+  assert.match(promptText, /"decisionHints":/);
+  assert.match(promptText, /"requestType":/);
+  assert.match(promptText, /"preferredAction":/);
+  assert.match(promptText, /"preferredTaskId":/);
+  assert.match(promptText, /"originKind": "related_sibling"/);
+  assert.match(promptText, /"sourceTaskId": "task-source-1"/);
+  assert.match(promptText, /"latestExecutionId":/);
   assert.match(String(service.llmClient.calls[0]?.system || ''), /Use continue_task|优先继续该 task/);
   assert.match(String(service.llmClient.calls[0]?.system || ''), /clarification|澄清/);
   assert.match(String(service.llmClient.calls[0]?.system || ''), /Decision example|决策示例/);
+  assert.match(String(service.llmClient.calls[0]?.system || ''), /routingHints|requestType|preferredExecutionTarget/);
+  assert.match(String(service.llmClient.calls[0]?.system || ''), /originKind|sourceTaskId|latestExecutionId/);
+});
+
+test('AssistantLlmClient falls back to account-backed sources when bridge sources are unavailable', async () => {
+  const client = new AssistantLlmClient({
+    enabled: true,
+    allowChatGptAccountSource: false,
+    allowClaudeAccountSource: false
+  });
+
+  const originalGetRuntimeConfig = client.getRuntimeConfig.bind(client);
+  client.getRuntimeConfig = () => ({
+    ...originalGetRuntimeConfig(),
+    enabled: true,
+    sources: {
+      chatgptAccount: false,
+      claudeAccount: false,
+      anthropicApiKey: false,
+      openaiApiKeyBridge: false,
+      azureOpenaiApiKeyBridge: false
+    }
+  });
+
+  const candidates = await client.listCandidateSources();
+  assert.ok(Array.isArray(candidates));
+  assert.ok(candidates.length >= 1);
+  assert.match(String(candidates[0]?.kind || ''), /chatgpt-account|claude-account/);
+});
+
+test('Assistant mode bypasses the LLM path when the conversation is waiting for approval', async () => {
+  const fixture = createFixture();
+  const llmClient = new ShouldNotBeCalledLlmClient();
+  const dialogueService = new AssistantDialogueService({
+    runStore: fixture.runStore,
+    observationService: fixture.observationService,
+    taskViewService: fixture.taskViewService,
+    messageService: fixture.messageService,
+    llmClient
+  });
+  const assistantModeService = new AssistantModeService({
+    conversationStore: fixture.conversationStore,
+    assistantSessionStore: fixture.sessionStore,
+    assistantRunStore: fixture.runStore,
+    observationService: fixture.observationService,
+    messageService: fixture.messageService,
+    taskViewService: fixture.taskViewService,
+    dialogueService
+  });
+  const chatService = new ChatUiConversationService({
+    conversationStore: fixture.conversationStore,
+    messageService: fixture.messageService,
+    taskStore: fixture.taskStore,
+    assistantModeService
+  });
+
+  const conversation = fixture.conversationStore.save({
+    id: 'conv-waiting-approval',
+    channel: 'chat-ui',
+    accountId: 'default',
+    externalConversationId: 'chat-ui-approval',
+    externalUserId: 'local-user',
+    title: 'Waiting approval',
+    mode: 'assistant',
+    activeRuntimeSessionId: null,
+    lastPendingApprovalId: 'approval-1',
+    lastPendingQuestionId: null,
+    metadata: {
+      assistantCore: {
+        mode: 'assistant'
+      }
+    },
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  });
+
+  const result = await chatService.sendMessage({
+    conversationId: conversation.id,
+    text: '同意',
+    defaultRuntimeProvider: 'codex'
+  });
+
+  assert.notEqual(result.type, 'assistant_run_accepted');
 });
 
 test('Assistant ReAct can continue a task by task id instead of activeRuntimeSessionId', async () => {

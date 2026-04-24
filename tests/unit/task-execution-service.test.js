@@ -237,3 +237,263 @@ test('AgentOrchestratorMessageService answers natural-language status through su
   assert.match(String(result.message || ''), /Polish login page/);
   assert.match(String(result.message || ''), /running/i);
 });
+
+test('AgentOrchestratorMessageService returns multi-task supervisor status overview for natural-language progress queries', async () => {
+  const { messageService } = createFixture();
+
+  const result = await messageService.routeUserMessage({
+    message: { text: '进展如何' },
+    conversation: {
+      id: 'conv-multi-status',
+      metadata: {
+        supervisor: {
+          taskMemory: {
+            activeTaskId: 'task-a',
+            byTask: {
+              'task-a': {
+                taskId: 'task-a',
+                sessionId: 'session-a',
+                provider: 'codex',
+                title: 'Build dashboard',
+                status: 'running',
+                summary: 'Implementing dashboard widgets.'
+              },
+              'task-b': {
+                taskId: 'task-b',
+                sessionId: 'session-b',
+                provider: 'claude-code',
+                title: 'Review API',
+                status: 'waiting_user',
+                pendingQuestion: 'Need database schema'
+              }
+            }
+          }
+        }
+      }
+    }
+  });
+
+  assert.equal(result.type, 'supervisor_status');
+  assert.match(String(result.message || ''), /2 active task\(s\)/i);
+  assert.match(String(result.message || ''), /Build dashboard/);
+  assert.match(String(result.message || ''), /Review API/);
+});
+
+test('AgentOrchestratorMessageService chooses the current task for descriptive multi-task follow-up instead of asking for clarification', async () => {
+  const { messageService, runtimeSessionManager, supervisorTaskStore } = createFixture();
+
+  const primary = await messageService.startRuntimeTask({
+    provider: 'codex',
+    input: 'build dashboard',
+    metadata: {
+      taskId: 'task-a',
+      conversationId: 'conv-smart-followup'
+    }
+  });
+  supervisorTaskStore.upsertForRuntime({
+    taskId: 'task-a',
+    conversationId: 'conv-smart-followup',
+    runtimeSessionId: primary.id,
+    provider: 'codex',
+    title: 'Build dashboard',
+    goal: 'build dashboard',
+    status: 'running'
+  });
+  supervisorTaskStore.create({
+    id: 'task-b',
+    conversationId: 'conv-smart-followup',
+    title: 'Review API',
+    goal: 'review api',
+    status: 'running',
+    executorStrategy: 'claude-code',
+    primaryExecutionId: 'session-b',
+    metadata: {
+      runtimeSessionId: 'session-b',
+      provider: 'claude-code'
+    }
+  });
+
+  const result = await messageService.routeUserMessage({
+    message: { text: '把仪表盘改成两列布局' },
+    conversation: {
+      id: 'conv-smart-followup',
+      metadata: {
+        supervisor: {
+          taskMemory: {
+            activeTaskId: 'task-a',
+            byTask: {
+              'task-a': {
+                taskId: 'task-a',
+                sessionId: primary.id,
+                provider: 'codex',
+                title: 'Build dashboard',
+                status: 'running',
+                summary: 'Implement dashboard widgets.'
+              },
+              'task-b': {
+                taskId: 'task-b',
+                sessionId: 'session-b',
+                provider: 'claude-code',
+                title: 'Review API',
+                status: 'running',
+                summary: 'Review authentication endpoints.'
+              }
+            }
+          }
+        }
+      }
+    }
+  });
+
+  const turns = runtimeSessionManager.listTurns(primary.id, { limit: 10 });
+  assert.equal(result.type, 'runtime_continued');
+  assert.equal(result.session.id, primary.id);
+  assert.equal(turns[0]?.input, '把仪表盘改成两列布局');
+});
+
+test('AgentOrchestratorMessageService reuses remembered task identity for retry phrasing while starting a fresh execution', async () => {
+  const { messageService, supervisorTaskStore } = createFixture();
+
+  const result = await messageService.routeUserMessage({
+    message: { text: '重试刚才那个' },
+    conversation: {
+      metadata: {
+        supervisor: {
+          brief: {
+            kind: 'last_failed',
+            taskId: 'task-retry',
+            title: 'Polish login page',
+            provider: 'codex',
+            providerLabel: 'Codex',
+            status: 'failed',
+            summary: '',
+            result: '',
+            error: 'Write was blocked.',
+            waitingReason: '',
+            nextSuggestion: 'You can retry this task.'
+          }
+        }
+      }
+    },
+    defaultRuntimeProvider: 'claude-code'
+  });
+
+  const task = supervisorTaskStore.get('task-retry');
+  assert.equal(result.type, 'runtime_started');
+  assert.equal(result.startedFresh, true);
+  assert.equal(result.session.execution.taskId, 'task-retry');
+  assert.equal(task.id, 'task-retry');
+  assert.equal(task.metadata.originKind, 'retry_task');
+  assert.match(String(result.message || ''), /Retrying remembered task/i);
+});
+
+test('AgentOrchestratorMessageService starts a related sibling task with source-task memory but fresh task identity', async () => {
+  const { messageService, supervisorTaskStore } = createFixture();
+
+  const result = await messageService.routeUserMessage({
+    message: { text: '基于刚才那个再做一个：注册页' },
+    conversation: {
+      metadata: {
+        supervisor: {
+          brief: {
+            kind: 'last_completed',
+            taskId: 'task-source',
+            title: 'Create a login page',
+            provider: 'codex',
+            providerLabel: 'Codex',
+            status: 'completed',
+            summary: 'The login page is finished.',
+            result: 'index.html is ready.',
+            error: '',
+            waitingReason: '',
+            nextSuggestion: 'You can ask for a revision, a follow-up change, or start a related task.'
+          }
+        }
+      }
+    },
+    defaultRuntimeProvider: 'claude-code'
+  });
+
+  const freshTask = supervisorTaskStore.findByRuntimeSessionId(result.session.id);
+  assert.equal(result.type, 'runtime_started');
+  assert.equal(result.startedFresh, true);
+  assert.notEqual(freshTask?.id, 'task-source');
+  assert.equal(freshTask?.sourceTaskId, 'task-source');
+  assert.equal(freshTask?.metadata?.originKind, 'related_sibling');
+  assert.match(String(result.message || ''), /related task/i);
+});
+
+test('AgentOrchestratorMessageService chooses the non-focus active task for alternate-task phrasing', async () => {
+  const { messageService, runtimeSessionManager, supervisorTaskStore } = createFixture();
+
+  const primary = await messageService.startRuntimeTask({
+    provider: 'codex',
+    input: 'build qq page',
+    metadata: {
+      taskId: 'task-qq',
+      conversationId: 'conv-alt-task'
+    }
+  });
+  const alternate = await messageService.startRuntimeTask({
+    provider: 'claude-code',
+    input: 'build x page',
+    metadata: {
+      taskId: 'task-x',
+      conversationId: 'conv-alt-task'
+    }
+  });
+
+  supervisorTaskStore.upsertForRuntime({
+    taskId: 'task-qq',
+    conversationId: 'conv-alt-task',
+    runtimeSessionId: primary.id,
+    provider: 'codex',
+    title: 'Build QQ page',
+    goal: 'build qq page',
+    status: 'completed'
+  });
+  supervisorTaskStore.upsertForRuntime({
+    taskId: 'task-x',
+    conversationId: 'conv-alt-task',
+    runtimeSessionId: alternate.id,
+    provider: 'claude-code',
+    title: 'Build X page',
+    goal: 'build x page',
+    status: 'waiting_approval'
+  });
+
+  const result = await messageService.routeUserMessage({
+    message: { text: '我的另外一个任务呢，执行的咋样了' },
+    conversation: {
+      id: 'conv-alt-task',
+      metadata: {
+        supervisor: {
+          taskMemory: {
+            activeTaskId: 'task-qq',
+            byTask: {
+              'task-qq': {
+                taskId: 'task-qq',
+                sessionId: primary.id,
+                provider: 'codex',
+                title: 'Build QQ page',
+                status: 'completed'
+              },
+              'task-x': {
+                taskId: 'task-x',
+                sessionId: alternate.id,
+                provider: 'claude-code',
+                title: 'Build X page',
+                status: 'waiting_approval',
+                pendingApprovalTitle: 'Claude Code wants to use Write'
+              }
+            }
+          }
+        }
+      }
+    }
+  });
+
+  assert.equal(result.type, 'command_error');
+  assert.match(String(result.message || ''), /Build X page|Claude Code/i);
+  assert.match(String(result.message || ''), /permission decision|waiting on a permission decision/i);
+});

@@ -130,6 +130,129 @@ function isTerminalTaskStatus(status) {
   return ['completed', 'failed', 'cancelled'].includes(String(status || '').trim());
 }
 
+function normalizeComparableText(value) {
+  return String(value || '').trim().toLowerCase();
+}
+
+function tokenizeComparableText(value) {
+  return [...new Set(
+    normalizeComparableText(value)
+      .replace(/[^a-z0-9\u3400-\u9fff]+/g, ' ')
+      .split(/\s+/)
+      .map((entry) => entry.trim())
+      .filter((entry) => entry.length >= 2)
+  )];
+}
+
+function countTokenOverlap(text, candidates = []) {
+  const sourceTokens = tokenizeComparableText(text);
+  if (sourceTokens.length === 0) return 0;
+  const candidateTokens = new Set(candidates.flatMap((entry) => tokenizeComparableText(entry)));
+  return sourceTokens.filter((entry) => candidateTokens.has(entry)).length;
+}
+
+function isGenericAmbiguousFollowUp(input) {
+  const text = String(input || '').trim();
+  if (!text) return false;
+  return [
+    /^(继续|继续一下|继续刚才那个|继续这个|接着做|接着来|继续推进|看看进展|看下进展|进展如何|现在怎么样|状态如何)$/i,
+    /^(continue|resume|keep going|follow up|status|progress|check progress)$/i
+  ].some((pattern) => pattern.test(text));
+}
+
+function isDescriptiveTaskFollowUp(input) {
+  const text = String(input || '').trim();
+  if (!text) return false;
+  if (isGenericAmbiguousFollowUp(text)) return false;
+  return [
+    /(把.+改|改成|修一下|修复|调整|优化|补充|增加|新增|再加|基于刚才|基于这个|另外再做一个|相关任务|继续处理|继续做)/,
+    /\b(change|update|fix|revise|add|adjust|refine|continue with|follow up on)\b/i
+  ].some((pattern) => pattern.test(text));
+}
+
+function isAlternateTaskReference(input) {
+  const text = String(input || '').trim();
+  if (!text) return false;
+  return [
+    /(另外(那)?个任务|另一个任务|另一个呢|另外那个呢|剩下那个任务|另外一个呢|另一个怎么样了|另外那个怎么样了)/,
+    /\b(the other task|another task|the remaining task|the other one)\b/i
+  ].some((pattern) => pattern.test(text));
+}
+
+function scoreTaskCandidate(task, {
+  text = '',
+  currentTaskId = '',
+  waitingTaskCount = 0
+} = {}) {
+  let score = 0;
+  const normalizedText = normalizeComparableText(text);
+  const normalizedTaskId = String(task?.taskId || '').trim();
+  const isCurrent = normalizedTaskId && normalizedTaskId === String(currentTaskId || '').trim();
+
+  if (isCurrent) score += 4;
+  if (task?.status === 'waiting_user') score += 2;
+  if (task?.status === 'waiting_approval') score += 2;
+  if (waitingTaskCount === 1 && ['waiting_user', 'waiting_approval'].includes(String(task?.status || '').trim())) {
+    score += 3;
+  }
+  if (normalizedText.includes(normalizeComparableText(task?.provider))) {
+    score += 2;
+  }
+
+  score += Math.min(6, countTokenOverlap(text, [
+    task?.title,
+    task?.summary,
+    task?.result,
+    task?.error,
+    task?.pendingApprovalTitle,
+    task?.pendingQuestion
+  ]) * 2);
+
+  if (isDescriptiveTaskFollowUp(text) && isCurrent) {
+    score += 4;
+  }
+
+  if (
+    ['waiting_user', 'waiting_approval'].includes(String(task?.status || '').trim())
+    && !isGenericAmbiguousFollowUp(text)
+    && !isNaturalLanguageStatusIntent(text)
+  ) {
+    score += 1;
+  }
+
+  return score;
+}
+
+function chooseBestTaskMatch(tasks = [], {
+  text = '',
+  currentTaskId = ''
+} = {}) {
+  const waitingTaskCount = tasks.filter((entry) => ['waiting_user', 'waiting_approval'].includes(String(entry?.status || '').trim())).length;
+  const ranked = tasks
+    .map((task) => ({
+      task,
+      score: scoreTaskCandidate(task, {
+        text,
+        currentTaskId,
+        waitingTaskCount
+      })
+    }))
+    .sort((left, right) => right.score - left.score);
+
+  const top = ranked[0] || null;
+  const second = ranked[1] || null;
+  if (!top || top.score <= 0) {
+    return null;
+  }
+  if (second && top.score - second.score < 3 && isGenericAmbiguousFollowUp(text)) {
+    return null;
+  }
+  if (second && top.score - second.score < 2 && top.score < 6) {
+    return null;
+  }
+  return top.task;
+}
+
 function selectTaskRoute(conversation, { text = '', parsed = null, activeSession = null } = {}, store = supervisorTaskStore) {
   if (!conversation) {
     return {
@@ -143,6 +266,18 @@ function selectTaskRoute(conversation, { text = '', parsed = null, activeSession
   const tasks = getTrackedSupervisorTasks(conversation, store);
   const activeTasks = tasks.filter((entry) => !isTerminalTaskStatus(entry.status));
   const waitingTasks = activeTasks.filter((entry) => ['waiting_approval', 'waiting_user'].includes(entry.status));
+  const currentTaskId = String(currentTask?.taskId || '').trim();
+  const alternateTaskMatch = isAlternateTaskReference(text)
+    ? activeTasks.find((entry) => String(entry?.taskId || '').trim() !== currentTaskId) || null
+    : null;
+
+  if (alternateTaskMatch) {
+    return {
+      kind: 'alternate_task',
+      task: alternateTaskMatch,
+      activeTasks
+    };
+  }
 
   if (currentTask?.taskId) {
     const matched = activeTasks.find((entry) => entry.taskId === String(currentTask.taskId).trim())
@@ -156,7 +291,7 @@ function selectTaskRoute(conversation, { text = '', parsed = null, activeSession
     }
   }
 
-  if (!parsed && waitingTasks.length === 1) {
+  if (!parsed && waitingTasks.length === 1 && !isNaturalLanguageStatusIntent(text)) {
     return {
       kind: 'single_waiting',
       task: waitingTasks[0],
@@ -164,7 +299,7 @@ function selectTaskRoute(conversation, { text = '', parsed = null, activeSession
     };
   }
 
-  if (!parsed && activeTasks.length === 1) {
+  if (!parsed && activeTasks.length === 1 && !isNaturalLanguageStatusIntent(text)) {
     return {
       kind: 'single_active',
       task: activeTasks[0],
@@ -173,6 +308,24 @@ function selectTaskRoute(conversation, { text = '', parsed = null, activeSession
   }
 
   if (!parsed && activeTasks.length > 1) {
+    if (isNaturalLanguageStatusIntent(text)) {
+      return {
+        kind: 'status_overview',
+        task: null,
+        activeTasks
+      };
+    }
+    const scoredMatch = chooseBestTaskMatch(activeTasks, {
+      text,
+      currentTaskId
+    });
+    if (scoredMatch) {
+      return {
+        kind: 'scored_match',
+        task: scoredMatch,
+        activeTasks
+      };
+    }
     return {
       kind: 'needs_clarification',
       task: null,
@@ -202,6 +355,31 @@ function buildTaskClarificationResponse(tasks = []) {
     message: [
       'There are multiple active tasks in this conversation. Tell me which one to continue, or start a fresh one with /new.',
       lines.length > 0 ? lines.join('\n') : null
+    ].filter(Boolean).join('\n')
+  };
+}
+
+function buildConversationTaskStatusResponse(conversation, tasks = [], session = null) {
+  if (!Array.isArray(tasks) || tasks.length === 0) {
+    return buildSupervisorStatusResponse(conversation, session);
+  }
+
+  const lines = tasks.slice(0, 5).map((entry, index) => {
+    const waiting = entry.pendingApprovalTitle
+      ? ` / waiting approval: ${entry.pendingApprovalTitle}`
+      : (entry.pendingQuestion ? ` / waiting input: ${entry.pendingQuestion}` : '');
+    const summary = String(entry.summary || entry.result || '').trim();
+    return [
+      `${index + 1}. ${entry.title || entry.taskId} / ${providerLabel(entry.provider)} / ${entry.status || 'unknown'}${waiting}`,
+      summary ? `   ${summary}` : null
+    ].filter(Boolean).join('\n');
+  });
+
+  return {
+    type: 'supervisor_status',
+    message: [
+      `There are ${tasks.length} active task(s) in this conversation.`,
+      lines.join('\n')
     ].filter(Boolean).join('\n')
   };
 }
@@ -277,22 +455,98 @@ function isNaturalLanguageTaskContinueIntent(input) {
   ].some((pattern) => pattern.test(text));
 }
 
+function isRetryTaskIntent(input) {
+  const text = String(input || '').trim();
+  if (!text) return false;
+  return [
+    /^(重试|再试一次|重新试|retry|try again)/i,
+    /(重试刚才那个|重试这个|retry this|retry that)/i
+  ].some((pattern) => pattern.test(text));
+}
+
+function isReturnToSourceIntent(input) {
+  const text = String(input || '').trim();
+  if (!text) return false;
+  return [
+    /(回到上一个任务|回到原任务|回到刚才那个任务|回到原来的任务)/,
+    /\b(return to (the )?(previous|source|original) task)\b/i
+  ].some((pattern) => pattern.test(text));
+}
+
+function isRelatedSiblingIntent(input) {
+  const text = String(input || '').trim();
+  if (!text) return false;
+  return [
+    /(另外再做一个|基于刚才那个再做一个|相关任务|再做一个|再来一个)/,
+    /\b(another one|related task|sibling task|based on that create another)\b/i
+  ].some((pattern) => pattern.test(text));
+}
+
+function classifyRememberedTaskIntent(input, brief = null) {
+  if (!brief || typeof brief !== 'object' || !String(brief.kind || '').trim()) {
+    return null;
+  }
+
+  if (isRetryTaskIntent(input)) {
+    return {
+      originKind: 'retry_task',
+      reuseTaskIdentity: true
+    };
+  }
+
+  if (isReturnToSourceIntent(input)) {
+    return {
+      originKind: 'return_to_source',
+      reuseTaskIdentity: false
+    };
+  }
+
+  if (isRelatedSiblingIntent(input)) {
+    return {
+      originKind: 'related_sibling',
+      reuseTaskIdentity: false
+    };
+  }
+
+  if (isDescriptiveTaskFollowUp(input) || isNaturalLanguageTaskContinueIntent(input)) {
+    return {
+      originKind: 'remembered_follow_up',
+      reuseTaskIdentity: true
+    };
+  }
+
+  return null;
+}
+
 function shouldStartFreshFromRememberedContext(brief = null) {
   if (!brief || typeof brief !== 'object') return false;
   return ['last_completed', 'last_failed'].includes(String(brief.kind || ''));
 }
 
-function buildRememberedContextMessage(brief = null) {
+function buildRememberedContextMessage(brief = null, rememberedIntent = null) {
   const sourceTitle = String(brief?.title || '').trim();
+  const originKind = String(rememberedIntent?.originKind || '').trim();
+  if (originKind === 'retry_task' && sourceTitle) {
+    return `Retrying remembered task "${sourceTitle}" with a fresh execution.`;
+  }
+  if (originKind === 'return_to_source' && sourceTitle) {
+    return `Returning to remembered source task "${sourceTitle}" with a fresh execution.`;
+  }
+  if (originKind === 'related_sibling' && sourceTitle) {
+    return `Started a related task derived from "${sourceTitle}".`;
+  }
+  if (originKind === 'remembered_follow_up' && sourceTitle) {
+    return `Continuing remembered task "${sourceTitle}" with a fresh execution.`;
+  }
   if (!sourceTitle) {
     return 'Started a fresh task using remembered conversation context.';
   }
   return `Started a fresh task using remembered conversation context from "${sourceTitle}".`;
 }
 
-function buildRememberedSupervisorContext(brief = null) {
+function buildRememberedSupervisorContext(brief = null, rememberedIntent = null) {
   return {
-    kind: 'direct',
+    kind: String(rememberedIntent?.originKind || 'direct'),
     title: '',
     summary: '',
     sourceTitle: String(brief?.title || '').trim(),
@@ -358,12 +612,12 @@ function isApprovalNegative(input) {
 
 function wantsRememberedApproval(input) {
   const text = String(input || '').trim().toLowerCase();
-  return /(后续|以后|本会话|别再问|都允许|全部允许|this session|from now on|remember|don'?t ask again)/i.test(text);
+  return /(后续|以后|本会话|别再问|都允许|全部允许|都同意|全部同意|一律同意|this session|from now on|remember|don'?t ask again)/i.test(text);
 }
 
 function wantsConversationRememberedApproval(input) {
   const text = String(input || '').trim().toLowerCase();
-  return /(这个对话|这次对话|当前对话|这个聊天|这条会话|this conversation|this chat|以后都|后续都|别再问)/i.test(text);
+  return /(这个对话|这次对话|当前对话|这个聊天|这条会话|this conversation|this chat|以后都|后续都|别再问|后面都同意|以后都同意)/i.test(text);
 }
 
 export class AgentOrchestratorMessageService {
@@ -716,8 +970,16 @@ export class AgentOrchestratorMessageService {
       };
     }
 
+    if (!parsed?.command && taskRoute.kind === 'status_overview') {
+      return buildConversationTaskStatusResponse(conversation, taskRoute.activeTasks, resolvedSession || activeSession || null);
+    }
+
     if (!parsed?.command && taskRoute.kind === 'needs_clarification') {
       return buildTaskClarificationResponse(taskRoute.activeTasks);
+    }
+
+    if (!parsed?.command && isNaturalLanguageStatusIntent(text) && taskRoute.activeTasks?.length > 1) {
+      return buildConversationTaskStatusResponse(conversation, taskRoute.activeTasks, resolvedSession || activeSession || null);
     }
 
     if (!parsed?.command && isNaturalLanguageStatusIntent(text)) {
@@ -754,22 +1016,34 @@ export class AgentOrchestratorMessageService {
       };
     }
 
+    const rememberedIntent = !resolvedSessionId
+      ? classifyRememberedTaskIntent(text, supervisorBrief)
+      : null;
+    const startMetadata = rememberedIntent
+      ? {
+          ...metadata,
+          taskId: rememberedIntent.reuseTaskIdentity ? (supervisorBrief?.taskId || metadata?.taskId || '') : (metadata?.taskId || ''),
+          sourceTaskId: supervisorBrief?.taskId || metadata?.sourceTaskId || '',
+          originKind: rememberedIntent.originKind
+        }
+      : metadata;
+
     const session = await this.startRuntimeTask({
       provider: preferredProvider,
       input: text,
       cwd,
       model,
-      metadata
+      metadata: startMetadata
     });
 
-    if (shouldStartFreshFromRememberedContext(supervisorBrief)) {
+    if (shouldStartFreshFromRememberedContext(supervisorBrief) || rememberedIntent) {
       return {
         type: 'runtime_started',
         provider: preferredProvider,
         session,
         startedFresh: true,
-        message: buildRememberedContextMessage(supervisorBrief),
-        supervisorContext: buildRememberedSupervisorContext(supervisorBrief)
+        message: buildRememberedContextMessage(supervisorBrief, rememberedIntent),
+        supervisorContext: buildRememberedSupervisorContext(supervisorBrief, rememberedIntent)
       };
     }
 

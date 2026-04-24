@@ -115,6 +115,8 @@ function normalizeSupervisorStoreTask(task = null) {
     id: task.id,
     conversationId: task.conversationId || '',
     runtimeSessionId: task.metadata?.runtimeSessionId || task.primaryExecutionId || '',
+    primaryExecutionId: task.primaryExecutionId || '',
+    latestExecutionId: task.metadata?.latestExecutionId || task.metadata?.runtimeSessionId || task.primaryExecutionId || '',
     provider: task.executorStrategy || task.metadata?.provider || '',
     title: task.title || '',
     status: task.status || '',
@@ -123,6 +125,7 @@ function normalizeSupervisorStoreTask(task = null) {
     result: task.result || '',
     error: task.error || '',
     originKind: task.metadata?.originKind || '',
+    sourceTaskId: task.sourceTaskId || task.metadata?.sourceTaskId || '',
     updatedAt: task.updatedAt || task.lastUpdateAt || ''
   };
 }
@@ -158,6 +161,8 @@ function summarizeTask(task = null) {
     id: task.id,
     conversationId: task.conversationId || '',
     runtimeSessionId: task.runtimeSessionId || '',
+    primaryExecutionId: task.primaryExecutionId || task.runtimeSessionId || '',
+    latestExecutionId: task.latestExecutionId || task.runtimeSessionId || '',
     provider: task.provider || '',
     title: task.title || '',
     status: task.status || '',
@@ -166,6 +171,7 @@ function summarizeTask(task = null) {
     result: task.result || '',
     error: task.error || '',
     originKind: task.originKind || '',
+    sourceTaskId: task.sourceTaskId || '',
     updatedAt: task.updatedAt || ''
   };
 }
@@ -236,6 +242,92 @@ function deriveLastUserVisibleMessage(deliveries = []) {
 
 function isTerminalTaskState(state = '') {
   return ['completed', 'failed', 'cancelled'].includes(String(state || '').trim());
+}
+
+function buildTaskRelationshipSummary(record = null) {
+  const task = record?.task || null;
+  if (!task?.id) return '';
+  if (task.originKind === 'retry_task') {
+    return task.sourceTaskId
+      ? `This task is a retry of source task ${task.sourceTaskId}.`
+      : 'This task is a retry execution.';
+  }
+  if (task.originKind === 'return_to_source') {
+    return task.sourceTaskId
+      ? `This task returns to source task ${task.sourceTaskId}.`
+      : 'This task returns to an earlier source task.';
+  }
+  if (task.originKind === 'related_sibling') {
+    return task.sourceTaskId
+      ? `This task is a related sibling derived from source task ${task.sourceTaskId}.`
+      : 'This task is a related sibling task.';
+  }
+  if (task.originKind === 'remembered_follow_up') {
+    return task.sourceTaskId
+      ? `This task continues remembered work linked to source task ${task.sourceTaskId}.`
+      : 'This task continues remembered work from the conversation.';
+  }
+  return '';
+}
+
+function buildFocusTaskReason({
+  focusTask = null,
+  waitingTasks = [],
+  activeTasks = [],
+  currentTaskId = ''
+} = {}) {
+  if (!focusTask) return '';
+  if (focusTask.taskId && focusTask.taskId === String(currentTaskId || '').trim()) {
+    return 'This is the current focus task from supervisor memory.';
+  }
+  if (waitingTasks.length === 1 && waitingTasks[0]?.taskId === focusTask.taskId) {
+    return 'This task is focused because it is the only waiting task.';
+  }
+  if (activeTasks[0]?.taskId === focusTask.taskId) {
+    return 'This task is focused because it is the most relevant active task.';
+  }
+  if (['completed', 'failed', 'cancelled'].includes(String(focusTask.state || '').trim())) {
+    return 'This task is focused because no active task is available and it is the most relevant recent task.';
+  }
+  return 'This task is the current best candidate for follow-up.';
+}
+
+function buildDecisionHints({ focusTask = null, waitingTasks = [], activeTasks = [] } = {}) {
+  const shouldClarify = activeTasks.length > 1 && waitingTasks.length !== 1 && !focusTask;
+  let preferredAction = 'inspect_task_space';
+  let reason = 'Inspect task space before choosing a task.';
+  let preferredTaskId = '';
+
+  if (waitingTasks.length === 1) {
+    preferredAction = 'continue_waiting_task';
+    preferredTaskId = waitingTasks[0]?.taskId || '';
+    reason = 'There is exactly one waiting task, so it should be handled first.';
+  } else if (focusTask) {
+    preferredAction = 'continue_focus_task';
+    preferredTaskId = focusTask.taskId || '';
+    reason = 'A focus task is available and is the best default task for follow-up.';
+  } else if (activeTasks.length > 1) {
+    preferredAction = 'clarify_task';
+    reason = 'There are multiple active tasks and no single clear task to continue safely.';
+  } else if (activeTasks.length === 1) {
+    preferredAction = 'continue_active_task';
+    preferredTaskId = activeTasks[0]?.taskId || '';
+    reason = 'There is one active task, so it is the default continuation candidate.';
+  }
+
+  return {
+    shouldClarify,
+    preferredAction,
+    preferredTaskId,
+    reason,
+    shouldPreferStatusOverview: activeTasks.length > 1,
+    shouldPreferWaitingTask: waitingTasks.length === 1,
+    shouldReuseFocusTask: Boolean(focusTask?.taskId),
+    waitingTaskCount: waitingTasks.length,
+    activeTaskCount: activeTasks.length,
+    focusTaskRelationship: buildTaskRelationshipSummary(focusTask),
+    focusTaskExecutionTarget: focusTask?.task?.latestExecutionId || focusTask?.runtimeSession?.id || ''
+  };
 }
 
 export class AssistantTaskViewService {
@@ -517,6 +609,18 @@ export class AssistantTaskViewService {
       recentCompletedTasks,
       recentFailedTasks,
       recentTasks: records.slice(0, Math.max(1, recentLimit)),
+      focusTaskReason: buildFocusTaskReason({
+        focusTask,
+        waitingTasks,
+        activeTasks,
+        currentTaskId
+      }),
+      taskRelationshipSummary: focusTask ? buildTaskRelationshipSummary(focusTask) : '',
+      decisionHints: buildDecisionHints({
+        focusTask,
+        waitingTasks,
+        activeTasks
+      }),
       summary: {
         taskCount: records.length,
         activeCount: records.filter((record) => !isTerminalTaskState(record.state)).length,

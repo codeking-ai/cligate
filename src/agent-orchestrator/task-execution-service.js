@@ -73,6 +73,7 @@ export class TaskExecutionService {
   } = {}) {
     const normalizedTaskId = toText(taskId);
     const normalizedRole = toText(role) || 'primary';
+    const normalizedSourceTaskId = toText(metadata?.sourceTaskId);
     const existingTask = normalizedTaskId ? this.supervisorTaskStore.get(normalizedTaskId) : null;
     const session = await this.runtimeSessionManager.createSession({
       provider,
@@ -101,7 +102,7 @@ export class TaskExecutionService {
       updatedAt: session.updatedAt
     });
 
-    if (conversationId || normalizedTaskId) {
+    if (conversationId || normalizedTaskId || normalizedSourceTaskId) {
       const supervisorTask = this.supervisorTaskStore.upsertForRuntime({
         taskId: normalizedTaskId,
         conversationId,
@@ -110,6 +111,7 @@ export class TaskExecutionService {
         title: session.title || input,
         goal: input,
         status: session.status,
+        sourceTaskId: normalizedSourceTaskId,
         metadata: {
           taskId: normalizedTaskId,
           conversationId: toText(conversationId),

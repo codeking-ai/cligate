@@ -179,6 +179,13 @@ function shouldDeferBackgroundCallback(result = null) {
     && sessionIds.length > 0;
 }
 
+function hasPendingRuntimeInteraction(conversation = null) {
+  return Boolean(
+    String(conversation?.lastPendingApprovalId || '').trim()
+    || String(conversation?.lastPendingQuestionId || '').trim()
+  );
+}
+
 function buildAggregatedRuntimeMessage({ sessions = [], runText = '' } = {}) {
   const zh = /[\u3400-\u9fff]/.test(String(runText || ''));
   const lines = sessions.map((session, index) => {
@@ -654,6 +661,10 @@ export class AssistantModeService {
     }
 
     if (!parsed && !assistantModeActive) {
+      return null;
+    }
+
+    if (!parsed && assistantModeActive && hasPendingRuntimeInteraction(conversation)) {
       return null;
     }
 
