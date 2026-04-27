@@ -3,8 +3,16 @@ import assert from 'node:assert/strict';
 
 import { _testExports } from '../../src/routes/responses-route.js';
 import { orderAssignedCredentials } from '../../src/app-routing.js';
+import { setCredentialRuntimeState } from '../../src/runtime-state.js';
 
-const { _responsesToChatBody, findToolCallSequenceError, resolveResponsesStreamingMode, _responsesToAnthropicBody } = _testExports;
+const {
+  _responsesToChatBody,
+  findToolCallSequenceError,
+  resolveResponsesStreamingMode,
+  _responsesToAnthropicBody,
+  getAssignedFailureReason,
+  normalizeAssignedFailureReason
+} = _testExports;
 
 test('_responsesToChatBody merges assistant text before function_call into one tool-calling assistant message', () => {
   const parsed = {
@@ -213,4 +221,74 @@ test('orderAssignedCredentials shuffles assigned bindings for random strategy', 
     assignments.map((item) => item.credential.email),
     ['a@example.com', 'b@example.com', 'c@example.com']
   );
+});
+
+test('normalizeAssignedFailureReason falls back when value is empty', () => {
+  assert.equal(normalizeAssignedFailureReason('', 'request_failed'), 'request_failed');
+  assert.equal(normalizeAssignedFailureReason(' auth_error_403 ', 'request_failed'), 'auth_error_403');
+});
+
+test('getAssignedFailureReason prefers assigned credential runtime error state', () => {
+  const credentialId = 'api-key:key_assigned_runtime';
+  setCredentialRuntimeState(credentialId, {
+    status: 'invalid',
+    lastError: 'auth_error_403'
+  });
+
+  const reason = getAssignedFailureReason({
+    unavailableReason: 'request_failed',
+    assignments: [
+      {
+        credentialType: 'api-key',
+        credential: { id: 'key_assigned_runtime' },
+        binding: { targetId: 'key_assigned_runtime' }
+      }
+    ]
+  });
+
+  assert.equal(reason, 'auth_error_403');
+
+  setCredentialRuntimeState(credentialId, {
+    status: 'active',
+    lastError: null
+  });
+});
+
+test('getAssignedFailureReason surfaces per-request upstream errors over the misleading "resolved" reason', () => {
+  // Simulates the DeepSeek 400 case: app-routing sets unavailableReason='resolved'
+  // (success-path label) but the assigned API key handler captured the real
+  // upstream HTTP error onto assignment.upstreamErrors before returning false.
+  const reason = getAssignedFailureReason({
+    unavailableReason: 'resolved',
+    assignments: [
+      {
+        credentialType: 'api-key',
+        credential: { id: 'key_deepseek' },
+        binding: { targetId: 'key_deepseek' }
+      }
+    ],
+    upstreamErrors: [
+      {
+        provider: 'deepseek',
+        keyId: 'key_deepseek',
+        status: 400,
+        message: 'The `reasoning_content` in the thinking mode must be passed back to the API.'
+      }
+    ]
+  });
+
+  assert.match(reason, /^deepseek_400:/);
+  assert.match(reason, /reasoning_content/);
+});
+
+test('getAssignedFailureReason picks the most recent upstream error when multiple candidates fail', () => {
+  const reason = getAssignedFailureReason({
+    unavailableReason: 'resolved',
+    upstreamErrors: [
+      { provider: 'openai', status: 401, message: 'invalid_api_key' },
+      { provider: 'deepseek', status: 503, message: 'service_unavailable' }
+    ]
+  });
+
+  assert.equal(reason, 'deepseek_503: service_unavailable');
 });

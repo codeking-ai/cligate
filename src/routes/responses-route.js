@@ -28,7 +28,7 @@ import { logRequest } from '../request-logger.js';
 import { detectRequestApp, resolveAssignedCredentials, orderAssignedCredentials } from '../app-routing.js';
 import { resolveCredentialForRequest } from '../credential-selector.js';
 import { buildCredentialId } from '../credential-registry.js';
-import { markCredentialError, markCredentialRateLimited, markCredentialSuccess, recordRoutingDecision } from '../runtime-state.js';
+import { getCredentialRuntimeState, markCredentialError, markCredentialRateLimited, markCredentialSuccess, recordRoutingDecision } from '../runtime-state.js';
 import { tryHandleLocalResponses } from '../local-routing.js';
 
 const UPSTREAM_URL = 'https://chatgpt.com/backend-api/codex/responses';
@@ -365,8 +365,9 @@ export async function handleResponses(req, res) {
             const result = await _handleResponsesAssignment(req, res, assignment, rawBody, contentEncoding, parsed, modelId, isStreaming, startTime, isCompact);
             if (result !== false) return;
             if (!assignment.fallbackToDefault) {
+                const failureReason = getAssignedFailureReason(assignment);
                 return res.status(503).json({
-                    error: { message: `Assigned credential unavailable for ${appId}: ${assignment.unavailableReason || 'request_failed'}` }
+                    error: { message: `Assigned credential unavailable for ${appId}: ${failureReason}` }
                 });
             }
         }
@@ -479,14 +480,14 @@ async function _handleResponsesAssignment(req, res, assignment, rawBody, content
         }
 
         if (!parsed) continue;
-        const result = await _handleResponsesViaAssignedApiKey(res, parsed, modelId, isStreaming, startTime, candidate.credential);
+        const result = await _handleResponsesViaAssignedApiKey(res, parsed, modelId, isStreaming, startTime, candidate.credential, assignment);
         if (result !== false) return result;
     }
 
     return false;
 }
 
-async function _handleResponsesViaAssignedApiKey(res, parsed, modelId, isStreaming, startTime, provider) {
+async function _handleResponsesViaAssignedApiKey(res, parsed, modelId, isStreaming, startTime, provider, assignment = null) {
     try {
         let mappedModel;
         let response;
@@ -502,12 +503,32 @@ async function _handleResponsesViaAssignedApiKey(res, parsed, modelId, isStreami
             response = await provider.sendRequest(mappedBody);
             responseBody = await response.text();
             let chatResponse;
-            try { chatResponse = JSON.parse(responseBody); } catch { return false; }
+            try {
+                chatResponse = JSON.parse(responseBody);
+            } catch {
+                markCredentialError(buildCredentialId('api-key', provider.id), 'invalid_json_response', { model: mappedModel || modelId });
+                recordAssignmentUpstreamError(assignment, {
+                    provider: provider.type,
+                    keyId: provider.id,
+                    status: 'invalid_json',
+                    message: 'invalid_json_response'
+                });
+                logger.warn(`[Codex] Assigned API key invalid JSON response: ${provider.name}`);
+                return false;
+            }
             responsesFormat = _chatToResponsesFormat(chatResponse, modelId);
         }
         const durationMs = Date.now() - startTime;
 
         if (!response.ok) {
+            const upstreamMessage = extractUpstreamErrorMessage(responseBody, response.status);
+            recordAssignmentUpstreamError(assignment, {
+                provider: provider.type,
+                keyId: provider.id,
+                status: response.status,
+                message: upstreamMessage
+            });
+            logger.warn(`[Codex] Assigned API key upstream error | ${provider.type}/${provider.name} | http_${response.status} | ${upstreamMessage}`);
             if (response.status === 429) recordRateLimit(provider.id, 60000);
             if (response.status === 401 || response.status === 403) recordError(provider.id);
             if (response.status === 429) {
@@ -515,12 +536,35 @@ async function _handleResponsesViaAssignedApiKey(res, parsed, modelId, isStreami
             } else if (response.status === 401 || response.status === 403) {
                 markCredentialError(buildCredentialId('api-key', provider.id), `auth_error_${response.status}`, { model: mappedModel || modelId, invalid: true });
             } else {
-                markCredentialError(buildCredentialId('api-key', provider.id), `http_${response.status}`, { model: mappedModel || modelId });
+                markCredentialError(buildCredentialId('api-key', provider.id), `http_${response.status}: ${upstreamMessage}`, { model: mappedModel || modelId });
             }
+            logRequest({
+                route: '/responses',
+                provider: provider.type,
+                keyId: provider.id,
+                model: modelId,
+                mappedModel,
+                requestBody: parsed,
+                responseBody,
+                durationMs,
+                status: response.status,
+                success: false,
+                error: String(responseBody || '').slice(0, 200)
+            });
             return false;
         }
 
-        if (!responsesFormat) return false;
+        if (!responsesFormat) {
+            markCredentialError(buildCredentialId('api-key', provider.id), 'invalid_chat_response_shape', { model: mappedModel || modelId });
+            recordAssignmentUpstreamError(assignment, {
+                provider: provider.type,
+                keyId: provider.id,
+                status: 'invalid_shape',
+                message: 'invalid_chat_response_shape'
+            });
+            logger.warn(`[Codex] Assigned API key returned an unsupported chat response shape: ${provider.name}`);
+            return false;
+        }
         if (providerSupportsNativeResponses(provider)) {
             logger.info(`[Codex] Native responses output | ${provider.type}/${provider.name} | ${summarizeResponseOutputTypes(responsesFormat)}`);
         }
@@ -540,6 +584,12 @@ async function _handleResponsesViaAssignedApiKey(res, parsed, modelId, isStreami
         return true;
     } catch (error) {
         markCredentialError(buildCredentialId('api-key', provider.id), error, { model: modelId });
+        recordAssignmentUpstreamError(assignment, {
+            provider: provider.type,
+            keyId: provider.id,
+            status: 'exception',
+            message: error?.message || String(error)
+        });
         logger.error(`[Codex] Assigned API key error: ${provider.name} - ${error.message}`);
         return false;
     }
@@ -834,6 +884,18 @@ function _chatToResponsesFormat(chatResponse, model) {
     const msg = choice?.message || {};
     const output = [];
 
+    // Reasoning content (DeepSeek thinking models, GLM reasoners) — surface as a
+    // Responses-API reasoning item so the Codex client can preserve it in
+    // conversation history. Other providers (OpenAI/Azure/Gemini) don't return
+    // this field on chat-completions, so this branch naturally no-ops for them.
+    if (msg.reasoning_content) {
+        output.push({
+            type: 'reasoning',
+            id: `rs_${Date.now()}`,
+            summary: [{ type: 'summary_text', text: String(msg.reasoning_content) }]
+        });
+    }
+
     // Text content
     if (msg.content) {
         output.push({
@@ -903,6 +965,63 @@ function normalizeCompactResponse(responseBody, modelId) {
 function resolveResponsesStreamingMode(isCompact, parsed) {
     if (isCompact) return false;
     return parsed ? parsed.stream !== false : true;
+}
+
+function normalizeAssignedFailureReason(value, fallback = 'request_failed') {
+    const text = String(value || '').trim();
+    return text || fallback;
+}
+
+function extractUpstreamErrorMessage(responseBody, statusCode) {
+    if (responseBody) {
+        try {
+            const parsed = typeof responseBody === 'string' ? JSON.parse(responseBody) : responseBody;
+            const msg = parsed?.error?.message || parsed?.message || parsed?.error?.code || parsed?.error?.type;
+            if (msg) return String(msg).slice(0, 200);
+        } catch {}
+        const text = String(responseBody).trim();
+        if (text) return text.slice(0, 200);
+    }
+    return statusCode ? `http_${statusCode}` : 'request_failed';
+}
+
+function recordAssignmentUpstreamError(assignment, info) {
+    if (!assignment || !info) return;
+    if (!Array.isArray(assignment.upstreamErrors)) assignment.upstreamErrors = [];
+    assignment.upstreamErrors.push(info);
+}
+
+function formatUpstreamErrorReason(info) {
+    if (!info) return '';
+    const provider = info.provider || 'upstream';
+    const status = info.status ? `_${info.status}` : '';
+    const message = info.message ? `: ${info.message}` : '';
+    return `${provider}${status}${message}`;
+}
+
+function resolveAssignedCredentialRuntimeReason(candidate) {
+    const targetId = candidate?.credential?.email || candidate?.credential?.id || candidate?.binding?.targetId || '';
+    if (!candidate?.credentialType || !targetId) return '';
+    const runtime = getCredentialRuntimeState(buildCredentialId(candidate.credentialType, targetId));
+    if (!runtime || runtime.status === 'active') return '';
+    return runtime.lastError || runtime.status || '';
+}
+
+function getAssignedFailureReason(assignment, fallback = 'request_failed') {
+    // Per-request upstream errors (set by _handleResponsesViaAssignedApiKey when the upstream
+    // returns a non-OK response) take priority — these contain the actual provider error
+    // message instead of the misleading "resolved" credential-lookup state.
+    const upstreamErrors = Array.isArray(assignment?.upstreamErrors) ? assignment.upstreamErrors : [];
+    if (upstreamErrors.length > 0) {
+        const formatted = formatUpstreamErrorReason(upstreamErrors[upstreamErrors.length - 1]);
+        if (formatted) return normalizeAssignedFailureReason(formatted, fallback);
+    }
+    const candidates = Array.isArray(assignment?.assignments) ? assignment.assignments : [];
+    for (const candidate of candidates) {
+        const runtimeReason = resolveAssignedCredentialRuntimeReason(candidate);
+        if (runtimeReason) return normalizeAssignedFailureReason(runtimeReason, fallback);
+    }
+    return normalizeAssignedFailureReason(assignment?.unavailableReason, fallback);
 }
 
 function providerSupportsNativeResponses(provider) {
@@ -1577,7 +1696,9 @@ export const _testExports = {
     _responsesToChatBody: _responsesToChatBody,
     _responsesToAnthropicBody,
     findToolCallSequenceError,
-    resolveResponsesStreamingMode
+    resolveResponsesStreamingMode,
+    getAssignedFailureReason,
+    normalizeAssignedFailureReason
 };
 
 export default { handleResponses };

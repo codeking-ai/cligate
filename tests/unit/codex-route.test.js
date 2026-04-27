@@ -2,8 +2,15 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { _testExports } from '../../src/routes/codex-route.js';
+import { setCredentialRuntimeState } from '../../src/runtime-state.js';
 
-const { _codexToChatBody, _codexToAnthropicBody, findToolCallSequenceError } = _testExports;
+const {
+  _codexToChatBody,
+  _codexToAnthropicBody,
+  findToolCallSequenceError,
+  getAssignedFailureReason,
+  normalizeAssignedFailureReason
+} = _testExports;
 
 test('_codexToChatBody merges assistant text before function_call into one tool-calling assistant message', () => {
   const body = {
@@ -148,4 +155,52 @@ test('_codexToAnthropicBody normalizes top-level union tool schemas for Claude',
   assert.equal(body.tools[0].input_schema.oneOf, undefined);
   assert.equal(body.tools[0].input_schema.anyOf, undefined);
   assert.equal(body.tools[0].input_schema.allOf, undefined);
+});
+
+test('codex normalizeAssignedFailureReason falls back when value is empty', () => {
+  assert.equal(normalizeAssignedFailureReason('', 'request_failed'), 'request_failed');
+  assert.equal(normalizeAssignedFailureReason(' auth_error_401 ', 'request_failed'), 'auth_error_401');
+});
+
+test('codex getAssignedFailureReason prefers assigned credential runtime error state', () => {
+  const credentialId = 'api-key:key_codex_assigned_runtime';
+  setCredentialRuntimeState(credentialId, {
+    status: 'invalid',
+    lastError: 'auth_error_401'
+  });
+
+  const reason = getAssignedFailureReason({
+    unavailableReason: 'request_failed',
+    assignments: [
+      {
+        credentialType: 'api-key',
+        credential: { id: 'key_codex_assigned_runtime' },
+        binding: { targetId: 'key_codex_assigned_runtime' }
+      }
+    ]
+  });
+
+  assert.equal(reason, 'auth_error_401');
+
+  setCredentialRuntimeState(credentialId, {
+    status: 'active',
+    lastError: null
+  });
+});
+
+test('codex getAssignedFailureReason surfaces per-request upstream errors over the "resolved" placeholder', () => {
+  const reason = getAssignedFailureReason({
+    unavailableReason: 'resolved',
+    upstreamErrors: [
+      {
+        provider: 'deepseek',
+        keyId: 'key_deepseek',
+        status: 400,
+        message: 'The `reasoning_content` in the thinking mode must be passed back to the API.'
+      }
+    ]
+  });
+
+  assert.match(reason, /^deepseek_400:/);
+  assert.match(reason, /reasoning_content/);
 });

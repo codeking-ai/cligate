@@ -27,6 +27,8 @@ import { logRequest } from '../request-logger.js';
 import { detectRequestApp, resolveAssignedCredentials, orderAssignedCredentials } from '../app-routing.js';
 import { getDiscoveredModels } from '../model-discovery.js';
 import { tryHandleLocalResponses } from '../local-routing.js';
+import { buildCredentialId } from '../credential-registry.js';
+import { getCredentialRuntimeState, markCredentialError, markCredentialRateLimited, markCredentialSuccess } from '../runtime-state.js';
 
 const UPSTREAM_BASE = 'https://chatgpt.com/backend-api';
 const MAX_RETRIES = 5;
@@ -53,6 +55,62 @@ const PASSTHROUGH_RESPONSE_HEADER_WHITELIST = [
 
 let accountRotator = null;
 let currentStrategy = null;
+
+function normalizeAssignedFailureReason(value, fallback = 'request_failed') {
+    const text = String(value || '').trim();
+    return text || fallback;
+}
+
+function resolveAssignedCredentialRuntimeReason(candidate) {
+    const targetId = candidate?.credential?.email || candidate?.credential?.id || candidate?.binding?.targetId || '';
+    if (!candidate?.credentialType || !targetId) return '';
+    const runtime = getCredentialRuntimeState(buildCredentialId(candidate.credentialType, targetId));
+    if (!runtime || runtime.status === 'active') return '';
+    return runtime.lastError || runtime.status || '';
+}
+
+function extractUpstreamErrorMessage(responseBody, statusCode) {
+    if (responseBody) {
+        try {
+            const parsed = typeof responseBody === 'string' ? JSON.parse(responseBody) : responseBody;
+            const msg = parsed?.error?.message || parsed?.message || parsed?.error?.code || parsed?.error?.type;
+            if (msg) return String(msg).slice(0, 200);
+        } catch {}
+        const text = String(responseBody).trim();
+        if (text) return text.slice(0, 200);
+    }
+    return statusCode ? `http_${statusCode}` : 'request_failed';
+}
+
+function recordAssignmentUpstreamError(assignment, info) {
+    if (!assignment || !info) return;
+    if (!Array.isArray(assignment.upstreamErrors)) assignment.upstreamErrors = [];
+    assignment.upstreamErrors.push(info);
+}
+
+function formatUpstreamErrorReason(info) {
+    if (!info) return '';
+    const provider = info.provider || 'upstream';
+    const status = info.status ? `_${info.status}` : '';
+    const message = info.message ? `: ${info.message}` : '';
+    return `${provider}${status}${message}`;
+}
+
+function getAssignedFailureReason(assignment, fallback = 'request_failed') {
+    // Per-request upstream errors take priority over the misleading credential-lookup
+    // state ("resolved") so the user sees the actual provider error.
+    const upstreamErrors = Array.isArray(assignment?.upstreamErrors) ? assignment.upstreamErrors : [];
+    if (upstreamErrors.length > 0) {
+        const formatted = formatUpstreamErrorReason(upstreamErrors[upstreamErrors.length - 1]);
+        if (formatted) return normalizeAssignedFailureReason(formatted, fallback);
+    }
+    const candidates = Array.isArray(assignment?.assignments) ? assignment.assignments : [];
+    for (const candidate of candidates) {
+        const runtimeReason = resolveAssignedCredentialRuntimeReason(candidate);
+        if (runtimeReason) return normalizeAssignedFailureReason(runtimeReason, fallback);
+    }
+    return normalizeAssignedFailureReason(assignment?.unavailableReason, fallback);
+}
 
 function getAccountRotator() {
     const settings = getServerSettings();
@@ -324,7 +382,8 @@ export async function handleCodexResponses(req, res) {
             const result = await _handleCodexAssignment(req, res, body, modelId, isStreaming, startTime, assignment);
             if (result !== false) return;
             if (!assignment.fallbackToDefault) {
-                return sendCodexError(res, 503, `Assigned credential unavailable for ${appId}: ${assignment.unavailableReason || 'request_failed'}`);
+                const failureReason = getAssignedFailureReason(assignment);
+                return sendCodexError(res, 503, `Assigned credential unavailable for ${appId}: ${failureReason}`);
             }
         }
     }
@@ -435,7 +494,7 @@ async function _handleCodexAssignment(req, res, body, modelId, isStreaming, star
             if (res.headersSent || res.writableEnded || res.destroyed) return true;
             continue;
         }
-        const result = await _handleCodexViaAssignedApiKey(res, body, modelId, isStreaming, startTime, candidate.credential);
+        const result = await _handleCodexViaAssignedApiKey(res, body, modelId, isStreaming, startTime, candidate.credential, assignment);
         if (result !== false) return result;
         if (res.headersSent || res.writableEnded || res.destroyed) return true;
     }
@@ -443,7 +502,7 @@ async function _handleCodexAssignment(req, res, body, modelId, isStreaming, star
     return false;
 }
 
-async function _handleCodexViaAssignedApiKey(res, body, modelId, isStreaming, startTime, provider) {
+async function _handleCodexViaAssignedApiKey(res, body, modelId, isStreaming, startTime, provider, assignment = null) {
     try {
         let mappedModel;
         let response;
@@ -458,10 +517,69 @@ async function _handleCodexViaAssignedApiKey(res, body, modelId, isStreaming, st
             const mappedBody = { ...chatBody, model: mappedModel };
             response = await provider.sendRequest(mappedBody);
             responseBody = await response.text();
-            const chatResponse = JSON.parse(responseBody);
+            let chatResponse;
+            try {
+                chatResponse = JSON.parse(responseBody);
+            } catch {
+                markCredentialError(buildCredentialId('api-key', provider.id), 'invalid_json_response', { model: mappedModel || modelId });
+                recordAssignmentUpstreamError(assignment, {
+                    provider: provider.type,
+                    keyId: provider.id,
+                    status: 'invalid_json',
+                    message: 'invalid_json_response'
+                });
+                logger.warn(`[Codex] Assigned API key invalid JSON response: ${provider.name}`);
+                return false;
+            }
             codexResponse = _chatToCodexResponse(chatResponse, modelId);
         }
-        if (!response.ok || !codexResponse) return false;
+        if (!response.ok) {
+            const upstreamMessage = extractUpstreamErrorMessage(responseBody, response.status);
+            recordAssignmentUpstreamError(assignment, {
+                provider: provider.type,
+                keyId: provider.id,
+                status: response.status,
+                message: upstreamMessage
+            });
+            logger.warn(`[Codex] Assigned API key upstream error | ${provider.type}/${provider.name} | http_${response.status} | ${upstreamMessage}`);
+            if (response.status === 429) {
+                recordRateLimit(provider.id, 60000);
+                markCredentialRateLimited(buildCredentialId('api-key', provider.id), 60000, { model: mappedModel || modelId });
+            } else if (response.status === 401 || response.status === 403) {
+                recordError(provider.id);
+                markCredentialError(buildCredentialId('api-key', provider.id), `auth_error_${response.status}`, {
+                    model: mappedModel || modelId,
+                    invalid: true
+                });
+            } else {
+                markCredentialError(buildCredentialId('api-key', provider.id), `http_${response.status}: ${upstreamMessage}`, { model: mappedModel || modelId });
+            }
+            logRequest({
+                route: '/backend-api/codex/responses',
+                provider: provider.type,
+                keyId: provider.id,
+                model: modelId,
+                mappedModel,
+                requestBody: body,
+                responseBody,
+                durationMs: Date.now() - startTime,
+                status: response.status,
+                success: false,
+                error: String(responseBody || '').slice(0, 200)
+            });
+            return false;
+        }
+        if (!codexResponse) {
+            markCredentialError(buildCredentialId('api-key', provider.id), 'invalid_chat_response_shape', { model: mappedModel || modelId });
+            recordAssignmentUpstreamError(assignment, {
+                provider: provider.type,
+                keyId: provider.id,
+                status: 'invalid_shape',
+                message: 'invalid_chat_response_shape'
+            });
+            logger.warn(`[Codex] Assigned API key returned an unsupported chat response shape: ${provider.name}`);
+            return false;
+        }
         if (providerSupportsNativeResponses(provider)) {
             logger.info(`[Codex] Native responses output | ${provider.type}/${provider.name} | ${summarizeResponseOutputTypes(codexResponse)}`);
         }
@@ -470,12 +588,23 @@ async function _handleCodexViaAssignedApiKey(res, body, modelId, isStreaming, st
         const outputTokens = codexResponse.usage?.output_tokens || 0;
         const cost = provider.estimateCost(mappedModel, inputTokens, outputTokens);
         recordUsage(provider.id, { inputTokens, outputTokens, model: mappedModel });
+        markCredentialSuccess(buildCredentialId('api-key', provider.id), {
+            model: mappedModel,
+            latencyMs: durationMs
+        });
         recordRequest({ provider: provider.type, keyId: provider.id, model: mappedModel, inputTokens, outputTokens, cost, durationMs, success: true });
         logRequest({ route: '/backend-api/codex/responses', provider: provider.type, keyId: provider.id, model: modelId, mappedModel, requestBody: body, responseBody, inputTokens, outputTokens, cost, durationMs, status: 200, success: true });
         logger.success(`[Codex] <<< Assigned API KEY OK | ${provider.type}/${provider.name} | model=${modelId} | ${durationMs}ms`);
         if (isStreaming) sendResponsesSSE(res, codexResponse); else res.json(codexResponse);
         return true;
     } catch (error) {
+        markCredentialError(buildCredentialId('api-key', provider.id), error, { model: modelId });
+        recordAssignmentUpstreamError(assignment, {
+            provider: provider.type,
+            keyId: provider.id,
+            status: 'exception',
+            message: error?.message || String(error)
+        });
         logger.error(`[Codex] Assigned API key error: ${provider.name} - ${error.message}`);
         return false;
     }
@@ -1537,7 +1666,9 @@ async function _handleCodexViaAntigravityAccount(res, body, modelId, isStreaming
 export const _testExports = {
     _codexToChatBody,
     _codexToAnthropicBody,
-    findToolCallSequenceError
+    findToolCallSequenceError,
+    getAssignedFailureReason,
+    normalizeAssignedFailureReason
 };
 
 export default { handleCodexResponses, handleCodexModels, handleCodexCatchAll };
