@@ -11,9 +11,70 @@ const {
   resolveResponsesStreamingMode,
   _responsesToAnthropicBody,
   _chatToResponsesFormat,
+  buildNativeResponsesForwardHeaders,
+  copyAllowedResponseHeaders,
   getAssignedFailureReason,
   normalizeAssignedFailureReason
 } = _testExports;
+
+test('buildNativeResponsesForwardHeaders keeps Codex lineage and turn headers for native responses providers', () => {
+  const headers = buildNativeResponsesForwardHeaders({
+    'x-client-request-id': 'thread-1',
+    'session_id': 'thread-1',
+    'x-codex-turn-state': 'ts-1',
+    'x-openai-subagent': 'review',
+    'x-codex-window-id': 'thread-1:0',
+    'x-codex-parent-thread-id': 'parent-1',
+    'x-codex-turn-metadata': '{"turn_id":"turn-1"}',
+    'x-codex-installation-id': 'install-1',
+    'x-codex-beta-features': 'responses_websockets',
+    'x-responsesapi-include-timing-metrics': 'true',
+    'openai-beta': 'assistants=v2',
+    'x-ignored-header': 'nope'
+  });
+
+  assert.deepEqual(headers, {
+    'x-client-request-id': 'thread-1',
+    'session_id': 'thread-1',
+    'x-codex-turn-state': 'ts-1',
+    'x-openai-subagent': 'review',
+    'x-codex-window-id': 'thread-1:0',
+    'x-codex-parent-thread-id': 'parent-1',
+    'x-codex-turn-metadata': '{"turn_id":"turn-1"}',
+    'x-codex-installation-id': 'install-1',
+    'x-codex-beta-features': 'responses_websockets',
+    'x-responsesapi-include-timing-metrics': 'true',
+    'openai-beta': 'assistants=v2'
+  });
+});
+
+test('copyAllowedResponseHeaders writes turn-state and model headers back to downstream client', () => {
+  const upstream = new Response('{}', {
+    status: 200,
+    headers: {
+      'x-codex-turn-state': 'ts-2',
+      'openai-model': 'gpt-5.4',
+      'x-openai-model': 'gpt-5.4',
+      'x-reasoning-included': 'true',
+      'x-ignored-header': 'nope'
+    }
+  });
+
+  const written = new Map();
+  const res = {
+    setHeader(name, value) {
+      written.set(String(name), value);
+    }
+  };
+
+  copyAllowedResponseHeaders(upstream, res);
+
+  assert.equal(written.get('x-codex-turn-state'), 'ts-2');
+  assert.equal(written.get('openai-model'), 'gpt-5.4');
+  assert.equal(written.get('x-openai-model'), 'gpt-5.4');
+  assert.equal(written.get('x-reasoning-included'), 'true');
+  assert.equal(written.has('x-ignored-header'), false);
+});
 
 test('_responsesToChatBody merges assistant text before function_call into one tool-calling assistant message', () => {
   const parsed = {

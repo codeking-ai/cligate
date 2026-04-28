@@ -8,10 +8,63 @@ const {
   _codexToChatBody,
   _codexToAnthropicBody,
   _chatToCodexResponse,
+  buildNativeResponsesForwardHeaders,
+  copyAllowedResponseHeaders,
   findToolCallSequenceError,
   getAssignedFailureReason,
   normalizeAssignedFailureReason
 } = _testExports;
+
+test('codex buildNativeResponsesForwardHeaders keeps Codex lineage and turn headers for native responses providers', () => {
+  const headers = buildNativeResponsesForwardHeaders({
+    'x-client-request-id': 'thread-2',
+    'session_id': 'thread-2',
+    'x-codex-turn-state': 'ts-3',
+    'x-openai-subagent': 'review',
+    'x-codex-window-id': 'thread-2:1',
+    'x-codex-parent-thread-id': 'parent-2',
+    'x-codex-turn-metadata': '{"turn_id":"turn-2"}',
+    'x-codex-installation-id': 'install-2',
+    'x-codex-beta-features': 'responses_websockets',
+    'x-responsesapi-include-timing-metrics': 'true',
+    'openai-beta': 'assistants=v2'
+  });
+
+  assert.equal(headers['x-client-request-id'], 'thread-2');
+  assert.equal(headers.session_id, 'thread-2');
+  assert.equal(headers['x-codex-turn-state'], 'ts-3');
+  assert.equal(headers['x-codex-window-id'], 'thread-2:1');
+  assert.equal(headers['x-codex-parent-thread-id'], 'parent-2');
+  assert.equal(headers['x-codex-turn-metadata'], '{"turn_id":"turn-2"}');
+  assert.equal(headers['x-codex-installation-id'], 'install-2');
+  assert.equal(headers['x-codex-beta-features'], 'responses_websockets');
+  assert.equal(headers['x-responsesapi-include-timing-metrics'], 'true');
+  assert.equal(headers['openai-beta'], 'assistants=v2');
+});
+
+test('codex copyAllowedResponseHeaders writes turn-state and model headers back to downstream client', () => {
+  const upstream = new Response('{}', {
+    status: 200,
+    headers: {
+      'x-codex-turn-state': 'ts-4',
+      'x-openai-model': 'gpt-5.4',
+      'retry-after': '2'
+    }
+  });
+
+  const written = new Map();
+  const res = {
+    setHeader(name, value) {
+      written.set(String(name), value);
+    }
+  };
+
+  copyAllowedResponseHeaders(upstream, res);
+
+  assert.equal(written.get('x-codex-turn-state'), 'ts-4');
+  assert.equal(written.get('x-openai-model'), 'gpt-5.4');
+  assert.equal(written.get('retry-after'), '2');
+});
 
 test('_codexToChatBody merges assistant text before function_call into one tool-calling assistant message', () => {
   const body = {

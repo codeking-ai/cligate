@@ -45,7 +45,14 @@ const SHORT_RATE_LIMIT_THRESHOLD_MS = 5000;
 const PASSTHROUGH_REQUEST_HEADER_WHITELIST = [
     'x-client-request-id',
     'x-openai-subagent',
-    'x-codex-turn-state'
+    'x-codex-turn-state',
+    'x-codex-window-id',
+    'x-codex-parent-thread-id',
+    'x-codex-turn-metadata',
+    'x-codex-installation-id',
+    'x-codex-beta-features',
+    'x-responsesapi-include-timing-metrics',
+    'openai-beta'
 ];
 const PASSTHROUGH_RESPONSE_HEADER_WHITELIST = [
     'openai-model',
@@ -644,6 +651,9 @@ async function _handleResponsesViaAssignedApiKey(res, parsed, modelId, isStreami
         logRequest({ route: '/responses', provider: provider.type, keyId: provider.id, model: modelId, mappedModel, requestBody: parsed, responseBody, inputTokens, outputTokens, cost, durationMs, status: 200, success: true });
         logger.success(`[Codex] <<< Assigned API KEY OK | ${provider.type}/${provider.name} | model=${modelId} | ${durationMs}ms`);
 
+        if (providerSupportsNativeResponses(provider)) {
+            copyAllowedResponseHeaders(response, res);
+        }
         if (isStreaming) sendResponsesSSE(res, responsesFormat); else res.json(responsesFormat);
         return true;
     } catch (error) {
@@ -1113,7 +1123,14 @@ function buildNativeResponsesForwardHeaders(sourceHeaders = {}) {
         'x-client-request-id',
         'session_id',
         'x-codex-turn-state',
-        'x-openai-subagent'
+        'x-openai-subagent',
+        'x-codex-window-id',
+        'x-codex-parent-thread-id',
+        'x-codex-turn-metadata',
+        'x-codex-installation-id',
+        'x-codex-beta-features',
+        'x-responsesapi-include-timing-metrics',
+        'openai-beta'
     ];
 
     for (const name of candidates) {
@@ -1251,6 +1268,9 @@ async function _handleResponsesViaApiKey(res, parsed, modelId, isStreaming, keyT
 
                 logger.success(`[Codex] <<< API KEY OK | ${type}/${provider.name} | model=${modelId} | ${durationMs}ms`);
 
+                if (providerSupportsNativeResponses(provider)) {
+                    copyAllowedResponseHeaders(response, res);
+                }
                 if (isStreaming) {
                     sendResponsesSSE(res, responsesFormat);
                 } else {
@@ -1798,6 +1818,8 @@ export const _testExports = {
     _responsesToChatBody: _responsesToChatBody,
     _responsesToAnthropicBody,
     _chatToResponsesFormat,
+    buildNativeResponsesForwardHeaders,
+    copyAllowedResponseHeaders,
     findToolCallSequenceError,
     resolveResponsesStreamingMode,
     getAssignedFailureReason,
