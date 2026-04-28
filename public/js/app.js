@@ -68,6 +68,9 @@ document.addEventListener('alpine:init', () => {
         freeModelsSaving: false,
         assistantAgentConfig: {
             enabled: false,
+            boundCredential: null,
+            fallbacks: [],
+            circuitBreaker: { failureThreshold: 3, probeIntervalMs: 300000 },
             sources: {
                 chatgptAccount: false,
                 claudeAccount: false,
@@ -78,12 +81,18 @@ document.addEventListener('alpine:init', () => {
         },
         assistantAgentStatus: {
             enabled: false,
-            configuredSources: {},
+            boundCredential: null,
+            fallbacks: [],
+            circuitBreaker: { failureThreshold: 3, probeIntervalMs: 300000 },
+            tiers: [],
             statuses: [],
             resolvedSource: null,
-            fallbackReason: ''
+            fallbackReason: '',
+            lastUsed: null,
+            catalog: { apiKeys: { anthropic: [], openai: [], 'azure-openai': [] }, claudeAccounts: [], chatgptAccounts: [] }
         },
         assistantAgentSaving: false,
+        assistantAgentTestResult: null,
         chatAssistantRunPoller: null,
         localModelRoutingEnabled: false,
         localModelRoutingSaving: false,
@@ -3203,14 +3212,18 @@ document.addEventListener('alpine:init', () => {
         async loadAssistantAgentConfig() {
             const { ok, data } = await this.api('/settings/assistant-agent');
             if (ok && data?.assistantAgent) {
+                const cfg = data.assistantAgent;
                 this.assistantAgentConfig = {
-                    enabled: data.assistantAgent.enabled === true,
+                    enabled: cfg.enabled === true,
+                    boundCredential: cfg.boundCredential || null,
+                    fallbacks: Array.isArray(cfg.fallbacks) ? cfg.fallbacks : [],
+                    circuitBreaker: cfg.circuitBreaker || { failureThreshold: 3, probeIntervalMs: 300000 },
                     sources: {
-                        chatgptAccount: data.assistantAgent.sources?.chatgptAccount === true,
-                        claudeAccount: data.assistantAgent.sources?.claudeAccount === true,
-                        anthropicApiKey: data.assistantAgent.sources?.anthropicApiKey !== false,
-                        openaiApiKeyBridge: data.assistantAgent.sources?.openaiApiKeyBridge !== false,
-                        azureOpenaiApiKeyBridge: data.assistantAgent.sources?.azureOpenaiApiKeyBridge !== false
+                        chatgptAccount: cfg.sources?.chatgptAccount === true,
+                        claudeAccount: cfg.sources?.claudeAccount === true,
+                        anthropicApiKey: cfg.sources?.anthropicApiKey !== false,
+                        openaiApiKeyBridge: cfg.sources?.openaiApiKeyBridge !== false,
+                        azureOpenaiApiKeyBridge: cfg.sources?.azureOpenaiApiKeyBridge !== false
                     }
                 };
             }
@@ -3224,42 +3237,142 @@ document.addEventListener('alpine:init', () => {
             }
         },
 
-        async saveAssistantAgentConfig() {
+        get assistantAgentCredentialOptions() {
+            const cat = this.assistantAgentStatus?.catalog || {};
+            const out = [];
+            const groups = [
+                { key: 'anthropicKeys', label: this.t('assistantAgentGroupAnthropicKey'), entries: cat.apiKeys?.anthropic || [] },
+                { key: 'openaiKeys', label: this.t('assistantAgentGroupOpenAiBridge'), entries: cat.apiKeys?.openai || [] },
+                { key: 'azureKeys', label: this.t('assistantAgentGroupAzureBridge'), entries: cat.apiKeys?.['azure-openai'] || [] },
+                { key: 'claudeAccounts', label: this.t('assistantAgentGroupClaudeAccount'), entries: cat.claudeAccounts || [] },
+                { key: 'chatgptAccounts', label: this.t('assistantAgentGroupChatgptAccount'), entries: cat.chatgptAccounts || [] }
+            ];
+            for (const group of groups) {
+                if (!group.entries.length) continue;
+                out.push({ group: group.label, entries: group.entries.map((entry) => ({
+                    value: `${entry.type}::${entry.id}`,
+                    label: entry.label,
+                    available: entry.available !== false,
+                    detail: entry.detail || '',
+                    descriptor: { type: entry.type, id: entry.id }
+                })) });
+            }
+            return out;
+        },
+
+        descriptorToValue(descriptor) {
+            return descriptor && descriptor.type && descriptor.id ? `${descriptor.type}::${descriptor.id}` : '';
+        },
+
+        valueToDescriptor(value) {
+            if (!value || typeof value !== 'string') return null;
+            const idx = value.indexOf('::');
+            if (idx <= 0) return null;
+            return { type: value.slice(0, idx), id: value.slice(idx + 2) };
+        },
+
+        labelForDescriptor(descriptor) {
+            if (!descriptor) return this.t('assistantAgentNoBinding');
+            const flat = this.assistantAgentCredentialOptions.flatMap((g) => g.entries.map((e) => ({ group: g.group, ...e })));
+            const target = `${descriptor.type}::${descriptor.id}`;
+            const match = flat.find((entry) => entry.value === target);
+            return match ? `${match.group} · ${match.label}` : `${descriptor.type} · ${descriptor.id}`;
+        },
+
+        async submitAssistantBinding(patch, { suppressToast = false } = {}) {
             if (this.assistantAgentSaving) return;
             this.assistantAgentSaving = true;
-            const { ok, data } = await this.api('/settings/assistant-agent', {
+            const { ok, data } = await this.api('/api/assistant/agent-binding', {
                 method: 'POST',
-                body: JSON.stringify({
-                    assistantAgent: this.assistantAgentConfig
-                })
+                body: JSON.stringify(patch)
             });
             this.assistantAgentSaving = false;
             if (ok && data?.assistantAgent) {
-                this.assistantAgentConfig = data.assistantAgent;
+                const cfg = data.assistantAgent;
+                this.assistantAgentConfig = {
+                    ...this.assistantAgentConfig,
+                    enabled: cfg.enabled === true,
+                    boundCredential: cfg.boundCredential || null,
+                    fallbacks: Array.isArray(cfg.fallbacks) ? cfg.fallbacks : [],
+                    circuitBreaker: cfg.circuitBreaker || this.assistantAgentConfig.circuitBreaker
+                };
                 await this.loadAssistantAgentStatus();
-                this.showToast(this.t('assistantAgentUpdated'), 'success');
-            } else {
-                this.showToast(data?.error || this.t('assistantAgentUpdateFailed'), 'error');
+                if (!suppressToast) this.showToast(this.t('assistantAgentUpdated'), 'success');
+                return true;
             }
+            this.showToast(data?.error || this.t('assistantAgentUpdateFailed'), 'error');
+            return false;
         },
 
         async toggleAssistantAgentEnabled() {
-            this.assistantAgentConfig = {
-                ...this.assistantAgentConfig,
-                enabled: !this.assistantAgentConfig.enabled
-            };
-            await this.saveAssistantAgentConfig();
+            await this.submitAssistantBinding({ enabled: !this.assistantAgentConfig.enabled });
         },
 
-        async toggleAssistantAgentSource(sourceKey) {
-            this.assistantAgentConfig = {
-                ...this.assistantAgentConfig,
-                sources: {
-                    ...(this.assistantAgentConfig.sources || {}),
-                    [sourceKey]: !this.assistantAgentConfig.sources?.[sourceKey]
+        async setAssistantPrimary(value) {
+            const descriptor = value === '' ? null : this.valueToDescriptor(value);
+            await this.submitAssistantBinding({ boundCredential: descriptor });
+        },
+
+        async setAssistantFallback(index, value) {
+            const fallbacks = [...(this.assistantAgentConfig.fallbacks || [])];
+            const descriptor = this.valueToDescriptor(value);
+            if (!descriptor) return;
+            fallbacks[index] = descriptor;
+            await this.submitAssistantBinding({ fallbacks });
+        },
+
+        async addAssistantFallback(value) {
+            const descriptor = this.valueToDescriptor(value);
+            if (!descriptor) return;
+            const fallbacks = [...(this.assistantAgentConfig.fallbacks || []), descriptor];
+            await this.submitAssistantBinding({ fallbacks });
+        },
+
+        async removeAssistantFallback(index) {
+            const fallbacks = [...(this.assistantAgentConfig.fallbacks || [])];
+            fallbacks.splice(index, 1);
+            await this.submitAssistantBinding({ fallbacks });
+        },
+
+        async moveAssistantFallback(index, direction) {
+            const fallbacks = [...(this.assistantAgentConfig.fallbacks || [])];
+            const target = index + direction;
+            if (target < 0 || target >= fallbacks.length) return;
+            [fallbacks[index], fallbacks[target]] = [fallbacks[target], fallbacks[index]];
+            await this.submitAssistantBinding({ fallbacks });
+        },
+
+        async saveAssistantCircuitBreaker() {
+            const cb = this.assistantAgentConfig.circuitBreaker || {};
+            await this.submitAssistantBinding({
+                circuitBreaker: {
+                    failureThreshold: Number(cb.failureThreshold) || 3,
+                    probeIntervalMs: Number(cb.probeIntervalMs) || 300000
                 }
-            };
-            await this.saveAssistantAgentConfig();
+            });
+        },
+
+        async testAssistantBinding(descriptor) {
+            this.assistantAgentTestResult = { pending: true };
+            const { ok, data } = await this.api('/api/assistant/agent-binding/test', {
+                method: 'POST',
+                body: JSON.stringify(descriptor || {})
+            });
+            this.assistantAgentTestResult = ok ? data : { ok: false, reason: data?.error || 'request failed' };
+        },
+
+        async resetAssistantBreaker(descriptor) {
+            const body = descriptor ? { descriptor } : {};
+            const { ok, data } = await this.api('/api/assistant/agent-binding/breaker/reset', {
+                method: 'POST',
+                body: JSON.stringify(body)
+            });
+            if (ok) {
+                await this.loadAssistantAgentStatus();
+                this.showToast(this.t('assistantAgentBreakerReset'), 'success');
+            } else {
+                this.showToast(data?.error || this.t('assistantAgentUpdateFailed'), 'error');
+            }
         },
 
         async toggleFreeModels() {

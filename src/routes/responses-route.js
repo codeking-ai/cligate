@@ -452,7 +452,7 @@ export async function handleResponses(req, res) {
     if (priority === 'apikey-first') {
         // apikey-first: API Key → ChatGPT accounts → Claude accounts
         if (hasApiKeys && parsed) {
-            const result = await _handleResponsesViaApiKey(res, parsed, modelId, isStreaming, chatKeyTypes, startTime);
+            const result = await _handleResponsesViaApiKey(res, parsed, modelId, isStreaming, chatKeyTypes, startTime, req.headers);
             if (result !== false) return;
         }
         if (hasAccounts) {
@@ -474,7 +474,7 @@ export async function handleResponses(req, res) {
             if (poolResult !== false) return;
         }
         if (hasApiKeys && parsed) {
-            const result = await _handleResponsesViaApiKey(res, parsed, modelId, isStreaming, chatKeyTypes, startTime);
+            const result = await _handleResponsesViaApiKey(res, parsed, modelId, isStreaming, chatKeyTypes, startTime, req.headers);
             if (result !== false) return;
         }
         if (!strictCodexCompatibility && hasClaudeAccounts && parsed) {
@@ -542,14 +542,14 @@ async function _handleResponsesAssignment(req, res, assignment, rawBody, content
         }
 
         if (!parsed) continue;
-        const result = await _handleResponsesViaAssignedApiKey(res, parsed, modelId, isStreaming, startTime, candidate.credential, assignment);
+        const result = await _handleResponsesViaAssignedApiKey(res, parsed, modelId, isStreaming, startTime, candidate.credential, assignment, req.headers);
         if (result !== false) return result;
     }
 
     return false;
 }
 
-async function _handleResponsesViaAssignedApiKey(res, parsed, modelId, isStreaming, startTime, provider, assignment = null) {
+async function _handleResponsesViaAssignedApiKey(res, parsed, modelId, isStreaming, startTime, provider, assignment = null, requestHeaders = {}) {
     try {
         let mappedModel;
         let response;
@@ -557,7 +557,7 @@ async function _handleResponsesViaAssignedApiKey(res, parsed, modelId, isStreami
         let responsesFormat;
 
         if (providerSupportsNativeResponses(provider)) {
-            ({ mappedModel, response, responseBody, normalized: responsesFormat } = await sendViaNativeResponsesProvider(provider, parsed, modelId));
+            ({ mappedModel, response, responseBody, normalized: responsesFormat } = await sendViaNativeResponsesProvider(provider, parsed, modelId, requestHeaders));
         } else {
             const chatBody = _responsesToChatBody(parsed);
             mappedModel = resolveModel(provider.type, modelId);
@@ -1107,6 +1107,25 @@ function providerSupportsNativeResponses(provider) {
     return typeof provider?.sendResponsesRequest === 'function';
 }
 
+function buildNativeResponsesForwardHeaders(sourceHeaders = {}) {
+    const headers = {};
+    const candidates = [
+        'x-client-request-id',
+        'session_id',
+        'x-codex-turn-state',
+        'x-openai-subagent'
+    ];
+
+    for (const name of candidates) {
+        const value = sourceHeaders?.[name];
+        if (value !== undefined && value !== null && value !== '') {
+            headers[name] = value;
+        }
+    }
+
+    return headers;
+}
+
 function summarizeResponseOutputTypes(responsesFormat) {
     const items = Array.isArray(responsesFormat?.output) ? responsesFormat.output : [];
     if (items.length === 0) return '(none)';
@@ -1122,14 +1141,16 @@ function summarizeResponseOutputTypes(responsesFormat) {
         .join(', ');
 }
 
-async function sendViaNativeResponsesProvider(provider, parsed, modelId) {
+async function sendViaNativeResponsesProvider(provider, parsed, modelId, requestHeaders = {}) {
     const mappedModel = resolveModel(provider.type, modelId);
     const requestBody = {
         ...parsed,
         model: mappedModel,
         stream: false
     };
-    const response = await provider.sendResponsesRequest(requestBody);
+    const response = await provider.sendResponsesRequest(requestBody, {
+        headers: buildNativeResponsesForwardHeaders(requestHeaders)
+    });
     const responseBody = await response.text();
     const normalized = normalizeCompactResponse(responseBody, modelId);
     return { mappedModel, response, responseBody, normalized };
@@ -1138,7 +1159,7 @@ async function sendViaNativeResponsesProvider(provider, parsed, modelId) {
 /**
  * Handle /responses via API key pool (with format conversion).
  */
-async function _handleResponsesViaApiKey(res, parsed, modelId, isStreaming, keyTypes, startTime) {
+async function _handleResponsesViaApiKey(res, parsed, modelId, isStreaming, keyTypes, startTime, requestHeaders = {}) {
     const MAX_KEY_RETRIES = 3;
     let fatalRequestError = false;
 
@@ -1155,7 +1176,7 @@ async function _handleResponsesViaApiKey(res, parsed, modelId, isStreaming, keyT
                 if (providerSupportsNativeResponses(provider)) {
                     mappedModel = resolveModel(type, modelId);
                     logger.info(`[Codex] >>> API KEY RESPONSES | ${type}/${provider.name} | ${modelId}→${mappedModel}`);
-                    ({ mappedModel, response, responseBody, normalized: responsesFormat } = await sendViaNativeResponsesProvider(provider, parsed, modelId));
+                    ({ mappedModel, response, responseBody, normalized: responsesFormat } = await sendViaNativeResponsesProvider(provider, parsed, modelId, requestHeaders));
                 } else {
                     const chatBody = _responsesToChatBody(parsed);
                     mappedModel = resolveModel(type, modelId);

@@ -21,6 +21,19 @@ const DEFAULT_SETTINGS = {
     requestLogRetentionDays: 7,          // Days to keep request logs
     assistantAgent: {
         enabled: true,
+        // New (preferred) shape. boundCredential = null means "supervisor not
+        // configured"; the runtime falls back to the deterministic runner.
+        boundCredential: null,
+        fallbacks: [],
+        circuitBreaker: {
+            failureThreshold: 3,
+            probeIntervalMs: 300_000
+        },
+        // Legacy toggle-based config kept as a read-only migration source. The
+        // runtime resolves the first available credential per the old priority
+        // order on first call and rewrites this into `boundCredential`. Fresh
+        // installs leave this populated as the default so existing setups keep
+        // working until the user explicitly picks a binding.
         sources: {
             chatgptAccount: false,
             claudeAccount: false,
@@ -135,6 +148,67 @@ function normalizeChannelsConfig(channels = {}) {
     };
 }
 
+const ASSISTANT_CREDENTIAL_TYPES = new Set(['api-key', 'chatgpt-account', 'claude-account']);
+const ASSISTANT_FALLBACKS_MAX = 3;
+const ASSISTANT_BREAKER_DEFAULTS = Object.freeze({
+    failureThreshold: 3,
+    probeIntervalMs: 300_000
+});
+const ASSISTANT_BREAKER_BOUNDS = Object.freeze({
+    failureThresholdMin: 1,
+    failureThresholdMax: 10,
+    probeIntervalMsMin: 60_000,        // 1 minute
+    probeIntervalMsMax: 3_600_000      // 60 minutes
+});
+
+function normalizeBoundCredential(value) {
+    if (!value || typeof value !== 'object') return null;
+    const type = String(value.type || '').trim();
+    const id = String(value.id || '').trim();
+    if (!ASSISTANT_CREDENTIAL_TYPES.has(type) || !id) return null;
+    return { type, id };
+}
+
+function normalizeFallbacks(value) {
+    if (!Array.isArray(value)) return [];
+    const seen = new Set();
+    const result = [];
+    for (const entry of value) {
+        const normalized = normalizeBoundCredential(entry);
+        if (!normalized) continue;
+        const key = `${normalized.type}::${normalized.id}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        result.push(normalized);
+        if (result.length >= ASSISTANT_FALLBACKS_MAX) break;
+    }
+    return result;
+}
+
+function clampNumber(value, fallback, min, max) {
+    const n = Number(value);
+    if (!Number.isFinite(n)) return fallback;
+    return Math.min(Math.max(Math.floor(n), min), max);
+}
+
+function normalizeCircuitBreaker(value) {
+    const v = value && typeof value === 'object' ? value : {};
+    return {
+        failureThreshold: clampNumber(
+            v.failureThreshold,
+            ASSISTANT_BREAKER_DEFAULTS.failureThreshold,
+            ASSISTANT_BREAKER_BOUNDS.failureThresholdMin,
+            ASSISTANT_BREAKER_BOUNDS.failureThresholdMax
+        ),
+        probeIntervalMs: clampNumber(
+            v.probeIntervalMs,
+            ASSISTANT_BREAKER_DEFAULTS.probeIntervalMs,
+            ASSISTANT_BREAKER_BOUNDS.probeIntervalMsMin,
+            ASSISTANT_BREAKER_BOUNDS.probeIntervalMsMax
+        )
+    };
+}
+
 function normalizeAssistantAgentConfig(config = {}) {
     const current = config && typeof config === 'object' ? config : {};
     const sources = current.sources && typeof current.sources === 'object'
@@ -143,6 +217,13 @@ function normalizeAssistantAgentConfig(config = {}) {
 
     return {
         enabled: current.enabled === true,
+        boundCredential: normalizeBoundCredential(current.boundCredential),
+        fallbacks: normalizeFallbacks(current.fallbacks),
+        circuitBreaker: normalizeCircuitBreaker(current.circuitBreaker),
+        // Legacy field — kept for one-time runtime migration. Fresh installs
+        // populate this from DEFAULT_SETTINGS; once `boundCredential` is set
+        // the migration step in llm-client.js leaves `sources` in place but
+        // ignores it. Existing route handlers still read this field.
         sources: {
             chatgptAccount: sources.chatgptAccount === true,
             claudeAccount: sources.claudeAccount === true,
@@ -152,6 +233,17 @@ function normalizeAssistantAgentConfig(config = {}) {
         }
     };
 }
+
+export {
+    normalizeAssistantAgentConfig,
+    normalizeBoundCredential,
+    normalizeFallbacks,
+    normalizeCircuitBreaker,
+    ASSISTANT_CREDENTIAL_TYPES,
+    ASSISTANT_FALLBACKS_MAX,
+    ASSISTANT_BREAKER_DEFAULTS,
+    ASSISTANT_BREAKER_BOUNDS
+};
 
 function ensureConfigDir() {
     if (!existsSync(CONFIG_DIR)) {

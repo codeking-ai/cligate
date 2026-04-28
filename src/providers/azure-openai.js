@@ -376,7 +376,7 @@ export class AzureOpenAIProvider extends BaseProvider {
         });
     }
 
-    async sendResponsesRequest(body) {
+    async sendResponsesRequest(body, { headers: extraHeaders = {} } = {}) {
         const url = this._buildResponsesUrl();
         const sanitizeStats = { encryptedFieldsRemoved: 0, compactionItemsRemoved: 0, includeEntriesRemoved: 0, signatureFieldsRemoved: 0 };
         const responsesBody = {
@@ -390,7 +390,8 @@ export class AzureOpenAIProvider extends BaseProvider {
             method: 'POST',
             headers: {
                 'api-key': this.apiKey,
-                'Content-Type': 'application/json'
+                'Content-Type': 'application/json',
+                ...(extraHeaders && typeof extraHeaders === 'object' ? extraHeaders : {})
             },
             body: JSON.stringify(responsesBody)
         });

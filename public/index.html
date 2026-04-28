@@ -1541,39 +1541,150 @@
                                     x-text="assistantAgentStatus.resolvedSource ? t('assistantAgentResolvedReady') : (assistantAgentStatus.fallbackReason || t('assistantAgentFallbackRunner'))"></div>
                             </div>
 
-                            <div class="text-xs font-mono text-gray-500 uppercase tracking-widest" x-text="t('assistantAgentSources')"></div>
-                            <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
-                                <template x-for="source in [
-                                    { key: 'anthropicApiKey', label: t('assistantAgentSourceAnthropicApiKey') },
-                                    { key: 'openaiApiKeyBridge', label: t('assistantAgentSourceOpenAiBridge') },
-                                    { key: 'azureOpenaiApiKeyBridge', label: t('assistantAgentSourceAzureBridge') },
-                                    { key: 'chatgptAccount', label: t('assistantAgentSourceChatgptAccount') },
-                                    { key: 'claudeAccount', label: t('assistantAgentSourceClaudeAccount') }
-                                ]" :key="source.key">
-                                    <button class="w-full rounded-lg border px-4 py-3 text-left transition-colors"
-                                        :class="assistantAgentConfig.sources?.[source.key]
-                                            ? 'border-neon-cyan/40 bg-neon-cyan/10 text-white'
-                                            : 'border-space-border/50 bg-space-800/40 text-gray-400'"
+                            <!-- Primary credential -->
+                            <div class="space-y-2">
+                                <div class="text-xs font-mono text-gray-500 uppercase tracking-widest" x-text="t('assistantAgentPrimary')"></div>
+                                <div class="flex flex-col md:flex-row gap-2">
+                                    <select class="flex-1 rounded-lg bg-space-800/60 border border-space-border/50 text-white px-3 py-2 text-sm"
                                         :disabled="assistantAgentSaving"
-                                        @click="toggleAssistantAgentSource(source.key)">
-                                        <div class="flex items-start justify-between gap-3">
-                                            <div class="min-w-0">
-                                                <div class="text-sm" x-text="source.label"></div>
-                                                <div class="mt-1 text-[10px] font-mono"
-                                                    :class="(assistantAgentStatus.statuses.find(entry => entry.key === source.key)?.available) ? 'text-neon-green' : 'text-gray-500'"
-                                                    x-text="assistantAgentStatus.statuses.find(entry => entry.key === source.key)?.detail || ''"></div>
-                                            </div>
-                                            <div class="flex flex-col items-end gap-1">
-                                                <span class="text-[10px] font-mono uppercase tracking-widest"
-                                                    x-text="assistantAgentConfig.sources?.[source.key] ? t('enabled') : t('disabled')"></span>
-                                                <span class="text-[10px] font-mono uppercase tracking-widest"
-                                                    :class="assistantAgentStatus.statuses.find(entry => entry.key === source.key)?.selected ? 'text-neon-cyan' : ((assistantAgentStatus.statuses.find(entry => entry.key === source.key)?.available) ? 'text-neon-green' : 'text-gray-500')"
-                                                    x-text="assistantAgentStatus.statuses.find(entry => entry.key === source.key)?.selected ? t('assistantAgentSelected') : ((assistantAgentStatus.statuses.find(entry => entry.key === source.key)?.available) ? t('assistantAgentAvailable') : t('assistantAgentUnavailable'))"></span>
-                                            </div>
-                                        </div>
-                                    </button>
+                                        :value="descriptorToValue(assistantAgentConfig.boundCredential)"
+                                        @change="setAssistantPrimary($event.target.value)">
+                                        <option value="" x-text="t('assistantAgentNoBinding')"></option>
+                                        <template x-for="group in assistantAgentCredentialOptions" :key="group.group">
+                                            <optgroup :label="group.group">
+                                                <template x-for="entry in group.entries" :key="entry.value">
+                                                    <option :value="entry.value"
+                                                        x-text="entry.label + (entry.available ? '' : ' (' + (entry.detail || t('assistantAgentUnavailable')) + ')')"></option>
+                                                </template>
+                                            </optgroup>
+                                        </template>
+                                    </select>
+                                    <button class="btn btn-xs btn-outline text-gray-300"
+                                        :disabled="!assistantAgentConfig.boundCredential || assistantAgentSaving"
+                                        @click="testAssistantBinding(assistantAgentConfig.boundCredential)"
+                                        x-text="t('assistantAgentTest')"></button>
+                                </div>
+                                <template x-if="assistantAgentTestResult">
+                                    <div class="text-[11px] font-mono"
+                                        :class="assistantAgentTestResult.ok ? 'text-neon-green' : (assistantAgentTestResult.pending ? 'text-gray-400' : 'text-red-400')"
+                                        x-text="assistantAgentTestResult.pending ? t('assistantAgentTesting') : (assistantAgentTestResult.ok ? (t('assistantAgentTestOk') + ' · ' + (assistantAgentTestResult.label || '')) : (t('assistantAgentTestFailed') + ': ' + (assistantAgentTestResult.reason || '')))"></div>
                                 </template>
                             </div>
+
+                            <!-- Fallbacks -->
+                            <div class="space-y-2">
+                                <div class="flex items-center justify-between">
+                                    <div class="text-xs font-mono text-gray-500 uppercase tracking-widest" x-text="t('assistantAgentFallbacks')"></div>
+                                    <div class="text-[10px] font-mono text-gray-500"
+                                        x-text="(assistantAgentConfig.fallbacks?.length || 0) + ' / 3'"></div>
+                                </div>
+                                <template x-for="(fallback, index) in (assistantAgentConfig.fallbacks || [])" :key="index">
+                                    <div class="flex items-center gap-2">
+                                        <span class="text-[10px] font-mono text-gray-500 w-6 text-center" x-text="'#' + (index + 1)"></span>
+                                        <select class="flex-1 rounded-lg bg-space-800/60 border border-space-border/50 text-white px-3 py-2 text-xs"
+                                            :disabled="assistantAgentSaving"
+                                            :value="descriptorToValue(fallback)"
+                                            @change="setAssistantFallback(index, $event.target.value)">
+                                            <template x-for="group in assistantAgentCredentialOptions" :key="group.group">
+                                                <optgroup :label="group.group">
+                                                    <template x-for="entry in group.entries" :key="entry.value">
+                                                        <option :value="entry.value" x-text="entry.label"></option>
+                                                    </template>
+                                                </optgroup>
+                                            </template>
+                                        </select>
+                                        <button class="btn btn-xs btn-outline text-gray-400 px-2"
+                                            :disabled="index === 0 || assistantAgentSaving"
+                                            @click="moveAssistantFallback(index, -1)">↑</button>
+                                        <button class="btn btn-xs btn-outline text-gray-400 px-2"
+                                            :disabled="index === (assistantAgentConfig.fallbacks?.length - 1) || assistantAgentSaving"
+                                            @click="moveAssistantFallback(index, 1)">↓</button>
+                                        <button class="btn btn-xs btn-outline text-red-400 px-2"
+                                            :disabled="assistantAgentSaving"
+                                            @click="removeAssistantFallback(index)">✕</button>
+                                    </div>
+                                </template>
+                                <div x-show="(assistantAgentConfig.fallbacks?.length || 0) < 3">
+                                    <select class="w-full rounded-lg bg-space-800/40 border border-dashed border-space-border/50 text-gray-300 px-3 py-2 text-xs"
+                                        :disabled="assistantAgentSaving"
+                                        @change="if ($event.target.value) { addAssistantFallback($event.target.value); $event.target.value = ''; }">
+                                        <option value="" x-text="'+ ' + t('assistantAgentAddFallback')"></option>
+                                        <template x-for="group in assistantAgentCredentialOptions" :key="group.group">
+                                            <optgroup :label="group.group">
+                                                <template x-for="entry in group.entries" :key="entry.value">
+                                                    <option :value="entry.value" x-text="entry.label"></option>
+                                                </template>
+                                            </optgroup>
+                                        </template>
+                                    </select>
+                                </div>
+                            </div>
+
+                            <!-- Circuit breaker config -->
+                            <div class="space-y-2">
+                                <div class="text-xs font-mono text-gray-500 uppercase tracking-widest" x-text="t('assistantAgentBreakerConfig')"></div>
+                                <div class="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
+                                    <label class="flex items-center gap-2">
+                                        <span class="text-gray-400" x-text="t('assistantAgentBreakerThreshold')"></span>
+                                        <input type="number" min="1" max="10" step="1"
+                                            class="w-20 rounded-md bg-space-800/60 border border-space-border/50 text-white px-2 py-1 text-xs"
+                                            :disabled="assistantAgentSaving"
+                                            x-model.number="assistantAgentConfig.circuitBreaker.failureThreshold"
+                                            @change="saveAssistantCircuitBreaker()">
+                                    </label>
+                                    <label class="flex items-center gap-2">
+                                        <span class="text-gray-400" x-text="t('assistantAgentBreakerInterval')"></span>
+                                        <select class="rounded-md bg-space-800/60 border border-space-border/50 text-white px-2 py-1 text-xs"
+                                            :disabled="assistantAgentSaving"
+                                            x-model.number="assistantAgentConfig.circuitBreaker.probeIntervalMs"
+                                            @change="saveAssistantCircuitBreaker()">
+                                            <option :value="60000">1 min</option>
+                                            <option :value="120000">2 min</option>
+                                            <option :value="300000">5 min</option>
+                                            <option :value="600000">10 min</option>
+                                            <option :value="1800000">30 min</option>
+                                            <option :value="3600000">60 min</option>
+                                        </select>
+                                    </label>
+                                </div>
+                            </div>
+
+                            <!-- Tier health table -->
+                            <div class="space-y-2">
+                                <div class="flex items-center justify-between">
+                                    <div class="text-xs font-mono text-gray-500 uppercase tracking-widest" x-text="t('assistantAgentTierHealth')"></div>
+                                    <button class="btn btn-xs btn-outline text-gray-400"
+                                        :disabled="assistantAgentSaving"
+                                        @click="resetAssistantBreaker()"
+                                        x-text="t('assistantAgentResetBreaker')"></button>
+                                </div>
+                                <template x-if="!assistantAgentStatus.tiers || assistantAgentStatus.tiers.length === 0">
+                                    <div class="text-xs font-mono text-gray-500" x-text="t('assistantAgentNoTiers')"></div>
+                                </template>
+                                <template x-for="(tier, index) in (assistantAgentStatus.tiers || [])" :key="tier.tier">
+                                    <div class="rounded-md border border-space-border/50 bg-space-800/30 px-3 py-2 text-xs">
+                                        <div class="flex items-center justify-between gap-2">
+                                            <div class="font-mono text-gray-400" x-text="tier.tier.toUpperCase()"></div>
+                                            <div class="font-mono"
+                                                :class="tier.breaker.state === 'tripped' ? 'text-red-400' : (tier.resolved ? 'text-neon-green' : 'text-yellow-400')"
+                                                x-text="tier.breaker.state === 'tripped' ? t('assistantAgentBreakerTripped') : (tier.resolved ? t('assistantAgentTierHealthy') : t('assistantAgentTierUnresolved'))"></div>
+                                        </div>
+                                        <div class="mt-1 text-gray-300" x-text="tier.label || (tier.descriptor.type + ' · ' + tier.descriptor.id)"></div>
+                                        <template x-if="!tier.resolved && tier.reason">
+                                            <div class="text-[10px] text-yellow-400" x-text="tier.reason"></div>
+                                        </template>
+                                        <template x-if="tier.breaker.consecutiveFailures">
+                                            <div class="text-[10px] text-gray-500"
+                                                x-text="t('assistantAgentRecentFailures') + ': ' + tier.breaker.consecutiveFailures"></div>
+                                        </template>
+                                    </div>
+                                </template>
+                                <template x-if="assistantAgentStatus.lastUsed">
+                                    <div class="text-[11px] font-mono text-gray-400 mt-2"
+                                        x-text="t('assistantAgentLastUsed') + ': ' + (assistantAgentStatus.lastUsed.label || '') + ' · ' + new Date(assistantAgentStatus.lastUsed.at).toLocaleTimeString()"></div>
+                                </template>
+                            </div>
+
                             <div class="text-xs text-gray-500 font-mono" x-text="t('assistantAgentSourceHint')"></div>
                         </div>
                     </div>

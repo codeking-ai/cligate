@@ -1,193 +1,176 @@
 import { listAccounts as listChatGptAccounts } from '../account-manager.js';
 import {
-  getAccount as getClaudeAccount,
   getUsableAccounts,
   listAccounts as listClaudeAccounts
 } from '../claude-account-manager.js';
-import { getCredentialsForAccount } from '../middleware/credentials.js';
-import { sendMessageStream } from '../direct-api.js';
-import { sendClaudeMessageWithMeta, mapToClaudeModel } from '../claude-api.js';
 import { selectKey } from '../api-key-manager.js';
-import { resolveModel } from '../model-mapping.js';
-import { getServerSettings } from '../server-settings.js';
+import { getServerSettings, setServerSettings } from '../server-settings.js';
+import { logger } from '../utils/logger.js';
 
-function pickChatGptAccount() {
-  const snapshot = listChatGptAccounts();
-  const accounts = Array.isArray(snapshot?.accounts) ? snapshot.accounts.filter((entry) => entry.enabled !== false) : [];
-  if (accounts.length === 0) return null;
-  return accounts.find((entry) => entry.email === snapshot.activeAccount) || accounts[0];
-}
+import { CircuitBreaker, tierKeyFor } from './circuit-breaker.js';
+import {
+  resolveCredential,
+  describeBinding,
+  listAvailableCredentials,
+  DEFAULT_CHATGPT_MODEL,
+  DEFAULT_CLAUDE_MODEL
+} from './credential-resolver.js';
 
-function pickClaudeAccount() {
-  const usable = typeof getUsableAccounts === 'function' ? getUsableAccounts() : [];
-  if (Array.isArray(usable) && usable.length > 0) {
-    return usable[0];
-  }
-  const snapshot = listClaudeAccounts();
-  const accounts = Array.isArray(snapshot?.accounts) ? snapshot.accounts.filter((entry) => entry.enabled !== false) : [];
-  if (accounts.length === 0) return null;
-  return getClaudeAccount(snapshot.activeAccount) || getClaudeAccount(accounts[0].email) || null;
-}
+let _migrationDone = false;
 
-function buildClaudeAccountCandidate(client, claudeAccount) {
-  if (!claudeAccount?.accessToken) return null;
-  return {
-    kind: 'claude-account',
-    label: claudeAccount.email || 'claude',
-    model: client.defaultClaudeModel,
-    send: async (request) => {
-      const result = await sendClaudeMessageWithMeta({
-        ...request,
-        model: mapToClaudeModel(request.model || client.defaultClaudeModel)
-      }, claudeAccount.accessToken);
-      return normalizeAnthropicResponse(result.data);
-    }
-  };
-}
-
-async function buildChatGptAccountCandidate(client, chatAccount) {
-  if (!chatAccount?.email) return null;
-  const creds = await getCredentialsForAccount(chatAccount.email);
-  if (!(creds?.accessToken && creds?.accountId)) {
-    return null;
-  }
-  return {
-    kind: 'chatgpt-account',
-    label: chatAccount.email,
-    model: client.defaultChatGptModel,
-    send: async (request) => sendChatGptAssistantRequest(request, creds, client.defaultChatGptModel)
-  };
-}
-
-function normalizeAnthropicResponse(response = {}) {
-  const content = Array.isArray(response?.content) ? response.content : [];
-  const text = content
-    .filter((entry) => entry?.type === 'text')
-    .map((entry) => entry.text || '')
-    .join('\n\n')
-    .trim();
-  const toolCalls = content
-    .filter((entry) => entry?.type === 'tool_use')
-    .map((entry) => ({
-      id: entry.id,
-      name: entry.name,
-      input: entry.input || {}
-    }));
-
-  return {
-    text,
-    toolCalls,
-    stopReason: response?.stop_reason || '',
-    usage: response?.usage || null,
-    raw: response
-  };
-}
-
-async function sendChatGptAssistantRequest(request, creds, defaultModel) {
-  const content = [];
-  let usage = null;
-  for await (const event of sendMessageStream({
-    ...request,
-    model: request.model || defaultModel,
-    stream: true
-  }, creds.accessToken, creds.accountId)) {
-    if (event?.event === 'content_block_delta' && event.data?.delta?.type === 'text_delta') {
-      content.push(event.data.delta.text || '');
-    }
-    if (event?.event === 'message_delta' && event.data?.usage) {
-      usage = event.data.usage;
-    }
+/**
+ * One-shot migration from legacy `assistantAgent.sources` toggles to
+ * `assistantAgent.boundCredential`. Runs at most once per process — picks the
+ * first resolvable concrete credential per the historical priority order
+ * (anthropic key → openai bridge → azure bridge → claude account → chatgpt
+ * account) and writes it back to settings.json. Subsequent runtime config
+ * reads see the new shape and skip this entirely.
+ */
+function migrateLegacySourcesIfNeeded(config) {
+  if (_migrationDone) return config;
+  if (config.boundCredential) {
+    _migrationDone = true;
+    return config;
   }
 
-  return {
-    text: content.join('').trim(),
-    toolCalls: [],
-    stopReason: 'end_turn',
-    usage,
-    raw: {
-      type: 'message',
-      role: 'assistant',
-      content: [{
-        type: 'text',
-        text: content.join('').trim()
-      }],
-      model: request.model || defaultModel,
-      stop_reason: 'end_turn',
-      stop_sequence: null,
-      usage
-    }
-  };
-}
+  const legacy = config.sources || {};
+  const tries = [];
 
-async function parseJsonResponse(response) {
-  if (!response?.ok) {
-    const body = await response.text();
-    throw new Error(body || `Assistant model request failed with ${response?.status || 500}`);
+  if (legacy.anthropicApiKey) {
+    tries.push(() => {
+      const provider = selectKey('anthropic');
+      return provider ? { type: 'api-key', id: provider.id } : null;
+    });
   }
-  return response.json();
-}
+  if (legacy.openaiApiKeyBridge) {
+    tries.push(() => {
+      const provider = selectKey('openai');
+      return provider?.sendAnthropicRequest ? { type: 'api-key', id: provider.id } : null;
+    });
+  }
+  if (legacy.azureOpenaiApiKeyBridge) {
+    tries.push(() => {
+      const provider = selectKey('azure-openai');
+      return provider?.sendAnthropicRequest ? { type: 'api-key', id: provider.id } : null;
+    });
+  }
+  if (legacy.claudeAccount) {
+    tries.push(() => {
+      const usable = typeof getUsableAccounts === 'function' ? getUsableAccounts() : [];
+      if (Array.isArray(usable) && usable.length > 0) {
+        return { type: 'claude-account', id: usable[0].email };
+      }
+      const snapshot = listClaudeAccounts();
+      const accounts = Array.isArray(snapshot?.accounts)
+        ? snapshot.accounts.filter((entry) => entry.enabled !== false)
+        : [];
+      if (accounts.length === 0) return null;
+      return { type: 'claude-account', id: accounts[0].email };
+    });
+  }
+  if (legacy.chatgptAccount) {
+    tries.push(() => {
+      const snapshot = listChatGptAccounts();
+      const accounts = Array.isArray(snapshot?.accounts)
+        ? snapshot.accounts.filter((entry) => entry.enabled !== false)
+        : [];
+      if (accounts.length === 0) return null;
+      const active = accounts.find((entry) => entry.email === snapshot.activeAccount) || accounts[0];
+      return { type: 'chatgpt-account', id: active.email };
+    });
+  }
 
-function sourceStatusRecord({
-  key,
-  label,
-  enabled,
-  available,
-  selected = false,
-  detail = '',
-  kind = ''
-} = {}) {
-  return {
-    key,
-    label,
-    enabled: enabled === true,
-    available: available === true,
-    selected: selected === true,
-    detail: String(detail || ''),
-    kind: String(kind || '')
-  };
+  let resolved = null;
+  for (const tryFn of tries) {
+    try {
+      resolved = tryFn();
+      if (resolved) break;
+    } catch {
+      // ignore and try next
+    }
+  }
+  _migrationDone = true;
+
+  if (!resolved) {
+    logger.info('[Supervisor] legacy supervisor config present but no concrete credential resolved; supervisor will run in fallback mode until the user binds one explicitly');
+    return config;
+  }
+
+  try {
+    const persisted = setServerSettings({
+      assistantAgent: { ...config, boundCredential: resolved }
+    });
+    logger.info(`[Supervisor] migrated legacy supervisor config → ${resolved.type}::${resolved.id}`);
+    return persisted.assistantAgent;
+  } catch (error) {
+    logger.warn(`[Supervisor] legacy migration failed to persist: ${error?.message || error}`);
+    return { ...config, boundCredential: resolved };
+  }
 }
 
 export class AssistantLlmClient {
   constructor({
-    defaultChatGptModel = 'gpt-5.4',
-    defaultClaudeModel = 'claude-sonnet-4-6',
-    allowChatGptAccountSource = false,
-    allowClaudeAccountSource = false,
+    defaultChatGptModel = DEFAULT_CHATGPT_MODEL,
+    defaultClaudeModel = DEFAULT_CLAUDE_MODEL,
     enabled = process.env.CLIGATE_ENABLE_ASSISTANT_AGENT !== '0'
   } = {}) {
     this.defaultChatGptModel = defaultChatGptModel;
     this.defaultClaudeModel = defaultClaudeModel;
-    this.allowChatGptAccountSource = allowChatGptAccountSource === true;
-    this.allowClaudeAccountSource = allowClaudeAccountSource === true;
     this.enabled = enabled === true;
+    this._breaker = new CircuitBreaker();
+    this._lastUsed = null; // { descriptor, kind, label, model, at }
+    this._lastFallbackReason = '';
   }
+
+  // ─── Config + migration ──────────────────────────────────────────────────
 
   getRuntimeConfig() {
     const settings = getServerSettings();
-    const configured = settings?.assistantAgent && typeof settings.assistantAgent === 'object'
+    const stored = settings?.assistantAgent && typeof settings.assistantAgent === 'object'
       ? settings.assistantAgent
       : null;
-    return {
-      enabled: configured ? configured.enabled === true : this.enabled,
-      sources: {
-        chatgptAccount: configured
-          ? configured.sources?.chatgptAccount === true
-          : this.allowChatGptAccountSource,
-        claudeAccount: configured
-          ? configured.sources?.claudeAccount === true
-          : this.allowClaudeAccountSource,
-        anthropicApiKey: configured
-          ? configured.sources?.anthropicApiKey !== false
-          : true,
-        openaiApiKeyBridge: configured
-          ? configured.sources?.openaiApiKeyBridge !== false
-          : true,
-        azureOpenaiApiKeyBridge: configured
-          ? configured.sources?.azureOpenaiApiKeyBridge !== false
-          : true
-      }
-    };
+
+    let config = stored
+      ? {
+          enabled: stored.enabled === true,
+          boundCredential: stored.boundCredential || null,
+          fallbacks: Array.isArray(stored.fallbacks) ? stored.fallbacks : [],
+          circuitBreaker: stored.circuitBreaker || { failureThreshold: 3, probeIntervalMs: 300_000 },
+          sources: stored.sources || {}
+        }
+      : {
+          enabled: this.enabled,
+          boundCredential: null,
+          fallbacks: [],
+          circuitBreaker: { failureThreshold: 3, probeIntervalMs: 300_000 },
+          sources: {}
+        };
+
+    config = migrateLegacySourcesIfNeeded(config);
+    this._breaker.updateThresholds(config.circuitBreaker);
+    return config;
   }
+
+  // ─── Helpers ─────────────────────────────────────────────────────────────
+
+  _chainDescriptors(config) {
+    const chain = [];
+    if (config.boundCredential) chain.push(config.boundCredential);
+    if (Array.isArray(config.fallbacks)) {
+      for (const entry of config.fallbacks) {
+        if (entry && typeof entry === 'object' && entry.type && entry.id) {
+          chain.push(entry);
+        }
+      }
+    }
+    return chain;
+  }
+
+  _pruneBreaker(chain) {
+    this._breaker.pruneTo(chain.map((descriptor) => tierKeyFor(descriptor)));
+  }
+
+  // ─── Source resolution ───────────────────────────────────────────────────
 
   async hasAvailableSource() {
     if (!this.getRuntimeConfig().enabled) return false;
@@ -197,219 +180,135 @@ export class AssistantLlmClient {
 
   getFallbackReason() {
     const config = this.getRuntimeConfig();
-    if (!config.enabled) {
-      return 'assistant_agent_disabled';
-    }
+    if (!config.enabled) return 'assistant_agent_disabled';
+    if (this._lastFallbackReason) return this._lastFallbackReason;
+    if (!config.boundCredential) return 'no_supervisor_binding';
     return 'no_available_llm_source';
   }
 
+  /**
+   * Walk the binding chain (primary then ordered fallbacks). For each tier:
+   *   - skip if circuit breaker says the tier is in cooldown
+   *   - resolve the credential into a working candidate
+   *   - skip if the credential has been deleted or disabled
+   *
+   * The returned list is in the order requests should try them. complete()
+   * iterates this list and records success/failure on the breaker.
+   */
   async listCandidateSources() {
     const config = this.getRuntimeConfig();
     if (!config.enabled) {
       throw new Error('Assistant LLM agent is disabled');
     }
+
+    const chain = this._chainDescriptors(config);
+    this._pruneBreaker(chain);
+
     const candidates = [];
-    const anthropicProvider = config.sources.anthropicApiKey ? selectKey('anthropic') : null;
-    if (anthropicProvider) {
-      candidates.push({
-        kind: 'api-key',
-        label: anthropicProvider.name,
-        model: this.defaultClaudeModel,
-        send: async (request) => normalizeAnthropicResponse(
-          await parseJsonResponse(await anthropicProvider.sendRequest({
-            ...request,
-              model: mapToClaudeModel(request.model || this.defaultClaudeModel)
-          }))
-        )
+    for (const descriptor of chain) {
+      const tierKey = tierKeyFor(descriptor);
+      if (this._breaker.shouldSkip(tierKey)) continue;
+      const candidate = await resolveCredential(descriptor, {
+        defaultChatGptModel: this.defaultChatGptModel,
+        defaultClaudeModel: this.defaultClaudeModel
       });
+      if (!candidate) continue;
+      candidates.push({ ...candidate, tierKey });
     }
-
-    const openAiProvider = config.sources.openaiApiKeyBridge ? selectKey('openai') : null;
-    if (openAiProvider?.sendAnthropicRequest) {
-      candidates.push({
-        kind: 'api-key',
-        label: openAiProvider.name,
-        model: this.defaultChatGptModel,
-        send: async (request) => normalizeAnthropicResponse(
-          await parseJsonResponse(await openAiProvider.sendAnthropicRequest({
-            ...request,
-            model: resolveModel(openAiProvider.type, request.model || this.defaultChatGptModel)
-              || request.model
-              || this.defaultChatGptModel
-          }))
-        )
-      });
-    }
-
-    const azureProvider = config.sources.azureOpenaiApiKeyBridge ? selectKey('azure-openai') : null;
-    if (azureProvider?.sendAnthropicRequest) {
-      candidates.push({
-        kind: 'api-key',
-        label: azureProvider.name,
-        model: this.defaultChatGptModel,
-        send: async (request) => normalizeAnthropicResponse(
-          await parseJsonResponse(await azureProvider.sendAnthropicRequest({
-            ...request,
-            model: resolveModel(azureProvider.type, request.model || this.defaultChatGptModel)
-              || request.model
-              || this.defaultChatGptModel
-          }))
-        )
-      });
-    }
-
-    if (config.sources.claudeAccount) {
-      const claudeCandidate = buildClaudeAccountCandidate(this, pickClaudeAccount());
-      if (claudeCandidate) {
-        candidates.push(claudeCandidate);
-      }
-    }
-
-    if (config.sources.chatgptAccount) {
-      const chatCandidate = await buildChatGptAccountCandidate(this, pickChatGptAccount());
-      if (chatCandidate) {
-        candidates.push(chatCandidate);
-      }
-    }
-
-    if (candidates.length === 0) {
-      const emergencyClaudeCandidate = buildClaudeAccountCandidate(this, pickClaudeAccount());
-      if (emergencyClaudeCandidate) {
-        candidates.push(emergencyClaudeCandidate);
-      }
-      const emergencyChatCandidate = await buildChatGptAccountCandidate(this, pickChatGptAccount());
-      if (emergencyChatCandidate) {
-        candidates.push(emergencyChatCandidate);
-      }
-    }
-
     return candidates;
   }
 
   async resolveSource() {
     const candidates = await this.listCandidateSources();
-    if (candidates.length > 0) {
-      return candidates[0];
+    if (candidates.length === 0) {
+      throw new Error('No assistant model source available');
     }
-
-    throw new Error('No assistant model source available');
+    return candidates[0];
   }
 
+  // ─── Status snapshot ─────────────────────────────────────────────────────
+
+  /**
+   * Snapshot of the current binding chain + breaker state for the UI.
+   * Does NOT make any LLM calls; purely reads in-memory state and the
+   * configured credential records.
+   */
   async inspectStatus() {
     const config = this.getRuntimeConfig();
-    const statuses = [];
+    const chain = this._chainDescriptors(config);
+    this._pruneBreaker(chain);
 
-    if (config.sources.chatgptAccount) {
-      const chatAccount = pickChatGptAccount();
-      const creds = chatAccount?.email ? await getCredentialsForAccount(chatAccount.email) : null;
-      statuses.push(sourceStatusRecord({
-        key: 'chatgptAccount',
-        label: 'ChatGPT Account',
-        enabled: true,
-        available: !!(creds?.accessToken && creds?.accountId),
-        detail: chatAccount?.email || 'No active ChatGPT account',
-        kind: 'chatgpt-account'
-      }));
-    } else {
-      statuses.push(sourceStatusRecord({
-        key: 'chatgptAccount',
-        label: 'ChatGPT Account',
-        enabled: false,
-        available: false,
-        detail: 'Disabled',
-        kind: 'chatgpt-account'
-      }));
-    }
-
-    if (config.sources.claudeAccount) {
-      const claudeAccount = pickClaudeAccount();
-      statuses.push(sourceStatusRecord({
-        key: 'claudeAccount',
-        label: 'Claude Account',
-        enabled: true,
-        available: !!claudeAccount?.accessToken,
-        detail: claudeAccount?.email || 'No usable Claude account',
-        kind: 'claude-account'
-      }));
-    } else {
-      statuses.push(sourceStatusRecord({
-        key: 'claudeAccount',
-        label: 'Claude Account',
-        enabled: false,
-        available: false,
-        detail: 'Disabled',
-        kind: 'claude-account'
-      }));
-    }
-
-    const anthropicProvider = config.sources.anthropicApiKey ? selectKey('anthropic') : null;
-    statuses.push(sourceStatusRecord({
-      key: 'anthropicApiKey',
-      label: 'Anthropic API Key',
-      enabled: config.sources.anthropicApiKey,
-      available: !!anthropicProvider,
-      detail: anthropicProvider?.name || (config.sources.anthropicApiKey ? 'No available Anthropic API key' : 'Disabled'),
-      kind: 'api-key'
-    }));
-
-    const openAiProvider = config.sources.openaiApiKeyBridge ? selectKey('openai') : null;
-    statuses.push(sourceStatusRecord({
-      key: 'openaiApiKeyBridge',
-      label: 'OpenAI API Key Bridge',
-      enabled: config.sources.openaiApiKeyBridge,
-      available: !!openAiProvider,
-      detail: openAiProvider?.name || (config.sources.openaiApiKeyBridge ? 'No available OpenAI API key' : 'Disabled'),
-      kind: 'api-key'
-    }));
-
-    const azureProvider = config.sources.azureOpenaiApiKeyBridge ? selectKey('azure-openai') : null;
-    statuses.push(sourceStatusRecord({
-      key: 'azureOpenaiApiKeyBridge',
-      label: 'Azure OpenAI Bridge',
-      enabled: config.sources.azureOpenaiApiKeyBridge,
-      available: !!azureProvider,
-      detail: azureProvider?.name || (config.sources.azureOpenaiApiKeyBridge ? 'No available Azure OpenAI key' : 'Disabled'),
-      kind: 'api-key'
+    const tiers = await Promise.all(chain.map(async (descriptor, index) => {
+      const tierKey = tierKeyFor(descriptor);
+      const breakerState = this._breaker.getState(tierKey);
+      const description = await describeBinding(descriptor);
+      return {
+        tier: index === 0 ? 'primary' : `fallback-${index}`,
+        descriptor,
+        resolved: description.ok,
+        kind: description.kind || null,
+        providerType: description.providerType || null,
+        label: description.label || null,
+        model: description.model || null,
+        reason: description.ok ? '' : (description.reason || ''),
+        breaker: breakerState
+      };
     }));
 
     let resolvedSource = null;
     let fallbackReason = '';
-    if (config.enabled) {
-      try {
-        const resolved = await this.resolveSource();
-        resolvedSource = {
-          kind: resolved.kind,
-          label: resolved.label,
-          model: resolved.model
-        };
-      } catch (error) {
-        fallbackReason = error?.message || 'No assistant model source available';
-      }
-    } else {
+    if (!config.enabled) {
       fallbackReason = 'Assistant LLM agent is disabled';
+    } else if (chain.length === 0) {
+      fallbackReason = 'No supervisor binding configured';
+    } else {
+      const usable = tiers.find((tier) => tier.resolved && tier.breaker.state !== 'tripped');
+      if (usable) {
+        resolvedSource = {
+          tier: usable.tier,
+          descriptor: usable.descriptor,
+          kind: usable.kind,
+          label: usable.label,
+          model: usable.model
+        };
+      } else {
+        fallbackReason = 'All supervisor tiers are unavailable';
+      }
     }
-
-    const resolvedKey = resolvedSource?.kind === 'chatgpt-account'
-      ? 'chatgptAccount'
-      : resolvedSource?.kind === 'claude-account'
-        ? 'claudeAccount'
-        : (resolvedSource?.label === openAiProvider?.name
-          ? 'openaiApiKeyBridge'
-          : (resolvedSource?.label === azureProvider?.name
-            ? 'azureOpenaiApiKeyBridge'
-            : (resolvedSource?.label === anthropicProvider?.name ? 'anthropicApiKey' : '')));
 
     return {
       enabled: config.enabled,
-      configuredSources: config.sources,
-      statuses: statuses.map((entry) => ({
-        ...entry,
-        selected: entry.key === resolvedKey
-      })),
+      boundCredential: config.boundCredential,
+      fallbacks: config.fallbacks,
+      circuitBreaker: config.circuitBreaker,
+      tiers,
+      // Backwards-compat alias for callers (older UI, route-handlers test) that
+      // expect `statuses` to be an array. The shape is the same as `tiers`;
+      // remove once the UI moves to the `tiers` key.
+      statuses: tiers,
       resolvedSource,
-      fallbackReason
+      fallbackReason,
+      lastUsed: this._lastUsed,
+      // Catalog of all bindable credentials for the UI dropdown.
+      catalog: listAvailableCredentials()
     };
   }
+
+  // ─── Breaker controls (used by routes) ───────────────────────────────────
+
+  resetBreaker(descriptor) {
+    if (!descriptor) {
+      this._breaker.resetAll();
+      return;
+    }
+    this._breaker.reset(tierKeyFor(descriptor));
+  }
+
+  getBreakerSnapshot() {
+    return this._breaker.snapshot();
+  }
+
+  // ─── Send ────────────────────────────────────────────────────────────────
 
   async complete({
     system,
@@ -420,6 +319,7 @@ export class AssistantLlmClient {
   } = {}) {
     const candidates = await this.listCandidateSources();
     if (candidates.length === 0) {
+      this._lastFallbackReason = 'no_available_supervisor_tier';
       throw new Error('No assistant model source available');
     }
 
@@ -433,19 +333,33 @@ export class AssistantLlmClient {
           max_tokens: maxTokens,
           model: model || source.model
         });
+        this._breaker.recordSuccess(source.tierKey);
+        this._lastUsed = {
+          descriptor: source.descriptor,
+          kind: source.kind,
+          label: source.label,
+          model: model || source.model,
+          at: Date.now()
+        };
+        this._lastFallbackReason = '';
         return {
           ...response,
           source: {
             kind: source.kind,
             label: source.label,
-            model: model || source.model
+            model: model || source.model,
+            descriptor: source.descriptor
           }
         };
       } catch (error) {
-        failures.push(`${source.label}: ${error?.message || String(error)}`);
+        const breakerState = this._breaker.recordFailure(source.tierKey);
+        const message = error?.message || String(error);
+        failures.push(`${source.label}: ${message}`);
+        logger.warn(`[Supervisor] tier failed | tier=${source.tierKey} | breaker=${breakerState} | reason=${message.slice(0, 200)}`);
       }
     }
 
+    this._lastFallbackReason = `all_supervisor_tiers_failed: ${failures.join(' | ')}`;
     throw new Error(`All assistant model sources failed: ${failures.join(' | ')}`);
   }
 }

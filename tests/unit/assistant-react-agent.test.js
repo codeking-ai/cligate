@@ -483,30 +483,29 @@ test('Assistant ReAct prompt includes task-space-first context', async () => {
   assert.match(String(service.llmClient.calls[0]?.system || ''), /originKind|sourceTaskId|latestExecutionId/);
 });
 
-test('AssistantLlmClient falls back to account-backed sources when bridge sources are unavailable', async () => {
-  const client = new AssistantLlmClient({
-    enabled: true,
-    allowChatGptAccountSource: false,
-    allowClaudeAccountSource: false
-  });
+test('AssistantLlmClient returns no candidates when no supervisor binding is configured (no silent emergency fallback)', async () => {
+  const client = new AssistantLlmClient({ enabled: true });
 
-  const originalGetRuntimeConfig = client.getRuntimeConfig.bind(client);
   client.getRuntimeConfig = () => ({
-    ...originalGetRuntimeConfig(),
     enabled: true,
-    sources: {
-      chatgptAccount: false,
-      claudeAccount: false,
-      anthropicApiKey: false,
-      openaiApiKeyBridge: false,
-      azureOpenaiApiKeyBridge: false
-    }
+    boundCredential: null,
+    fallbacks: [],
+    circuitBreaker: { failureThreshold: 3, probeIntervalMs: 300_000 },
+    sources: {}
   });
 
   const candidates = await client.listCandidateSources();
   assert.ok(Array.isArray(candidates));
-  assert.ok(candidates.length >= 1);
-  assert.match(String(candidates[0]?.kind || ''), /chatgpt-account|claude-account/);
+  assert.equal(candidates.length, 0);
+
+  let resolveError = null;
+  try {
+    await client.resolveSource();
+  } catch (error) {
+    resolveError = error;
+  }
+  assert.ok(resolveError, 'resolveSource should throw when no binding is configured');
+  assert.match(String(resolveError.message || ''), /no assistant model source available/i);
 });
 
 test('Assistant mode bypasses the LLM path when the conversation is waiting for approval', async () => {

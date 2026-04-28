@@ -75,7 +75,11 @@ import {
   handleGetAssistantTask
 } from './assistant-tasks-route.js';
 import {
-  handleGetAssistantAgentStatus
+  handleGetAssistantAgentStatus,
+  handleTestAssistantBinding,
+  handleGetAssistantBindingCatalog,
+  handleSetAssistantBinding,
+  handleResetAssistantBreaker
 } from './assistant-agent-route.js';
 import {
   handleListAgentChannelProviders,
@@ -372,6 +376,10 @@ export function registerApiRoutes(app, { port }) {
   app.get('/api/assistant/memory', handleGetAssistantMemory);
   app.get('/api/assistant/policies', handleGetAssistantPolicies);
   app.get('/api/assistant/agent-status', handleGetAssistantAgentStatus);
+  app.get('/api/assistant/agent-binding/catalog', handleGetAssistantBindingCatalog);
+  app.post('/api/assistant/agent-binding', handleSetAssistantBinding);
+  app.post('/api/assistant/agent-binding/test', handleTestAssistantBinding);
+  app.post('/api/assistant/agent-binding/breaker/reset', handleResetAssistantBreaker);
 
   // ─── Agent Channel Gateway ──────────────────────────────────────────────
   app.get('/api/agent-channels/providers', handleListAgentChannelProviders);

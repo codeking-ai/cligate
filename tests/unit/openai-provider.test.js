@@ -54,6 +54,61 @@ test('OpenAIProvider.sendResponsesRequest uses native responses endpoint', async
   }
 });
 
+test('OpenAIProvider.sendResponsesRequest forwards Codex session isolation headers', async () => {
+  const provider = new OpenAIProvider({
+    id: 'openai_session_headers',
+    name: 'openai-test',
+    apiKey: 'sk-test',
+    baseUrl: 'https://api.openai.com/v1'
+  });
+
+  const originalFetch = global.fetch;
+  let capturedOptions = null;
+
+  global.fetch = async (_url, options) => {
+    capturedOptions = options;
+    return new Response(JSON.stringify({
+      object: 'response',
+      model: 'gpt-5.4',
+      status: 'completed',
+      output: [],
+      usage: {
+        input_tokens: 1,
+        output_tokens: 1,
+        total_tokens: 2
+      }
+    }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' }
+    });
+  };
+
+  try {
+    await provider.sendResponsesRequest(
+      {
+        model: 'gpt-5.4',
+        input: 'hello',
+        stream: false
+      },
+      {
+        headers: {
+          'x-client-request-id': 'thread-A',
+          'session_id': 'thread-A',
+          'x-codex-turn-state': 'thread-A:3',
+          'x-openai-subagent': 'review'
+        }
+      }
+    );
+
+    assert.equal(capturedOptions.headers['x-client-request-id'], 'thread-A');
+    assert.equal(capturedOptions.headers.session_id, 'thread-A');
+    assert.equal(capturedOptions.headers['x-codex-turn-state'], 'thread-A:3');
+    assert.equal(capturedOptions.headers['x-openai-subagent'], 'review');
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
 test('OpenAIProvider.sendAnthropicRequest uses responses translator path and returns anthropic message', async () => {
   const provider = new OpenAIProvider({
     id: 'openai_2',

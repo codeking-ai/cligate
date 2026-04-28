@@ -32,7 +32,13 @@ function mockReq(body = {}, params = {}, query = {}) {
 import { handleGetHaikuModel, handleSetHaikuModel, handleGetAppRouting, handleSetAppRouting, handleGetStrictCodexCompatibility, handleSetStrictCodexCompatibility, handleGetStrictTranslatorCompatibility, handleSetStrictTranslatorCompatibility, handleGetAssistantAgentConfig, handleSetAssistantAgentConfig } from '../../src/routes/settings-route.js';
 import { handleGetPricing, handleUpdatePricing, handleResetPricing } from '../../src/routes/pricing-route.js';
 import { handleGetApiKey } from '../../src/routes/api-keys-route.js';
-import { handleGetAssistantAgentStatus } from '../../src/routes/assistant-agent-route.js';
+import {
+  handleGetAssistantAgentStatus,
+  handleTestAssistantBinding,
+  handleGetAssistantBindingCatalog,
+  handleSetAssistantBinding,
+  handleResetAssistantBreaker
+} from '../../src/routes/assistant-agent-route.js';
 
 test('handleGetHaikuModel: returns current haikuKiloModel', () => {
   const req = mockReq();
@@ -158,6 +164,85 @@ test('handleGetAssistantAgentStatus: returns status payload shape', async () => 
   assert.equal(res._body.success, true);
   assert.equal(typeof res._body.status?.enabled, 'boolean');
   assert.ok(Array.isArray(res._body.status?.statuses));
+  assert.ok(Array.isArray(res._body.status?.tiers));
+  assert.ok(res._body.status?.catalog && typeof res._body.status.catalog === 'object');
+});
+
+test('handleTestAssistantBinding: reports failure when descriptor is invalid', async () => {
+  const req = mockReq({});
+  const res = mockRes();
+  await handleTestAssistantBinding(req, res);
+  assert.equal(res._status, 200);
+  assert.equal(res._body.success, false);
+  assert.match(String(res._body.reason || ''), /not found|disabled|no descriptor/i);
+});
+
+test('handleTestAssistantBinding: reports failure for non-existent api key', async () => {
+  const req = mockReq({ type: 'api-key', id: 'no-such-key-anywhere' });
+  const res = mockRes();
+  await handleTestAssistantBinding(req, res);
+  assert.equal(res._status, 200);
+  assert.equal(res._body.success, false);
+});
+
+test('handleGetAssistantBindingCatalog: returns inventory groups', () => {
+  const req = mockReq();
+  const res = mockRes();
+  handleGetAssistantBindingCatalog(req, res);
+  assert.equal(res._status, 200);
+  assert.equal(res._body.success, true);
+  assert.ok(res._body.catalog?.apiKeys);
+  assert.ok(Array.isArray(res._body.catalog?.claudeAccounts));
+  assert.ok(Array.isArray(res._body.catalog?.chatgptAccounts));
+});
+
+test('handleSetAssistantBinding: rejects non-object body', () => {
+  const req = { body: null };
+  const res = mockRes();
+  handleSetAssistantBinding(req, res);
+  assert.equal(res._status, 400);
+  assert.equal(res._body.success, false);
+});
+
+test('handleSetAssistantBinding: rejects malformed boundCredential', () => {
+  const req = mockReq({ boundCredential: { type: 'api-key' } });
+  const res = mockRes();
+  handleSetAssistantBinding(req, res);
+  assert.equal(res._status, 400);
+  assert.match(String(res._body.error || ''), /boundCredential/);
+});
+
+test('handleSetAssistantBinding: rejects malformed fallbacks', () => {
+  const req = mockReq({ fallbacks: 'nope' });
+  const res = mockRes();
+  handleSetAssistantBinding(req, res);
+  assert.equal(res._status, 400);
+  assert.match(String(res._body.error || ''), /fallbacks/);
+});
+
+test('handleSetAssistantBinding: accepts boundCredential = null (clear binding)', () => {
+  const req = mockReq({ boundCredential: null });
+  const res = mockRes();
+  handleSetAssistantBinding(req, res);
+  assert.equal(res._status, 200);
+  assert.equal(res._body.success, true);
+  assert.equal(res._body.assistantAgent.boundCredential, null);
+});
+
+test('handleResetAssistantBreaker: resets all when no descriptor given', () => {
+  const req = mockReq({});
+  const res = mockRes();
+  handleResetAssistantBreaker(req, res);
+  assert.equal(res._status, 200);
+  assert.equal(res._body.success, true);
+  assert.ok(res._body.breaker && typeof res._body.breaker === 'object');
+});
+
+test('handleResetAssistantBreaker: rejects malformed descriptor', () => {
+  const req = mockReq({ descriptor: { id: 42 } });
+  const res = mockRes();
+  handleResetAssistantBreaker(req, res);
+  assert.equal(res._status, 400);
 });
 
 test('handleSetHaikuModel: rejects empty body with 400', async () => {

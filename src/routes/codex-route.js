@@ -463,7 +463,7 @@ export async function handleCodexResponses(req, res) {
     }
 
     if (priority === 'apikey-first' && hasApiKeys) {
-        const result = await _handleCodexViaApiKey(res, body, modelId, isStreaming, apiKeyTypes, startTime);
+        const result = await _handleCodexViaApiKey(res, body, modelId, isStreaming, apiKeyTypes, startTime, req.headers);
         if (result !== false) return;
         if (hasAccounts) {
             const poolResult = await _handleCodexViaAccountPool(req, res, body, rawBody, modelId, isStreaming, startTime);
@@ -486,7 +486,7 @@ export async function handleCodexResponses(req, res) {
         if (poolResult !== false) return;
     }
     if (hasApiKeys) {
-        const result = await _handleCodexViaApiKey(res, body, modelId, isStreaming, apiKeyTypes, startTime);
+        const result = await _handleCodexViaApiKey(res, body, modelId, isStreaming, apiKeyTypes, startTime, req.headers);
         if (result !== false) return;
     }
     if (!strictCodexCompatibility && hasClaudeAccounts) {
@@ -556,7 +556,7 @@ async function _handleCodexAssignment(req, res, body, modelId, isStreaming, star
             if (res.headersSent || res.writableEnded || res.destroyed) return true;
             continue;
         }
-        const result = await _handleCodexViaAssignedApiKey(res, body, modelId, isStreaming, startTime, candidate.credential, assignment);
+        const result = await _handleCodexViaAssignedApiKey(res, body, modelId, isStreaming, startTime, candidate.credential, assignment, req.headers);
         if (result !== false) return result;
         if (res.headersSent || res.writableEnded || res.destroyed) return true;
     }
@@ -564,7 +564,7 @@ async function _handleCodexAssignment(req, res, body, modelId, isStreaming, star
     return false;
 }
 
-async function _handleCodexViaAssignedApiKey(res, body, modelId, isStreaming, startTime, provider, assignment = null) {
+async function _handleCodexViaAssignedApiKey(res, body, modelId, isStreaming, startTime, provider, assignment = null, requestHeaders = {}) {
     try {
         let mappedModel;
         let response;
@@ -572,7 +572,7 @@ async function _handleCodexViaAssignedApiKey(res, body, modelId, isStreaming, st
         let codexResponse;
 
         if (providerSupportsNativeResponses(provider)) {
-            ({ mappedModel, response, responseBody, normalized: codexResponse } = await sendViaNativeResponsesProvider(provider, body, modelId));
+            ({ mappedModel, response, responseBody, normalized: codexResponse } = await sendViaNativeResponsesProvider(provider, body, modelId, requestHeaders));
         } else {
             const chatBody = _codexToChatBody(body);
             mappedModel = resolveModel(provider.type, modelId);
@@ -1031,6 +1031,25 @@ function providerSupportsNativeResponses(provider) {
     return typeof provider?.sendResponsesRequest === 'function';
 }
 
+function buildNativeResponsesForwardHeaders(sourceHeaders = {}) {
+    const headers = {};
+    const candidates = [
+        'x-client-request-id',
+        'session_id',
+        'x-codex-turn-state',
+        'x-openai-subagent'
+    ];
+
+    for (const name of candidates) {
+        const value = sourceHeaders?.[name];
+        if (value !== undefined && value !== null && value !== '') {
+            headers[name] = value;
+        }
+    }
+
+    return headers;
+}
+
 function summarizeResponseOutputTypes(codexResponse) {
     const items = Array.isArray(codexResponse?.output) ? codexResponse.output : [];
     if (items.length === 0) return '(none)';
@@ -1046,14 +1065,16 @@ function summarizeResponseOutputTypes(codexResponse) {
         .join(', ');
 }
 
-async function sendViaNativeResponsesProvider(provider, body, modelId) {
+async function sendViaNativeResponsesProvider(provider, body, modelId, requestHeaders = {}) {
     const mappedModel = resolveModel(provider.type, modelId);
     const requestBody = {
         ...body,
         model: mappedModel,
         stream: false
     };
-    const response = await provider.sendResponsesRequest(requestBody);
+    const response = await provider.sendResponsesRequest(requestBody, {
+        headers: buildNativeResponsesForwardHeaders(requestHeaders)
+    });
     const responseBody = await response.text();
     const normalized = normalizeProviderCodexResponse(responseBody, modelId);
     return { mappedModel, response, responseBody, normalized };
@@ -1062,7 +1083,7 @@ async function sendViaNativeResponsesProvider(provider, body, modelId) {
 /**
  * Handle /backend-api/codex/responses via API key pool (with format conversion).
  */
-async function _handleCodexViaApiKey(res, body, modelId, isStreaming, keyTypes, startTime) {
+async function _handleCodexViaApiKey(res, body, modelId, isStreaming, keyTypes, startTime, requestHeaders = {}) {
     const MAX_KEY_RETRIES = 3;
     let fatalRequestError = false;
 
@@ -1079,7 +1100,7 @@ async function _handleCodexViaApiKey(res, body, modelId, isStreaming, keyTypes, 
                 if (providerSupportsNativeResponses(provider)) {
                     mappedModel = resolveModel(type, modelId);
                     logger.info(`[Codex] >>> API KEY RESPONSES | ${type}/${provider.name} | ${modelId}→${mappedModel}`);
-                    ({ mappedModel, response, responseBody, normalized: codexResponse } = await sendViaNativeResponsesProvider(provider, body, modelId));
+                    ({ mappedModel, response, responseBody, normalized: codexResponse } = await sendViaNativeResponsesProvider(provider, body, modelId, requestHeaders));
                 } else {
                     const chatBody = _codexToChatBody(body);
                     mappedModel = resolveModel(type, modelId);

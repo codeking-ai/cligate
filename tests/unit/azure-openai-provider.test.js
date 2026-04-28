@@ -55,6 +55,63 @@ test('AzureOpenAIProvider.sendResponsesRequest uses Azure responses endpoint and
   }
 });
 
+test('AzureOpenAIProvider.sendResponsesRequest forwards Codex session isolation headers', async () => {
+  const provider = new AzureOpenAIProvider({
+    id: 'azure_session_headers',
+    name: 'azure-test',
+    apiKey: 'test-key',
+    baseUrl: 'https://example-resource.openai.azure.com/',
+    deploymentName: 'deployment-gpt54',
+    apiVersion: '2024-10-21'
+  });
+
+  const originalFetch = global.fetch;
+  let capturedOptions = null;
+
+  global.fetch = async (_url, options) => {
+    capturedOptions = options;
+    return new Response(JSON.stringify({
+      object: 'response',
+      model: 'deployment-gpt54',
+      status: 'completed',
+      output: [],
+      usage: {
+        input_tokens: 1,
+        output_tokens: 1,
+        total_tokens: 2
+      }
+    }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' }
+    });
+  };
+
+  try {
+    await provider.sendResponsesRequest(
+      {
+        model: 'gpt-5.4',
+        input: 'hello',
+        stream: false
+      },
+      {
+        headers: {
+          'x-client-request-id': 'thread-B',
+          'session_id': 'thread-B',
+          'x-codex-turn-state': 'thread-B:7',
+          'x-openai-subagent': 'review'
+        }
+      }
+    );
+
+    assert.equal(capturedOptions.headers['x-client-request-id'], 'thread-B');
+    assert.equal(capturedOptions.headers.session_id, 'thread-B');
+    assert.equal(capturedOptions.headers['x-codex-turn-state'], 'thread-B:7');
+    assert.equal(capturedOptions.headers['x-openai-subagent'], 'review');
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
 test('AzureOpenAIProvider.sendRequest surfaces nested fetch cause details', async () => {
   const provider = new AzureOpenAIProvider({
     id: 'azure_2',
