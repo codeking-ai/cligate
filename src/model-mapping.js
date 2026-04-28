@@ -65,14 +65,13 @@ const DEFAULT_PROVIDER_MAPPINGS = {
         reasoning: 'claude-opus-4-6',
     },
     deepseek: {
-        // Default to the non-thinking aliases so multi-turn tool use does not
-        // require echoing back `reasoning_content` (which the proxy's
-        // /responses ↔ chat-completions translation does not yet preserve).
-        // Users who want the V4 thinking models can override these in the dashboard.
-        flagship:  'deepseek-chat',
-        standard:  'deepseek-chat',
-        fast:      'deepseek-chat',
-        reasoning: 'deepseek-reasoner',
+        // DeepSeek v4 became the canonical model family on 2026-04-24.
+        // Keep reasoning on flash by default because v4 models already support
+        // thinking mode toggles through request parameters.
+        flagship:  'deepseek-v4-pro',
+        standard:  'deepseek-v4-flash',
+        fast:      'deepseek-v4-flash',
+        reasoning: 'deepseek-v4-flash',
     },
 };
 

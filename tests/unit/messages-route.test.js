@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { _testExports } from '../../src/routes/messages-route.js';
 import { analyzeAnthropicRequestFeatures } from '../../src/translators/request-features.js';
 import { rankAnthropicProvidersForRequest, resolveAnthropicProviderCapabilities } from '../../src/translators/provider-capabilities.js';
+import { getMappingsMeta } from '../../src/model-mapping.js';
 
 const {
   _applyAnthropicBridgeTokenCap,
@@ -307,4 +308,12 @@ test('_applyAnthropicBridgeTokenCap caps Claude Code bridge requests for Azure/O
       process.env.CLAUDE_CODE_MAX_OUTPUT_TOKENS = original;
     }
   }
+});
+
+test('DeepSeek default tier mappings resolve to v4 models', () => {
+  const defaults = getMappingsMeta().defaults.deepseek;
+  assert.equal(defaults.flagship, 'deepseek-v4-pro');
+  assert.equal(defaults.standard, 'deepseek-v4-flash');
+  assert.equal(defaults.fast, 'deepseek-v4-flash');
+  assert.equal(defaults.reasoning, 'deepseek-v4-flash');
 });

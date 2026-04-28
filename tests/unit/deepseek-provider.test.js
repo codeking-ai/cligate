@@ -31,7 +31,7 @@ test('DeepSeekProvider.sendRequest uses DeepSeek OpenAI-compatible chat endpoint
 
   try {
     const response = await provider.sendRequest({
-      model: 'deepseek-v4-flash',
+      model: 'deepseek-chat',
       messages: [{ role: 'user', content: 'hello' }]
     });
 
@@ -41,7 +41,120 @@ test('DeepSeekProvider.sendRequest uses DeepSeek OpenAI-compatible chat endpoint
 
     const payload = JSON.parse(capturedOptions.body);
     assert.equal(payload.model, 'deepseek-v4-flash');
+    assert.deepEqual(payload.thinking, { type: 'disabled' });
     assert.equal(payload.messages[0].content, 'hello');
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
+test('DeepSeekProvider.sendRequest normalizes deepseek-reasoner alias to v4 flash with thinking enabled', async () => {
+  const provider = new DeepSeekProvider({
+    id: 'deepseek_alias_reasoner',
+    name: 'deepseek-test',
+    apiKey: 'sk-test'
+  });
+
+  const originalFetch = global.fetch;
+  let capturedOptions = null;
+
+  global.fetch = async (_url, options) => {
+    capturedOptions = options;
+    return new Response(JSON.stringify({
+      id: 'chatcmpl_reasoner',
+      object: 'chat.completion',
+      model: 'deepseek-v4-flash',
+      choices: [{ index: 0, message: { role: 'assistant', content: 'ok' }, finish_reason: 'stop' }]
+    }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' }
+    });
+  };
+
+  try {
+    await provider.sendRequest({
+      model: 'deepseek-reasoner',
+      messages: [{ role: 'user', content: 'hello' }]
+    });
+
+    const payload = JSON.parse(capturedOptions.body);
+    assert.equal(payload.model, 'deepseek-v4-flash');
+    assert.deepEqual(payload.thinking, { type: 'enabled' });
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
+test('DeepSeekProvider.sendRequest defaults thinking to disabled when no alias and no caller-supplied value', async () => {
+  const provider = new DeepSeekProvider({
+    id: 'deepseek_default_disabled',
+    name: 'deepseek-test',
+    apiKey: 'sk-test'
+  });
+
+  const originalFetch = global.fetch;
+  let capturedOptions = null;
+
+  global.fetch = async (_url, options) => {
+    capturedOptions = options;
+    return new Response(JSON.stringify({
+      id: 'chatcmpl_default',
+      object: 'chat.completion',
+      model: 'deepseek-v4-flash',
+      choices: [{ index: 0, message: { role: 'assistant', content: 'ok' }, finish_reason: 'stop' }]
+    }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' }
+    });
+  };
+
+  try {
+    await provider.sendRequest({
+      model: 'deepseek-v4-flash',
+      messages: [{ role: 'user', content: 'hello' }]
+    });
+
+    const payload = JSON.parse(capturedOptions.body);
+    assert.equal(payload.model, 'deepseek-v4-flash');
+    assert.deepEqual(payload.thinking, { type: 'disabled' });
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
+test('DeepSeekProvider.sendRequest preserves caller-supplied thinking value', async () => {
+  const provider = new DeepSeekProvider({
+    id: 'deepseek_explicit_thinking',
+    name: 'deepseek-test',
+    apiKey: 'sk-test'
+  });
+
+  const originalFetch = global.fetch;
+  let capturedOptions = null;
+
+  global.fetch = async (_url, options) => {
+    capturedOptions = options;
+    return new Response(JSON.stringify({
+      id: 'chatcmpl_explicit',
+      object: 'chat.completion',
+      model: 'deepseek-v4-pro',
+      choices: [{ index: 0, message: { role: 'assistant', content: 'ok' }, finish_reason: 'stop' }]
+    }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' }
+    });
+  };
+
+  try {
+    await provider.sendRequest({
+      model: 'deepseek-v4-pro',
+      messages: [{ role: 'user', content: 'hello' }],
+      thinking: { type: 'enabled' }
+    });
+
+    const payload = JSON.parse(capturedOptions.body);
+    assert.equal(payload.model, 'deepseek-v4-pro');
+    assert.deepEqual(payload.thinking, { type: 'enabled' });
   } finally {
     global.fetch = originalFetch;
   }

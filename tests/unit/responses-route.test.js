@@ -10,6 +10,7 @@ const {
   findToolCallSequenceError,
   resolveResponsesStreamingMode,
   _responsesToAnthropicBody,
+  _chatToResponsesFormat,
   getAssignedFailureReason,
   normalizeAssignedFailureReason
 } = _testExports;
@@ -34,6 +35,28 @@ test('_responsesToChatBody merges assistant text before function_call into one t
   assert.equal(body.messages[2].role, 'tool');
   assert.equal(body.messages[2].tool_call_id, 'call_1');
   assert.equal(findToolCallSequenceError(body.messages), null);
+});
+
+test('_responsesToChatBody reattaches reasoning items onto the following assistant message for DeepSeek tool turns', () => {
+  const parsed = {
+    model: 'deepseek-v4-flash',
+    input: [
+      { type: 'message', role: 'user', content: 'inspect repo' },
+      {
+        type: 'reasoning',
+        id: 'rs_1',
+        summary: [{ type: 'summary_text', text: 'Need to inspect files before answering.' }]
+      },
+      { type: 'message', role: 'assistant', content: 'I will inspect the repository first.' },
+      { type: 'function_call', call_id: 'call_1', name: 'shell_command', arguments: '{"command":"Get-ChildItem"}' }
+    ]
+  };
+
+  const body = _responsesToChatBody(parsed);
+
+  assert.equal(body.messages[1].role, 'assistant');
+  assert.equal(body.messages[1].reasoning_content, 'Need to inspect files before answering.');
+  assert.equal(body.messages[1].tool_calls[0].id, 'call_1');
 });
 
 test('_responsesToChatBody merges assistant text after function_call into the same tool-calling assistant message', () => {
@@ -291,4 +314,71 @@ test('getAssignedFailureReason picks the most recent upstream error when multipl
   });
 
   assert.equal(reason, 'deepseek_503: service_unavailable');
+});
+
+test('_chatToResponsesFormat emits a reasoning output item when reasoning_content is present (DeepSeek thinking)', () => {
+  const chatResponse = {
+    id: 'cmpl_test',
+    choices: [{
+      message: {
+        role: 'assistant',
+        content: 'Here is the answer.',
+        reasoning_content: 'Let me think step by step about this problem.'
+      }
+    }],
+    usage: { prompt_tokens: 10, completion_tokens: 20, total_tokens: 30 }
+  };
+
+  const result = _chatToResponsesFormat(chatResponse, 'gpt-5.4');
+
+  assert.ok(Array.isArray(result.output));
+  assert.equal(result.output[0].type, 'reasoning');
+  assert.equal(result.output[0].summary[0].type, 'summary_text');
+  assert.equal(result.output[0].summary[0].text, 'Let me think step by step about this problem.');
+  // The text message comes after the reasoning item
+  assert.equal(result.output[1].type, 'message');
+  assert.equal(result.output[1].content[0].text, 'Here is the answer.');
+});
+
+test('_chatToResponsesFormat does not emit reasoning when the field is absent (no impact on OpenAI/Azure)', () => {
+  const chatResponse = {
+    id: 'cmpl_test',
+    choices: [{
+      message: {
+        role: 'assistant',
+        content: 'plain reply'
+      }
+    }]
+  };
+
+  const result = _chatToResponsesFormat(chatResponse, 'gpt-5.4');
+
+  // No reasoning items in output — only the regular message
+  const reasoningItems = result.output.filter(o => o.type === 'reasoning');
+  assert.equal(reasoningItems.length, 0);
+  assert.equal(result.output[0].type, 'message');
+});
+
+test('_chatToResponsesFormat emits reasoning + message + function_call together when all three are present', () => {
+  const chatResponse = {
+    choices: [{
+      message: {
+        role: 'assistant',
+        content: 'Calling tool now',
+        reasoning_content: 'I should look up the file first',
+        tool_calls: [{
+          id: 'call_1',
+          type: 'function',
+          function: { name: 'read_file', arguments: '{"path":"foo"}' }
+        }]
+      }
+    }]
+  };
+
+  const result = _chatToResponsesFormat(chatResponse, 'gpt-5.4');
+
+  assert.equal(result.output.length, 3);
+  assert.equal(result.output[0].type, 'reasoning');
+  assert.equal(result.output[1].type, 'message');
+  assert.equal(result.output[2].type, 'function_call');
 });

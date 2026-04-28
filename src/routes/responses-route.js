@@ -30,6 +30,12 @@ import { resolveCredentialForRequest } from '../credential-selector.js';
 import { buildCredentialId } from '../credential-registry.js';
 import { getCredentialRuntimeState, markCredentialError, markCredentialRateLimited, markCredentialSuccess, recordRoutingDecision } from '../runtime-state.js';
 import { tryHandleLocalResponses } from '../local-routing.js';
+import {
+    extractDeepSeekReasoningText,
+    isDeepSeekProviderType,
+    mergeDeepSeekReasoningText,
+    normalizeDeepSeekRequestBody
+} from '../deepseek-utils.js';
 
 const UPSTREAM_URL = 'https://chatgpt.com/backend-api/codex/responses';
 const UPSTREAM_COMPACT_URL = 'https://chatgpt.com/backend-api/codex/responses/compact';
@@ -225,6 +231,62 @@ function mergeChatMessageContent(existing, incoming) {
         return merged.map(part => part.text || '').join('\n');
     }
     return merged;
+}
+
+function applyDeepSeekReasoningToChatMessages(messages, responsesInput) {
+    if (!Array.isArray(messages) || messages.length === 0 || !Array.isArray(responsesInput)) {
+        return messages;
+    }
+
+    const normalizedMessages = messages.map((message) => ({ ...message }));
+    const assistantIndexes = normalizedMessages
+        .map((message, index) => ({ message, index }))
+        .filter(({ message }) => message?.role === 'assistant')
+        .map(({ index }) => index);
+
+    let assistantCursor = 0;
+    let pendingReasoning = '';
+
+    for (const item of responsesInput) {
+        if (item?.type === 'reasoning') {
+            pendingReasoning = mergeDeepSeekReasoningText(
+                pendingReasoning,
+                extractDeepSeekReasoningText(item)
+            );
+            continue;
+        }
+
+        if (item?.type !== 'message' || item.role !== 'assistant') {
+            continue;
+        }
+
+        if (!pendingReasoning) {
+            assistantCursor++;
+            continue;
+        }
+
+        while (assistantCursor < assistantIndexes.length) {
+            const targetIndex = assistantIndexes[assistantCursor++];
+            const target = normalizedMessages[targetIndex];
+            if (!target.reasoning_content) {
+                target.reasoning_content = pendingReasoning;
+                pendingReasoning = '';
+                break;
+            }
+        }
+    }
+
+    if (pendingReasoning) {
+        for (let i = assistantIndexes.length - 1; i >= 0; i--) {
+            const target = normalizedMessages[assistantIndexes[i]];
+            if (!target.reasoning_content) {
+                target.reasoning_content = pendingReasoning;
+                break;
+            }
+        }
+    }
+
+    return normalizedMessages;
 }
 
 function summarizeChatMessage(message, index) {
@@ -499,7 +561,9 @@ async function _handleResponsesViaAssignedApiKey(res, parsed, modelId, isStreami
         } else {
             const chatBody = _responsesToChatBody(parsed);
             mappedModel = resolveModel(provider.type, modelId);
-            const mappedBody = { ...chatBody, model: mappedModel };
+            const mappedBody = isDeepSeekProviderType(provider.type)
+                ? normalizeDeepSeekRequestBody({ ...chatBody, model: mappedModel })
+                : { ...chatBody, model: mappedModel };
             response = await provider.sendRequest(mappedBody);
             responseBody = await response.text();
             let chatResponse;
@@ -693,6 +757,19 @@ async function _handleResponsesViaAssignedAccount(req, res, rawBody, contentEnco
 function _responsesToChatBody(parsed) {
     const messages = [];
 
+    // Diagnostic — count reasoning items in input. Used to verify whether the
+    // Codex client echoes back `type:'reasoning'` items emitted by the proxy.
+    // If this count stays at 0 across multi-turn sessions where the upstream
+    // model returned reasoning_content, Codex isn't preserving them, and Plan C
+    // Step 2 (writing reasoning_content into outgoing assistant messages) is
+    // not feasible on the OpenAI-protocol path.
+    if (Array.isArray(parsed?.input)) {
+        const reasoningCount = parsed.input.filter(item => item?.type === 'reasoning').length;
+        if (reasoningCount > 0) {
+            logger.info(`[Codex] _responsesToChatBody received ${reasoningCount} reasoning item(s) in input`);
+        }
+    }
+
     // System / instructions
     if (parsed.instructions) {
         messages.push({ role: 'system', content: parsed.instructions });
@@ -875,6 +952,8 @@ function _responsesToChatBody(parsed) {
                 }
             }));
     }
+
+    body.messages = applyDeepSeekReasoningToChatMessages(body.messages, parsed.input);
 
     return body;
 }
@@ -1080,7 +1159,9 @@ async function _handleResponsesViaApiKey(res, parsed, modelId, isStreaming, keyT
                 } else {
                     const chatBody = _responsesToChatBody(parsed);
                     mappedModel = resolveModel(type, modelId);
-                    const mappedBody = { ...chatBody, model: mappedModel };
+                    const mappedBody = isDeepSeekProviderType(type)
+                        ? normalizeDeepSeekRequestBody({ ...chatBody, model: mappedModel })
+                        : { ...chatBody, model: mappedModel };
                     const toolSequenceError = findToolCallSequenceError(mappedBody.messages);
                     if (toolSequenceError) {
                         logger.warn(`[Codex Proxy] Invalid tool-call sequence before API key request | provider=${type}/${provider.name} | assistant_index=${toolSequenceError.assistantIndex} | next_role=${toolSequenceError.nextRole} | missing=${toolSequenceError.missingIds.join(',')} | window=${toolSequenceError.window.join(' || ')}`);
@@ -1695,6 +1776,7 @@ export const _testExports = {
     normalizeCompactResponse,
     _responsesToChatBody: _responsesToChatBody,
     _responsesToAnthropicBody,
+    _chatToResponsesFormat,
     findToolCallSequenceError,
     resolveResponsesStreamingMode,
     getAssignedFailureReason,

@@ -11,6 +11,7 @@
 
 import { OpenAIProvider } from './openai.js';
 import { estimateCostWithRegistry, getDefaultPricing } from '../pricing-registry.js';
+import { normalizeDeepSeekRequestBody } from '../deepseek-utils.js';
 
 const DEFAULT_BASE_URL = 'https://api.deepseek.com';
 const ANTHROPIC_API_VERSION = '2023-06-01';
@@ -47,6 +48,10 @@ export class DeepSeekProvider extends OpenAIProvider {
         } catch {
             return false;
         }
+    }
+
+    async sendRequest(body, options = {}) {
+        return super.sendRequest(normalizeDeepSeekRequestBody(body), options);
     }
 
     async sendAnthropicRequest(body) {

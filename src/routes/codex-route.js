@@ -29,6 +29,12 @@ import { getDiscoveredModels } from '../model-discovery.js';
 import { tryHandleLocalResponses } from '../local-routing.js';
 import { buildCredentialId } from '../credential-registry.js';
 import { getCredentialRuntimeState, markCredentialError, markCredentialRateLimited, markCredentialSuccess } from '../runtime-state.js';
+import {
+    extractDeepSeekReasoningText,
+    isDeepSeekProviderType,
+    mergeDeepSeekReasoningText,
+    normalizeDeepSeekRequestBody
+} from '../deepseek-utils.js';
 
 const UPSTREAM_BASE = 'https://chatgpt.com/backend-api';
 const MAX_RETRIES = 5;
@@ -256,6 +262,62 @@ function mergeChatMessageContent(existing, incoming) {
         return merged.map(part => part.text || '').join('\n');
     }
     return merged;
+}
+
+function applyDeepSeekReasoningToChatMessages(messages, responsesInput) {
+    if (!Array.isArray(messages) || messages.length === 0 || !Array.isArray(responsesInput)) {
+        return messages;
+    }
+
+    const normalizedMessages = messages.map((message) => ({ ...message }));
+    const assistantIndexes = normalizedMessages
+        .map((message, index) => ({ message, index }))
+        .filter(({ message }) => message?.role === 'assistant')
+        .map(({ index }) => index);
+
+    let assistantCursor = 0;
+    let pendingReasoning = '';
+
+    for (const item of responsesInput) {
+        if (item?.type === 'reasoning') {
+            pendingReasoning = mergeDeepSeekReasoningText(
+                pendingReasoning,
+                extractDeepSeekReasoningText(item)
+            );
+            continue;
+        }
+
+        if (item?.type !== 'message' || item.role !== 'assistant') {
+            continue;
+        }
+
+        if (!pendingReasoning) {
+            assistantCursor++;
+            continue;
+        }
+
+        while (assistantCursor < assistantIndexes.length) {
+            const targetIndex = assistantIndexes[assistantCursor++];
+            const target = normalizedMessages[targetIndex];
+            if (!target.reasoning_content) {
+                target.reasoning_content = pendingReasoning;
+                pendingReasoning = '';
+                break;
+            }
+        }
+    }
+
+    if (pendingReasoning) {
+        for (let i = assistantIndexes.length - 1; i >= 0; i--) {
+            const target = normalizedMessages[assistantIndexes[i]];
+            if (!target.reasoning_content) {
+                target.reasoning_content = pendingReasoning;
+                break;
+            }
+        }
+    }
+
+    return normalizedMessages;
 }
 
 function summarizeChatMessage(message, index) {
@@ -514,7 +576,9 @@ async function _handleCodexViaAssignedApiKey(res, body, modelId, isStreaming, st
         } else {
             const chatBody = _codexToChatBody(body);
             mappedModel = resolveModel(provider.type, modelId);
-            const mappedBody = { ...chatBody, model: mappedModel };
+            const mappedBody = isDeepSeekProviderType(provider.type)
+                ? normalizeDeepSeekRequestBody({ ...chatBody, model: mappedModel })
+                : { ...chatBody, model: mappedModel };
             response = await provider.sendRequest(mappedBody);
             responseBody = await response.text();
             let chatResponse;
@@ -693,6 +757,14 @@ async function _handleCodexViaAssignedClaudeAccount(res, body, modelId, isStream
 
 function _codexToChatBody(body) {
     const messages = [];
+
+    // Diagnostic — see comment in responses-route.js _responsesToChatBody.
+    if (Array.isArray(body?.input)) {
+        const reasoningCount = body.input.filter(item => item?.type === 'reasoning').length;
+        if (reasoningCount > 0) {
+            logger.info(`[Codex] _codexToChatBody received ${reasoningCount} reasoning item(s) in input`);
+        }
+    }
 
     if (body.instructions) {
         messages.push({ role: 'system', content: body.instructions });
@@ -873,6 +945,8 @@ function _codexToChatBody(body) {
             }));
     }
 
+    chatBody.messages = applyDeepSeekReasoningToChatMessages(chatBody.messages, body.input);
+
     return chatBody;
 }
 
@@ -880,6 +954,18 @@ function _chatToCodexResponse(chatResponse, model) {
     const choice = chatResponse.choices?.[0];
     const msg = choice?.message || {};
     const output = [];
+
+    // Reasoning content (DeepSeek thinking models, GLM reasoners) — surface as a
+    // Responses-API reasoning item so the Codex client can preserve it in
+    // conversation history. Other providers (OpenAI/Azure/Gemini) don't return
+    // this field on chat-completions, so this branch naturally no-ops for them.
+    if (msg.reasoning_content) {
+        output.push({
+            type: 'reasoning',
+            id: `rs_${Date.now()}`,
+            summary: [{ type: 'summary_text', text: String(msg.reasoning_content) }]
+        });
+    }
 
     if (msg.content) {
         output.push({
@@ -997,7 +1083,9 @@ async function _handleCodexViaApiKey(res, body, modelId, isStreaming, keyTypes, 
                 } else {
                     const chatBody = _codexToChatBody(body);
                     mappedModel = resolveModel(type, modelId);
-                    const mappedBody = { ...chatBody, model: mappedModel };
+                    const mappedBody = isDeepSeekProviderType(type)
+                        ? normalizeDeepSeekRequestBody({ ...chatBody, model: mappedModel })
+                        : { ...chatBody, model: mappedModel };
                     const toolSequenceError = findToolCallSequenceError(mappedBody.messages);
                     if (toolSequenceError) {
                         logger.warn(`[Codex Proxy] Invalid tool-call sequence before API key request | provider=${type}/${provider.name} | assistant_index=${toolSequenceError.assistantIndex} | next_role=${toolSequenceError.nextRole} | missing=${toolSequenceError.missingIds.join(',')} | window=${toolSequenceError.window.join(' || ')}`);
@@ -1666,6 +1754,7 @@ async function _handleCodexViaAntigravityAccount(res, body, modelId, isStreaming
 export const _testExports = {
     _codexToChatBody,
     _codexToAnthropicBody,
+    _chatToCodexResponse,
     findToolCallSequenceError,
     getAssignedFailureReason,
     normalizeAssignedFailureReason

@@ -7,6 +7,7 @@ import { setCredentialRuntimeState } from '../../src/runtime-state.js';
 const {
   _codexToChatBody,
   _codexToAnthropicBody,
+  _chatToCodexResponse,
   findToolCallSequenceError,
   getAssignedFailureReason,
   normalizeAssignedFailureReason
@@ -32,6 +33,28 @@ test('_codexToChatBody merges assistant text before function_call into one tool-
   assert.equal(chatBody.messages[2].role, 'tool');
   assert.equal(chatBody.messages[2].tool_call_id, 'call_1');
   assert.equal(findToolCallSequenceError(chatBody.messages), null);
+});
+
+test('_codexToChatBody reattaches reasoning items onto the following assistant message for DeepSeek tool turns', () => {
+  const body = {
+    model: 'deepseek-v4-flash',
+    input: [
+      { type: 'message', role: 'user', content: 'inspect repo' },
+      {
+        type: 'reasoning',
+        id: 'rs_1',
+        summary: [{ type: 'summary_text', text: 'Need to inspect files before answering.' }]
+      },
+      { type: 'message', role: 'assistant', content: 'I will inspect the repository first.' },
+      { type: 'function_call', call_id: 'call_1', name: 'shell_command', arguments: '{"command":"Get-ChildItem"}' }
+    ]
+  };
+
+  const chatBody = _codexToChatBody(body);
+
+  assert.equal(chatBody.messages[1].role, 'assistant');
+  assert.equal(chatBody.messages[1].reasoning_content, 'Need to inspect files before answering.');
+  assert.equal(chatBody.messages[1].tool_calls[0].id, 'call_1');
 });
 
 test('_codexToChatBody defers system messages inserted between tool_calls and tool outputs', () => {
@@ -203,4 +226,31 @@ test('codex getAssignedFailureReason surfaces per-request upstream errors over t
 
   assert.match(reason, /^deepseek_400:/);
   assert.match(reason, /reasoning_content/);
+});
+
+test('_chatToCodexResponse emits a reasoning item when reasoning_content is present', () => {
+  const chatResponse = {
+    choices: [{
+      message: {
+        role: 'assistant',
+        content: 'Final answer',
+        reasoning_content: 'Internal thinking trace'
+      }
+    }]
+  };
+
+  const result = _chatToCodexResponse(chatResponse, 'gpt-5.4');
+
+  assert.equal(result.output[0].type, 'reasoning');
+  assert.equal(result.output[0].summary[0].text, 'Internal thinking trace');
+  assert.equal(result.output[1].type, 'message');
+});
+
+test('_chatToCodexResponse does not emit reasoning when reasoning_content is absent', () => {
+  const chatResponse = {
+    choices: [{ message: { role: 'assistant', content: 'plain' } }]
+  };
+  const result = _chatToCodexResponse(chatResponse, 'gpt-5.4');
+  const reasoningItems = result.output.filter(o => o.type === 'reasoning');
+  assert.equal(reasoningItems.length, 0);
 });
