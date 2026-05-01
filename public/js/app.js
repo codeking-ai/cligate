@@ -278,6 +278,41 @@ document.addEventListener('alpine:init', () => {
             return this.antigravityAccounts.filter(a => a.email.toLowerCase().includes(q) || (a.displayName || '').toLowerCase().includes(q));
         },
 
+        accountStateValue(account) {
+            if (account?.enabled === false) return 'disabled';
+            if (account?.isActive) return 'active';
+            return 'idle';
+        },
+
+        accountStateLabel(account) {
+            const state = this.accountStateValue(account);
+            if (state === 'disabled') return this.t('disabled');
+            if (state === 'active') return this.t('activeStatus');
+            return this.t('idleStatus');
+        },
+
+        accountStateDotClass(account, theme = 'default') {
+            const state = this.accountStateValue(account);
+            if (state === 'disabled') return 'bg-red-500';
+            if (state === 'active') {
+                if (theme === 'claude') return 'bg-neon-purple shadow-[0_0_8px_rgba(168,85,247,0.6)] animate-pulse';
+                if (theme === 'antigravity') return 'bg-cyan-300 shadow-[0_0_8px_rgba(103,232,249,0.6)] animate-pulse';
+                return 'bg-neon-green shadow-[0_0_8px_rgba(34,197,94,0.6)]';
+            }
+            return 'bg-gray-500';
+        },
+
+        accountStateTextClass(account, theme = 'default') {
+            const state = this.accountStateValue(account);
+            if (state === 'disabled') return 'text-red-400';
+            if (state === 'active') {
+                if (theme === 'claude') return 'text-neon-purple';
+                if (theme === 'antigravity') return 'text-cyan-300';
+                return 'text-neon-green';
+            }
+            return 'text-gray-500';
+        },
+
         get dashboardTotalAccounts() {
             return this.accounts.length + this.claudeAccounts.length + this.antigravityAccounts.length;
         },
