@@ -177,11 +177,18 @@ npm install -g cligate
 cligate start
 ```
 
+如果 npm registry 上暂时没有可用包，也可以直接从 GitHub 安装 CLI：
+
+```bash
+npm install -g github:codeking-ai/cligate
+cligate start
+```
+
 ### 方式 3：桌面应用（Electron）
 
 从 [Releases](https://github.com/codeking-ai/cligate/releases) 下载最新安装包。
 
-从 `v1.2.0` 开始，打 tag 的正式发布应当由同一套 workflow 同时发布 GitHub Release 安装包和 npm 包。如果 `npx cligate@latest` 或 `npm install -g cligate` 返回 registry `404`，优先检查对应 GitHub tag 的发布流程是否成功完成。
+从 `v1.2.0` 开始，打 tag 的正式发布应当由同一套 workflow 同时发布 GitHub Release 安装包和 npm 包。如果 `npx cligate@latest` 或 `npm install -g cligate` 返回 registry `404`，可先使用上面的 GitHub 安装命令，或检查对应 GitHub tag 的发布流程是否成功完成。
 
 ---
 

@@ -178,11 +178,18 @@ npm install -g cligate
 cligate start
 ```
 
-### Option 3: Desktop App (Electron)
+If the npm registry package is not available yet, install the CLI directly from GitHub instead:
+
+```bash
+npm install -g github:codeking-ai/cligate
+cligate start
+```
+
+### Option 3: Desktop app
 
 Download the latest release from [Releases](https://github.com/codeking-ai/cligate/releases).
 
-Starting with `v1.2.0`, a tagged release is expected to publish both GitHub release artifacts and the npm package from the same workflow. If `npx cligate@latest` or `npm install -g cligate` returns a registry `404`, check whether the matching GitHub tag finished the publish workflow successfully.
+Starting with `v1.2.0`, a tagged release is expected to publish both GitHub release artifacts and the npm package from the same workflow. If `npx cligate@latest` or `npm install -g cligate` returns a registry `404`, use the GitHub install command above or check whether the matching GitHub tag finished the publish workflow successfully.
 
 ---
 
