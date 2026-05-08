@@ -55,6 +55,18 @@ Before asking a product-usage question, check:
 - [docs/README.md](./docs/README.md)
 - [docs/product-manual.en.md](./docs/product-manual.en.md)
 - [docs/product-manual.zh-CN.md](./docs/product-manual.zh-CN.md)
+- [docs/COMMUNITY.md](./docs/COMMUNITY.md)
+
+## Community and Direct Contact
+
+If you want faster discussion or direct contact, see:
+
+- [Community Guide](./docs/COMMUNITY.md)
+
+That page includes:
+
+- Discord
+- the maintainer's personal WeChat QR code
 
 ## Release and Version Questions
 

@@ -31,6 +31,7 @@ jobs:
           test -f docs/README.md
           test -f docs/SCREENSHOTS.md
           test -f docs/RELEASING.md
+          test -f docs/COMMUNITY.md
           test -f docs/product-manual.en.md
           test -f docs/product-manual.zh-CN.md
           test -f CONTRIBUTING.md
@@ -49,10 +50,12 @@ jobs:
           grep -q "docs/README.md" README.md
           grep -q "docs/SCREENSHOTS.md" README.md
           grep -q "docs/RELEASING.md" README.md
+          grep -q "docs/COMMUNITY.md" README.md
           grep -q "docs/product-manual.en.md" README.md
           grep -q "SUPPORT.md" README.md
           grep -q "docs/README.md" README_CN.md
           grep -q "docs/SCREENSHOTS.md" README_CN.md
           grep -q "docs/RELEASING.md" README_CN.md
+          grep -q "docs/COMMUNITY.md" README_CN.md
           grep -q "docs/product-manual.zh-CN.md" README_CN.md
           grep -q "SUPPORT.md" README_CN.md

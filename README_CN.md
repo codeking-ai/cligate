@@ -141,6 +141,7 @@ Gemini CLI 和 OpenClaw 可直接在仪表盘完成配置。
 - [OpenClaw 集成](./docs/OPENCLAW.md)
 - [截图维护规范](./docs/SCREENSHOTS.md)
 - [发布说明](./docs/RELEASING.md)
+- [社区与联系方式](./docs/COMMUNITY.md)
 - [贡献指南](./CONTRIBUTING.md)
 - [安全策略](./SECURITY.md)
 - [支持与反馈](./SUPPORT.md)
@@ -191,7 +192,11 @@ CliGate 本地控制平面 (localhost:8081)
 
 - [GitHub Discussions](https://github.com/codeking-ai/cligate/discussions)
 - [Issues](https://github.com/codeking-ai/cligate/issues)
+- [Discord](https://discord.gg/GgxZSehxqG)
+- [社区与联系方式](./docs/COMMUNITY.md)
 - [Releases](https://github.com/codeking-ai/cligate/releases)
+
+如需直接联系作者，`社区与联系方式` 页面中已提供个人微信二维码。
 
 如果你准备提 PR，请先看 [CONTRIBUTING.md](./CONTRIBUTING.md)。
 

@@ -15,3 +15,4 @@ This changelog is maintained from source. Published release artifacts and tags r
 - Added a screenshot maintenance guide for repository-facing visuals.
 - Added support and release documentation for repository operations.
 - Hardened the npm release workflow and package publish configuration.
+- Restored community contact entry points, including Discord and WeChat guidance.

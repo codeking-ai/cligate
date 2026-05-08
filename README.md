@@ -141,6 +141,7 @@ Start here if you want the shortest path to the right document:
 - [OpenClaw Integration](./docs/OPENCLAW.md)
 - [Screenshot Guide](./docs/SCREENSHOTS.md)
 - [Release Guide](./docs/RELEASING.md)
+- [Community](./docs/COMMUNITY.md)
 - [Contributing](./CONTRIBUTING.md)
 - [Security](./SECURITY.md)
 - [Support](./SUPPORT.md)
@@ -191,7 +192,11 @@ See [docs/API.md](./docs/API.md) for more detail.
 
 - [GitHub Discussions](https://github.com/codeking-ai/cligate/discussions)
 - [Issues](https://github.com/codeking-ai/cligate/issues)
+- [Discord](https://discord.gg/GgxZSehxqG)
+- [Community Guide](./docs/COMMUNITY.md)
 - [Releases](https://github.com/codeking-ai/cligate/releases)
+
+For Chinese-speaking users, the community guide also includes the maintainer's personal WeChat QR code.
 
 If you plan to contribute, read [CONTRIBUTING.md](./CONTRIBUTING.md) before opening a pull request.
 

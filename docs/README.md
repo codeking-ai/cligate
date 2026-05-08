@@ -13,6 +13,7 @@ This directory contains the project documentation used by both repository reader
 - [OpenClaw Integration](./OPENCLAW.md)
 - [Screenshot Guide](./SCREENSHOTS.md)
 - [Releasing](./RELEASING.md)
+- [Community](./COMMUNITY.md)
 
 ## By Audience
 
@@ -32,6 +33,7 @@ This directory contains the project documentation used by both repository reader
 - [OAUTH](./OAUTH.md)
 - [Channel Gateway API](./channel-gateway-api.md)
 - [Releasing](./RELEASING.md)
+- [Community](./COMMUNITY.md)
 
 ### Contributors
 
@@ -40,6 +42,7 @@ This directory contains the project documentation used by both repository reader
 - [Translator Capability Matrix](./TRANSLATOR_CAPABILITY_MATRIX.md)
 - [Screenshot Guide](./SCREENSHOTS.md)
 - [Releasing](./RELEASING.md)
+- [Community](./COMMUNITY.md)
 
 ## Notes
 
