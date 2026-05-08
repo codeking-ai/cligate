@@ -2,27 +2,29 @@
 
 ## Overview
 
-CliGate is a local multi-protocol AI proxy system that unifies requests from Claude Code, Codex CLI, Gemini CLI, and OpenClaw. Its main features include:
+CliGate is a local AI gateway that sits between developer tools, agent runtimes, channel workflows, and upstream model providers.
 
-- account pool management
-- API key management
-- request routing and model mapping
-- a web dashboard
-- direct testing in Web Chat
-- one-click configuration for Claude Code, Codex CLI, Gemini CLI, and OpenClaw
+It currently combines these capability groups:
 
-CliGate runs locally by default and does not require a third-party relay service. In most cases, you only need to start the service, add at least one valid account or API key, and then test requests from the dashboard.
+- protocol translation for Claude Code, Codex CLI, Gemini CLI, and OpenClaw
+- account pools and API key routing
+- app-level routing and model mapping
+- dashboard chat and product-assistant flows
+- Codex and Claude Code runtime sessions in the dashboard
+- Telegram and Feishu channel gateways
+- request logs, usage, pricing, API exploration, and tool setup
+- optional local runtime routing for on-device models
+
+CliGate runs locally by default. In the common path, you start the service, add one usable credential, configure one client, and verify behavior from the dashboard.
 
 ## Quick Start
 
 ### Start the service
 
-You can start CliGate in either of these ways:
+Run one of these:
 
-1. Run directly: `npx cligate@latest start`
-2. Run after global install: `cligate start`
-
-From `v1.2.0` onward, tagged releases are expected to publish GitHub desktop artifacts and the npm package together. If npm returns `404`, verify the matching GitHub tag and release workflow first.
+1. `npx cligate@latest start`
+2. `cligate start`
 
 The default dashboard address is:
 
@@ -30,45 +32,116 @@ The default dashboard address is:
 
 ### Recommended first-time setup
 
-1. Start CliGate
-2. Open the dashboard
-3. Go to Accounts or API Keys
-4. Add at least one working account or API key
-5. Open the Chat page and test a model
-6. If you want to use Claude Code or another CLI through CliGate, go to Settings and run the one-click configuration
+1. Start CliGate.
+2. Open the dashboard.
+3. Add at least one working account, API key, or local runtime.
+4. Open `Chat` and verify a model.
+5. Open `Settings` and use one-click config for the CLI tool you want to proxy.
+6. If you use Telegram or Feishu, configure `Channels` after the core path is working.
 
-## Main Dashboard Pages
+## Dashboard Navigation
 
-### Dashboard
+The current dashboard is organized around work areas rather than a single settings page.
 
-The Dashboard page shows overall status, including account counts, availability, quick tests, and setup guidance for Claude Code, Codex CLI, Gemini CLI, and OpenClaw.
+### Workbench
 
-### Chat
+#### Dashboard
 
-The Chat page is the built-in Web Chat panel for testing accounts, Claude accounts, and API keys directly from the dashboard.
+Use `Dashboard` for a high-level readiness view:
 
-You can configure:
+- linked and available account counts
+- active plan and token state
+- quick navigation to accounts, chat, tools, and logs
+- one-click setup entry points for supported CLI tools
 
-- Chat Source: the account or API key used for the conversation
-- Model: the model name to send
-- Product Assistant: when enabled, the assistant prioritizes this manual for product usage questions
-- System Prompt: optional conversation-level instruction
+#### Chat
 
-The Chat page is only a testing surface. It does not change proxy behavior unless you explicitly confirm a configuration action.
+`Chat` is the main interactive verification surface.
 
-### Accounts
+You can use it in two modes:
 
-The Accounts page is used to manage:
+- assistant chat mode for routed model testing
+- agent runtime mode for Codex or Claude Code runtime sessions
+
+Key controls include:
+
+- `Chat Source`
+- `Model`
+- `System Prompt`
+- `Product Assistant`
+- runtime provider selection when agent runtime mode is enabled
+
+`Product Assistant` prioritizes this manual for product-usage questions. It does not silently rewrite your global routing configuration. Configuration changes still require an explicit action and confirmation path.
+
+#### Assistant Tasks
+
+`Assistant Tasks` is the task-level operational view for runtime work launched through the dashboard.
+
+Use it to inspect:
+
+- task state
+- pending clarifications
+- pending approvals
+- task outputs
+- resume and follow-up paths
+
+#### Conversation Records
+
+`Conversation Records` is the inspection surface for persisted channel-linked runtime activity.
+
+Use it when you need to understand:
+
+- what happened in a Telegram or Feishu conversation
+- which runtime provider was involved
+- whether a task is still active, blocked, or complete
+
+### Assistant
+
+#### Assistant Agent
+
+`Assistant Agent` is the binding and policy area for the assistant-side runtime behavior.
+
+Use it to inspect:
+
+- whether the assistant agent is enabled
+- which credential source is bound
+- fallback behavior
+- circuit-breaker state
+
+### CLI Tools
+
+#### Tool Installer
+
+`Tool Installer` checks for the presence and status of supported local tools and can help install or update them.
+
+This area is intended for:
+
+- Node.js availability checks
+- Claude Code / Codex CLI / Gemini CLI / OpenClaw setup
+- install/update guidance from the dashboard
+
+### Credentials
+
+#### Accounts
+
+`Accounts` manages:
 
 - ChatGPT accounts
 - Claude accounts
 - Antigravity accounts
 
-You can add, switch, enable, disable, refresh, and remove them from the dashboard.
+Supported actions include:
 
-### API Keys
+- add
+- import
+- enable or disable
+- refresh
+- switch
+- remove
 
-The API Keys page supports providers such as:
+#### API Keys
+
+`API Keys` manages provider credentials such as:
 
 - OpenAI
 - Anthropic
@@ -79,206 +152,349 @@ The API Keys page supports providers such as:
 - Moonshot
 - ZhipuAI
 
-Once enabled, an API key can participate in routing and can also be selected directly as a Chat source.
+Enabled keys can participate in routing and can also be selected directly in `Chat`.
 
-### Settings
+#### Local Models
 
-The Settings page is used for:
+`Local Models` is the dashboard area for local runtime routing.
 
-- one-click Claude Code configuration
-- one-click Codex CLI configuration
-- one-click Gemini CLI configuration
-- one-click OpenClaw configuration
-- routing priority
-- per-app assignments
-- free model toggle
-- local model routing
-- model mapping
+Use it to:
 
-## Accounts and API Keys
+- configure a local runtime endpoint
+- check runtime health
+- refresh discovered models
+- expose local models to the routing layer
 
-### ChatGPT Accounts
+### Configuration
 
-ChatGPT accounts are added through OAuth. After they are added, CliGate stores the token locally and includes the account in routing according to the configured strategy.
+#### Channels
 
-### Claude Accounts
+`Channels` configures Telegram and Feishu providers.
 
-Claude accounts are added through Claude OAuth. They can serve Anthropic-compatible requests and can also be selected directly as a chat source in Web Chat.
+Typical settings include:
 
-### Antigravity Accounts
+- polling or webhook mode
+- WebSocket mode for local Feishu desktop setups
+- default runtime provider
+- working directory
+- pairing or approval behavior
 
-Antigravity browser OAuth requires `ANTIGRAVITY_GOOGLE_CLIENT_SECRET` in the server environment. If that secret is not available, use manual import instead of the browser login flow.
+#### Routing
 
-### API Keys
+`Routing` controls request resolution behavior.
 
-If you do not want to rely on account pools, you can use API keys instead. Once enabled, the system treats them as available providers for routing and chat testing.
+Important concepts:
 
-### Minimum requirement
+- `Routing Priority`: account pool first or API key first
+- `Routing Mode`: automatic or app-assigned
+- `App Assignments`: bind a specific client to a specific credential or local runtime
+- `Free Models`: allow supported free-model fallback flows
+- `Model Mapping`: resolve requested model IDs to actual upstream models
 
-At least one of the following must exist:
+#### Settings
+
+`Settings` contains one-click configuration flows for supported tools and general server-side options.
+
+The most common use is:
+
+- configure Claude Code for proxy mode
+- configure Codex CLI for proxy mode
+- configure Gemini CLI for proxy mode
+- configure OpenClaw for proxy mode
+
+### Monitoring
+
+#### Usage
+
+`Usage` shows aggregate usage across accounts, providers, and models.
+
+Use it for:
+
+- overview metrics
+- daily or monthly trends
+- provider-level cost inspection
+
+#### Pricing
+
+`Pricing` is the manual pricing registry and override surface.
+
+Use it to inspect or adjust:
+
+- model pricing entries
+- provider pricing assumptions
+- manual overrides used in cost views
+
+#### Request Logs
+
+`Request Logs` is the structured history view for request and response traffic.
+
+Use it to inspect:
+
+- request dates
+- provider-specific failures
+- filtered request histories
+
+#### API Explorer
+
+`API Explorer` is a direct testing panel for local endpoints.
+
+It is useful for:
+
+- protocol verification
+- route debugging
+- formatting and payload inspection
+
+#### Logs
+
+`Logs` is the rawer server output and live log area.
+
+Use it when request logs are not enough and you need server-side operational context.
+
+### Resources
+
+#### Manual
+
+`Manual` is the lightweight in-product guide available at `/manual/`.
+
+It is a short operational guide for first-time users. The full source-of-truth manuals remain the markdown files in `docs/`.
+
+#### Resources
+
+`Resources` is the curated catalog of free and trial LLM providers available at `/resources/`.
+
+It is read-only and does not change routing behavior by itself.
+
+## Credentials and Minimum Requirements
+
+CliGate needs at least one usable upstream path.
+
+That usually means at least one of:
 
 1. a working ChatGPT account
 2. a working Claude account
-3. a working API key
+3. a working Antigravity account
+4. a working API key
+5. a working local runtime for the requests you intend to send
 
-If none of them are available, requests cannot be routed successfully.
+If none of these are available, routed requests will fail.
 
-## How to Use the Chat Page
+## Chat and Product Assistant
 
-### Start a test conversation
+### When to use Chat
 
-1. Open the Chat page
-2. Choose a Chat Source
-3. Enter or select a model
-4. Type a prompt
-5. Send the message
+Use `Chat` when you want to:
+
+- confirm that a credential works
+- test a model name
+- try a system prompt
+- verify that routing is going where you expect
+- ask product-usage questions through `Product Assistant`
 
 ### What Product Assistant does
 
-When Product Assistant is enabled, the Chat page prioritizes this manual when answering product usage questions. Example questions:
+When `Product Assistant` is enabled, CliGate prioritizes this manual while answering product-usage questions such as:
 
-- How do I configure Claude Code?
-- How do I add an API key?
-- What does routing mode mean?
-- How do I disable the Claude Code proxy?
+- how to configure Claude Code
+- how to add API keys
+- what routing mode means
+- how to disable proxy mode for a tool
 
-If you use Chat for ordinary conversation, Product Assistant does not change the selected upstream source or model.
+### What Product Assistant does not do
 
-### Does Product Assistant affect the original proxy?
+- It does not change tool configuration just because you asked a question.
+- It does not silently rewrite routing or account settings.
+- It does not replace the actual runtime provider you selected for normal chat.
 
-No. Product Assistant only works inside the Web Chat page. It does not alter the existing proxy behavior for Claude Code, Codex CLI, Gemini CLI, or OpenClaw.
+## Tool Configuration
 
-## Claude Code Usage
+### Claude Code
 
-### Enable Claude Code proxy
+Use the one-click action in `Settings` to configure Claude Code for proxy mode.
 
-You can use the one-click action in Settings to point Claude Code to CliGate. After this operation, CliGate updates Claude Code configuration so that Claude Code uses the local proxy.
-
-Default proxy URL:
-
-`http://localhost:8081`
-
-The resulting configuration uses values like:
+Typical proxy values include:
 
 - `ANTHROPIC_BASE_URL=http://localhost:8081`
 - `ANTHROPIC_API_KEY=sk-ant-claude-code-proxy`
 
-It also writes the default Sonnet, Opus, and Haiku model configuration used by Claude Code.
-
-### Enable Claude Code proxy from Product Assistant
-
-With Product Assistant enabled in Chat, you can ask:
-
-- Help me enable the Claude Code proxy
-
-The system will first show a pending action. The actual config is only written after you confirm it.
-
-### Disable Claude Code proxy
-
-If you no longer want Claude Code to use CliGate, disable the proxy. This removes the proxy-related Claude Code configuration and restores direct mode.
-
-With Product Assistant enabled, you can ask:
-
-- Help me disable the Claude Code proxy
-- Remove the Claude Code proxy
-
-Again, the system requires confirmation before executing the action.
-
-### View current Claude Code config
-
-You can inspect the current Claude configuration through:
+You can inspect current state through:
 
 - `GET /claude/config`
 
-## Routing and Models
+### Codex CLI
+
+Use the one-click action in `Settings` to configure Codex CLI.
+
+Typical configuration targets the local endpoints for:
+
+- `chatgpt_base_url`
+- `openai_base_url`
+
+You can inspect current state through:
+
+- `GET /codex/config`
+
+### Gemini CLI
+
+Use the one-click setup in `Settings` to apply the required local proxy path and compatibility changes.
+
+You can inspect current state through:
+
+- `GET /gemini-cli/config`
+
+### OpenClaw
+
+Use the one-click setup in `Settings` to configure OpenClaw for CliGate-backed provider access.
+
+You can inspect current state through:
+
+- `GET /openclaw/config`
+
+## Channels and Runtime Sessions
+
+### Supported channel workflows
+
+CliGate supports Telegram and Feishu channel workflows through the `Channels` area and corresponding API routes.
+
+### Runtime session behavior
+
+Once a channel or dashboard conversation is attached to a runtime session, follow-up messages can continue in the same runtime context until the user resets or detaches it.
+
+This is important for:
+
+- continuing a task without restating context
+- handling approval requests in sequence
+- answering runtime questions without losing the current run
+
+### Typical channel commands
+
+Common operational commands include:
+
+- `/cx <task>` for a fresh Codex session
+- `/cc <task>` for a fresh Claude Code session
+- `/new` to detach and start fresh on the next message
+
+See the channel-related repository docs for integration details beyond this manual.
+
+## Routing Concepts
 
 ### Routing Priority
 
-The system supports two priority modes:
-
-- Account Pool First
-- API Key First
-
-If both pools are available, routing follows this configured priority.
+If both account pools and API key pools are available, `Routing Priority` decides which family is attempted first.
 
 ### Routing Mode
 
-Two routing modes are supported:
+Two modes exist:
 
-1. `automatic`: keep the original automatic routing behavior
-2. `app-assigned`: bind specific applications to specific credentials
+1. `automatic`
+2. `app-assigned`
+
+Use `automatic` when you want CliGate to resolve requests with the normal routing logic.
+
+Use `app-assigned` when you want specific clients to always use a specific credential or local runtime.
 
 ### App Assignments
 
-In app-assigned mode, you can bind individual clients to fixed credentials. Examples:
+Examples:
 
 - Codex always uses one ChatGPT account
 - Claude Code always uses one Claude account
-- OpenClaw always uses one API key
+- Gemini CLI always uses one API key
+- OpenClaw always uses one local runtime or provider key
 
 ### Model Mapping
 
-CliGate supports provider-specific model mapping. That means the requested model name and the final upstream model do not always need to be the same.
+Model mapping allows the incoming model name and the upstream model name to differ.
+
+This is useful when:
+
+- a client expects one model ID but you want a different upstream target
+- you want a stable local-facing model name across provider changes
 
 ### Free Models
 
-You can enable or disable system free model routing. When disabled, those requests are routed only through your own accounts or API keys.
+Free-model routing allows supported requests to resolve to configured free upstream options when that behavior is enabled.
+
+## API and Operational Surfaces
+
+Common API surfaces include:
+
+- `POST /v1/messages`
+- `POST /v1/chat/completions`
+- `POST /v1/responses`
+- `POST /backend-api/codex/responses`
+- `POST /v1beta/models/*`
+- `GET /api/agent-runtimes/providers`
+- `GET /api/agent-channels/conversations`
+- `GET /api/resources`
+- `GET /health`
+
+Use `API Explorer`, `Request Logs`, and `Logs` together when debugging route behavior.
 
 ## Common Scenarios
 
 ### I only want to verify that a model works
 
-1. Add an account or API key
-2. Open Chat
-3. Select a source
-4. Enter a model
-5. Send a simple prompt
+1. Add an account, API key, or local runtime.
+2. Open `Chat`.
+3. Select a source.
+4. Enter a model.
+5. Send a simple prompt.
 
 ### I want Claude Code to use the local proxy
 
-1. Make sure CliGate is running
-2. Click the one-click Claude Code setup in Settings
-3. Or ask Product Assistant to enable the Claude Code proxy
-4. Confirm the pending action
-5. Start Claude Code
+1. Make sure CliGate is running.
+2. Open `Settings`.
+3. Run the one-click Claude Code configuration.
+4. Confirm the action if prompted.
+5. Start Claude Code.
 
-### I want Claude Code to return to direct mode
+### I want to route each tool differently
 
-1. Disable the proxy from Settings
-2. Or ask Product Assistant to remove the Claude Code proxy
-3. Confirm the action
+1. Open `Routing`.
+2. Set `Routing Mode` to `app-assigned`.
+3. Configure `App Assignments`.
+4. Verify behavior in `Chat`, `API Explorer`, or the relevant client.
+
+### I want mobile or channel-based runtime operations
+
+1. Confirm your core routing works from the dashboard first.
+2. Open `Channels`.
+3. Configure Telegram or Feishu.
+4. Set the default runtime provider and working directory.
+5. Use `Conversation Records` to inspect ongoing execution.
 
 ## Troubleshooting
 
 ### The dashboard does not open
 
-Make sure the service is running. The default dashboard URL is:
+Check:
 
-`http://localhost:8081`
-
-### Claude Code is not using the proxy
-
-Check the following:
-
-1. CliGate is running
-2. Claude Code has been configured through the one-click setup
-3. `ANTHROPIC_BASE_URL` points to `http://localhost:8081`
+1. the service is running
+2. the port is reachable locally
+3. the expected address is `http://localhost:8081`
 
 ### Chat requests fail
 
 Check:
 
-1. at least one working account or API key exists
-2. the selected Chat Source is valid
-3. the selected model is accepted by the upstream provider
+1. at least one valid upstream credential or runtime exists
+2. the selected source is still enabled
+3. the selected model is accepted by the effective upstream provider
 
-### Product Assistant gives an unexpected answer
+### A CLI tool is not using CliGate
 
-Product Assistant only answers product usage questions based on this manual. If something is not clearly stated here, it should say that the information was not found instead of inventing implementation details.
+Check:
+
+1. the tool was configured from `Settings`
+2. the tool-specific config endpoint reflects proxy mode
+3. CliGate is running on the expected local port
+
+### Product Assistant gives an incomplete answer
+
+Product Assistant answers from the product manual context. If something is not stated clearly here, the expected behavior is to say that the manual does not provide the answer rather than invent implementation details.
 
 ## Important Notes
 
-1. Product Assistant only affects the Web Chat page
-2. It does not automatically change the existing proxy behavior
-3. Claude Code config is only written after you explicitly confirm the action
-4. Asking how to do something does not automatically execute the action
+1. Product Assistant is guidance, not an implicit execution path.
+2. Runtime workflows and assistant workflows are not the same as ordinary chat completions.
+3. Dashboard documentation, repository docs, and screenshots should be kept in sync when the UI changes.

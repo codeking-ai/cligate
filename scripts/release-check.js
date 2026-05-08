@@ -30,6 +30,34 @@ function runCliVersion() {
   }).trim();
 }
 
+function runPackDryRun() {
+  const npmCacheDir = resolve(root, '.tmp', 'npm-cache');
+
+  try {
+    const jsonOutput = execSync(`npm pack --dry-run --json --cache "${npmCacheDir}"`, {
+      cwd: root,
+      encoding: 'utf8',
+      stdio: ['pipe', 'pipe', 'pipe'],
+      shell: true
+    });
+
+    const parsed = JSON.parse(jsonOutput);
+    if (Array.isArray(parsed) && parsed[0]) {
+      return parsed[0];
+    }
+  } catch (error) {
+    const output = execSync(`npm pack --dry-run --cache "${npmCacheDir}" 2>&1`, {
+      cwd: root,
+      encoding: 'utf8',
+      stdio: ['pipe', 'pipe', 'pipe'],
+      shell: true
+    });
+    return { textOutput: output };
+  }
+
+  return null;
+}
+
 const pkg = readJson('package.json');
 const lock = readJson('package-lock.json');
 const readme = readFileSync(resolve(root, 'README.md'), 'utf8');
@@ -50,16 +78,19 @@ ensure(readmeCn.includes('npx cligate@latest start'), 'README_CN.md is missing n
 const cliVersion = runCliVersion();
 ensure(cliVersion === pkg.version, `CLI --version output mismatch: expected ${pkg.version}, got ${cliVersion}`);
 
-const npmCacheDir = resolve(root, '.tmp', 'npm-cache');
-const packOutput = execSync(`npm pack --dry-run --cache "${npmCacheDir}" 2>&1`, {
-  cwd: root,
-  encoding: 'utf8',
-  stdio: ['pipe', 'pipe', 'pipe'],
-  shell: true
-});
+const packResult = runPackDryRun();
+ensure(packResult, 'npm pack --dry-run did not return any output');
 
-ensure(/npm notice\s+\d.*\sbin\/cli\.js/.test(packOutput), 'npm pack output is missing bin/cli.js');
-ensure(/npm notice\s+\d.*\sREADME\.md/.test(packOutput), 'npm pack output is missing README.md');
+if (Array.isArray(packResult.files)) {
+  const packedPaths = new Set(packResult.files.map((entry) => entry.path));
+  ensure(packedPaths.has('bin/cli.js'), 'npm pack output is missing bin/cli.js');
+  ensure(packedPaths.has('README.md'), 'npm pack output is missing README.md');
+} else if (typeof packResult.textOutput === 'string') {
+  ensure(/npm notice\s+\d.*\sbin\/cli\.js/.test(packResult.textOutput), 'npm pack output is missing bin/cli.js');
+  ensure(/npm notice\s+\d.*\sREADME\.md/.test(packResult.textOutput), 'npm pack output is missing README.md');
+} else {
+  fail('npm pack --dry-run output could not be validated');
+}
 
 if (!packOnly) {
   console.log(`release-check passed for ${pkg.name}@${pkg.version}`);

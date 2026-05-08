@@ -28,6 +28,9 @@
     "url": "https://github.com/codeking-ai/cligate/issues"
   },
   "homepage": "https://github.com/codeking-ai/cligate#readme",
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "start": "node src/index.js",
     "electron": "electron .",

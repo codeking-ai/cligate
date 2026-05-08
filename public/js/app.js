@@ -537,7 +537,7 @@ document.addEventListener('alpine:init', () => {
             if (['accounts', 'apikeys', 'localModels'].includes(tab)) return 'credentials';
             if (['channels'].includes(tab)) return 'channels';
             if (['settings', 'routing'].includes(tab)) return 'configuration';
-            if (['resources'].includes(tab)) return 'resources';
+            if (['resources', 'manual'].includes(tab)) return 'resources';
             if (['usage', 'pricing', 'apiExplorer', 'requestLogs', 'logs'].includes(tab)) return 'observability';
             return 'workspace';
         },

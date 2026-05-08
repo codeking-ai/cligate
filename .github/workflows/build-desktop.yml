@@ -12,6 +12,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      id-token: write
 
     steps:
       - name: Checkout
@@ -33,10 +34,27 @@ jobs:
       - name: Release readiness checks
         run: npm run release:check
 
-      - name: Publish npm package
+      - name: Show package version
+        run: node -e "const pkg=require('./package.json'); console.log(`Preparing npm publish for ${pkg.name}@${pkg.version}`)"
+
+      - name: Show latest published npm version
+        run: npm view cligate version || echo "Package not found on npm yet"
+
+      - name: Verify npm token identity
+        if: ${{ secrets.NPM_TOKEN != '' }}
+        run: npm whoami
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Publish npm package with token
+        if: ${{ secrets.NPM_TOKEN != '' }}
         run: npm publish --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Publish npm package with trusted publishing
+        if: ${{ secrets.NPM_TOKEN == '' }}
+        run: npm publish --access public --provenance
 
   build:
     strategy:

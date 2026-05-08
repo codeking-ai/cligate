@@ -3,3 +3,9 @@ contact_links:
   - name: GitHub Discussions
     url: https://github.com/codeking-ai/cligate/discussions
     about: For general questions, ideas, and community discussions
+  - name: Product Manual
+    url: https://github.com/codeking-ai/cligate/blob/master/docs/product-manual.en.md
+    about: Read the product manual before opening a usage question
+  - name: Support Guide
+    url: https://github.com/codeking-ai/cligate/blob/master/SUPPORT.md
+    about: Use the support guide to choose the right channel for your question

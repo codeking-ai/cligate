@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <script>if(localStorage.getItem('proxy-theme')==='light'){document.documentElement.classList.replace('dark','light')}</script>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CliGate Manual</title>
+    <link rel="stylesheet" href="/manual/style.css">
+</head>
+<body>
+    <div class="page-shell">
+        <header class="topbar">
+            <div class="brand-block">
+                <div class="brand-mark">CX</div>
+                <div>
+                    <p class="eyebrow">CliGate</p>
+                    <h1 class="brand-title">Product Guide</h1>
+                </div>
+            </div>
+            <div class="topbar-note">A lightweight guide for first-time users.</div>
+        </header>
+
+        <nav class="section-nav">
+            <a href="/" class="section-link">Dashboard</a>
+            <a href="/manual/" class="section-link active">Manual</a>
+            <a href="/resources/" class="section-link">Resources</a>
+        </nav>
+
+        <header class="page-header">
+            <div>
+                <p class="eyebrow">Start Here</p>
+                <h2>Understand, configure, and verify CliGate quickly</h2>
+                <p class="subtle">This page is a lightweight guide. For deeper reference, use the repository docs and product manual files.</p>
+            </div>
+            <div class="header-actions">
+                <a class="ghost-link" href="/">Back to Dashboard</a>
+            </div>
+        </header>
+
+        <section class="hero-grid">
+            <article class="hero-card accent">
+                <span class="card-label">What it is</span>
+                <h3>One local gateway for coding tools and runtime workflows</h3>
+                <p>CliGate unifies Claude Code, Codex CLI, Gemini CLI, OpenClaw, dashboard chat, local runtimes, and channel-based runtime sessions behind one local control plane.</p>
+            </article>
+            <article class="hero-card">
+                <span class="card-label">Default address</span>
+                <h3><code>http://localhost:8081</code></h3>
+                <p>Start the service, open the dashboard, add one usable credential, and then configure the client you want to proxy.</p>
+            </article>
+        </section>
+
+        <section class="content-grid">
+            <article class="content-card">
+                <span class="card-label">Quick Start</span>
+                <h3>Three-step setup</h3>
+                <ol>
+                    <li>Run <code>npx cligate@latest start</code> or <code>cligate start</code>.</li>
+                    <li>Add a ChatGPT account, Claude account, Antigravity account, API key, or local runtime.</li>
+                    <li>Use the dashboard to configure Claude Code, Codex CLI, Gemini CLI, or OpenClaw.</li>
+                </ol>
+            </article>
+
+            <article class="content-card">
+                <span class="card-label">Core Areas</span>
+                <h3>Where to go in the dashboard</h3>
+                <ul>
+                    <li><strong>Accounts / API Keys</strong>: add credentials and check availability.</li>
+                    <li><strong>Routing / Settings</strong>: set priority, app bindings, model mapping, and CLI config.</li>
+                    <li><strong>Chat / Assistant Tasks</strong>: test prompts and inspect runtime execution.</li>
+                    <li><strong>Channels / Conversation Records</strong>: operate Telegram or Feishu runtime workflows.</li>
+                    <li><strong>Usage / Logs / API Explorer</strong>: verify behavior and debug issues.</li>
+                </ul>
+            </article>
+
+            <article class="content-card">
+                <span class="card-label">CLI Examples</span>
+                <h3>Common tool configuration</h3>
+                <pre><code>Claude Code
+ANTHROPIC_BASE_URL=http://localhost:8081
+ANTHROPIC_API_KEY=any-key
+
+Codex CLI
+chatgpt_base_url = "http://localhost:8081/backend-api/"
+openai_base_url = "http://localhost:8081"</code></pre>
+            </article>
+
+            <article class="content-card">
+                <span class="card-label">Routing Model</span>
+                <h3>How requests are resolved</h3>
+                <p>CliGate can route through account pools, API keys, or local runtimes. You can keep automatic routing or bind specific apps to specific credentials.</p>
+            </article>
+
+            <article class="content-card">
+                <span class="card-label">Runtime Workflows</span>
+                <h3>Web and channel operations</h3>
+                <p>Codex and Claude Code runtime sessions can continue across follow-up messages in the dashboard or supported channels, with approvals and questions surfaced in the UI.</p>
+            </article>
+
+            <article class="content-card">
+                <span class="card-label">Need More Detail</span>
+                <h3>Repository documentation</h3>
+                <ul class="link-list">
+                    <li><a href="https://github.com/codeking-ai/cligate/blob/master/docs/README.md" target="_blank" rel="noreferrer">Documentation Hub</a></li>
+                    <li><a href="https://github.com/codeking-ai/cligate/blob/master/docs/product-manual.en.md" target="_blank" rel="noreferrer">Product Manual (EN)</a></li>
+                    <li><a href="https://github.com/codeking-ai/cligate/blob/master/docs/product-manual.zh-CN.md" target="_blank" rel="noreferrer">Product Manual (ZH)</a></li>
+                    <li><a href="https://github.com/codeking-ai/cligate/blob/master/docs/API.md" target="_blank" rel="noreferrer">API Reference</a></li>
+                    <li><a href="https://github.com/codeking-ai/cligate/blob/master/docs/ARCHITECTURE.md" target="_blank" rel="noreferrer">Architecture</a></li>
+                </ul>
+            </article>
+        </section>
+    </div>
+</body>
+</html>

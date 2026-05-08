@@ -1,0 +1,58 @@
+name: Docs Check
+
+on:
+  pull_request:
+    paths:
+      - 'README.md'
+      - 'README_CN.md'
+      - 'docs/**'
+      - '.github/pull_request_template.md'
+      - 'CONTRIBUTING.md'
+      - 'SECURITY.md'
+      - 'CHANGELOG.md'
+      - 'public/manual/**'
+      - 'public/resources/**'
+      - 'public/index.html'
+      - 'public/js/**'
+  workflow_dispatch:
+
+jobs:
+  docs-check:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Verify core docs exist
+        run: |
+          test -f README.md
+          test -f README_CN.md
+          test -f docs/README.md
+          test -f docs/SCREENSHOTS.md
+          test -f docs/RELEASING.md
+          test -f docs/product-manual.en.md
+          test -f docs/product-manual.zh-CN.md
+          test -f CONTRIBUTING.md
+          test -f SECURITY.md
+          test -f SUPPORT.md
+          test -f CHANGELOG.md
+          test -f .github/pull_request_template.md
+
+      - name: Verify local manual entry exists
+        run: |
+          test -f public/manual/index.html
+          test -f public/manual/style.css
+
+      - name: Verify docs links in README
+        run: |
+          grep -q "docs/README.md" README.md
+          grep -q "docs/SCREENSHOTS.md" README.md
+          grep -q "docs/RELEASING.md" README.md
+          grep -q "docs/product-manual.en.md" README.md
+          grep -q "SUPPORT.md" README.md
+          grep -q "docs/README.md" README_CN.md
+          grep -q "docs/SCREENSHOTS.md" README_CN.md
+          grep -q "docs/RELEASING.md" README_CN.md
+          grep -q "docs/product-manual.zh-CN.md" README_CN.md
+          grep -q "SUPPORT.md" README_CN.md
