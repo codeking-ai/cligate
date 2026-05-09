@@ -1,3 +1,4 @@
+import '../test-env.js';
 /**
  * Unit tests for src/account-rotation/rate-limits.js
  * Tests rate limit tracking and account state management.

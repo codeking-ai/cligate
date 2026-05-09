@@ -1,3 +1,4 @@
+import '../test-env.js';
 /**
  * Unit tests for src/kilo-format-converter.js
  * Tests Anthropic ↔ OpenAI Chat Completions format conversion.

@@ -10,7 +10,7 @@ export function parseIsolatedArgs(argv) {
     basePort: 8082,
     sourceConfigDir: join(homedir(), '.cligate'),
     isolatedConfigDir: join(process.cwd(), '.test-config'),
-    allowLiveMutations: true,
+    allowLiveMutations: false,
     startupTimeoutMs: 30000
   };
 
@@ -48,7 +48,7 @@ function ensureParentDir(filePath) {
 }
 
 export function prepareIsolatedConfig(options) {
-  cpSync(options.sourceConfigDir, options.isolatedConfigDir, { recursive: true, force: true });
+  mkdirSync(options.isolatedConfigDir, { recursive: true });
 
   const isolatedAuthDir = join(options.isolatedConfigDir, 'external-auth');
   const claudeCliConfigDir = join(options.isolatedConfigDir, 'claude-cli-config');
@@ -60,12 +60,14 @@ export function prepareIsolatedConfig(options) {
   const sourceCodexAuth = join(homedir(), '.codex', 'auth.json');
   const sourceClaudeCredentials = join(homedir(), '.claude', '.credentials.json');
 
-  if (existsSync(sourceCodexAuth)) {
+  const allowLocalAuthCopy = process.env.ENABLE_TEST_LOCAL_AUTH_COPY === 'true';
+
+  if (allowLocalAuthCopy && existsSync(sourceCodexAuth)) {
     ensureParentDir(codexAuthFile);
     cpSync(sourceCodexAuth, codexAuthFile, { force: true });
   }
 
-  if (existsSync(sourceClaudeCredentials)) {
+  if (allowLocalAuthCopy && existsSync(sourceClaudeCredentials)) {
     ensureParentDir(claudeCredentialsFile);
     cpSync(sourceClaudeCredentials, claudeCredentialsFile, { force: true });
   }
@@ -133,9 +135,9 @@ export function startIsolatedServer(options, authFiles) {
     env: {
       ...process.env,
       PORT: String(options.basePort),
-      PROXYPOOL_CONFIG_DIR: options.isolatedConfigDir,
-      PROXYPOOL_CODEX_AUTH_FILE: authFiles.codexAuthFile,
-      PROXYPOOL_CLAUDE_CREDENTIALS_FILE: authFiles.claudeCredentialsFile,
+      CLIGATE_CONFIG_DIR: options.isolatedConfigDir,
+      CLIGATE_CODEX_AUTH_FILE: authFiles.codexAuthFile,
+      CLIGATE_CLAUDE_CREDENTIALS_FILE: authFiles.claudeCredentialsFile,
       CLAUDE_CONFIG_PATH: authFiles.claudeCliConfigDir
     }
   });

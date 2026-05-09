@@ -1,3 +1,4 @@
+import './test-env.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
@@ -7,7 +8,7 @@ const baseUrl = process.env.ROUTING_TEST_BASE_URL || 'http://localhost:8081';
 
 // Tests expect the proxy server to already be running.
 // Set ROUTING_TEST_BASE_URL to override the default.
-const shouldSkip = false;
+const shouldSkip = process.env.ENABLE_LIVE_SERVER_TESTS !== 'true';
 
 async function postJson(path, body) {
   const url = new URL(path, baseUrl);

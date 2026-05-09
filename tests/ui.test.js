@@ -1,14 +1,16 @@
+import './test-env.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
 const UI_URL = process.env.UI_TEST_URL || 'http://localhost:8081/';
+const shouldSkip = process.env.ENABLE_LIVE_SERVER_TESTS !== 'true';
 
 async function getText(html, regex) {
   const match = html.match(regex);
   return match ? match[1] : null;
 }
 
-test('Web UI loads and includes core navigation', async () => {
+test('Web UI loads and includes core navigation', { skip: shouldSkip }, async () => {
   const res = await fetch(UI_URL);
   assert.equal(res.status, 200);
   const html = await res.text();
@@ -21,7 +23,7 @@ test('Web UI loads and includes core navigation', async () => {
   assert.ok(html.includes('settings'));
 });
 
-test('Web UI chat view includes agent runtime controls', async () => {
+test('Web UI chat view includes agent runtime controls', { skip: shouldSkip }, async () => {
   const res = await fetch(UI_URL);
   assert.equal(res.status, 200);
   const html = await res.text();
@@ -33,7 +35,7 @@ test('Web UI chat view includes agent runtime controls', async () => {
   assert.ok(html.includes("t('agentRuntimeMonitor')"));
 });
 
-test('Web UI loads app bundle and has a logs container', async () => {
+test('Web UI loads app bundle and has a logs container', { skip: shouldSkip }, async () => {
   const res = await fetch(UI_URL);
   assert.equal(res.status, 200);
   const html = await res.text();
@@ -45,7 +47,7 @@ test('Web UI loads app bundle and has a logs container', async () => {
   assert.ok(html.includes('id="logs-container"'));
 });
 
-test('UI Quick Test and Haiku test controls are present', async () => {
+test('UI Quick Test and Haiku test controls are present', { skip: shouldSkip }, async () => {
   const res = await fetch(UI_URL);
   assert.equal(res.status, 200);
   const html = await res.text();
@@ -57,7 +59,7 @@ test('UI Quick Test and Haiku test controls are present', async () => {
   assert.ok(html.includes("t('testHaiku')"));
 });
 
-test('app.js defines expected Alpine state keys (smoke)', async () => {
+test('app.js defines expected Alpine state keys (smoke)', { skip: shouldSkip }, async () => {
   const res = await fetch(new URL('/js/app.js', UI_URL));
   assert.equal(res.status, 200);
   const js = await res.text();
@@ -87,7 +89,7 @@ test('app.js defines expected Alpine state keys (smoke)', async () => {
   }
 });
 
-test('Dashboard template includes config viewer entry points', async () => {
+test('Dashboard template includes config viewer entry points', { skip: shouldSkip }, async () => {
   const res = await fetch(UI_URL);
   assert.equal(res.status, 200);
   const html = await res.text();
@@ -99,7 +101,7 @@ test('Dashboard template includes config viewer entry points', async () => {
   assert.ok(html.includes("@click=\"openConfigViewer('openclaw')\""));
 });
 
-test('Dashboard template includes resources catalog entry link', async () => {
+test('Dashboard template includes resources catalog entry link', { skip: shouldSkip }, async () => {
   const res = await fetch(UI_URL);
   assert.equal(res.status, 200);
   const html = await res.text();
@@ -108,7 +110,7 @@ test('Dashboard template includes resources catalog entry link', async () => {
   assert.ok(html.includes("t('resources')"));
 });
 
-test('Resources page loads its standalone assets', async () => {
+test('Resources page loads its standalone assets', { skip: shouldSkip }, async () => {
   const res = await fetch(new URL('/resources/', UI_URL));
   assert.equal(res.status, 200);
   const html = await res.text();

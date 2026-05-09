@@ -1,3 +1,4 @@
+import '../test-env.js';
 /**
  * Unit tests for the Phase 1 translator kernel.
  * Tests Anthropic ↔ OpenAI Responses conversion logic.

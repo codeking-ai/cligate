@@ -1,3 +1,4 @@
+import '../test-env.js';
 /**
  * Unit tests for src/account-rotation/strategies/
  * Tests account selection strategies.

@@ -50,6 +50,7 @@ import {
 import {
   getAccountQuota as fetchAccountQuota
 } from '../model-api.js';
+import { removeCredentialReferences } from '../server-settings.js';
 
 import { logger } from '../utils/logger.js';
 
@@ -211,6 +212,7 @@ export function handleRemoveAccount(req, res) {
   const email = decodeURIComponent(req.params.email);
   const result = removeAccount(email);
   if (result.success) {
+    removeCredentialReferences({ type: 'chatgpt-account', id: email });
     logger.info(`Removed account: ${email}`);
   }
   res.json(result);

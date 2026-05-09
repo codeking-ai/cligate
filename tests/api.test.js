@@ -1,10 +1,11 @@
+import './test-env.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
 import { once } from 'node:events';
 
 const baseUrl = process.env.ROUTING_TEST_BASE_URL || 'http://localhost:8081';
-const shouldSkip = false; // Tests expect the server to already be running.
+const shouldSkip = process.env.ENABLE_LIVE_SERVER_TESTS !== 'true';
 
 async function postJson(path, body) {
   const url = new URL(path, baseUrl);

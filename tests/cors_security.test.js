@@ -1,10 +1,12 @@
+import './test-env.js';
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
 const baseUrl = process.env.ROUTING_TEST_BASE_URL || 'http://localhost:8081';
+const shouldSkip = process.env.ENABLE_LIVE_SERVER_TESTS !== 'true';
 
-test('CORS: Allows localhost origin', async () => {
+test('CORS: Allows localhost origin', { skip: shouldSkip }, async () => {
   const res = await fetch(`${baseUrl}/health`, {
     method: 'OPTIONS',
     headers: {
@@ -19,7 +21,7 @@ test('CORS: Allows localhost origin', async () => {
   assert.equal(res.headers.get('access-control-allow-methods'), 'GET,POST,PUT,DELETE,OPTIONS');
 });
 
-test('CORS: Allows 127.0.0.1 origin', async () => {
+test('CORS: Allows 127.0.0.1 origin', { skip: shouldSkip }, async () => {
   const res = await fetch(`${baseUrl}/health`, {
     method: 'OPTIONS',
     headers: {
@@ -32,7 +34,7 @@ test('CORS: Allows 127.0.0.1 origin', async () => {
   assert.equal(res.headers.get('access-control-allow-origin'), 'http://127.0.0.1:8081');
 });
 
-test('CORS: Blocks external origin (malicious-site.com)', async () => {
+test('CORS: Blocks external origin (malicious-site.com)', { skip: shouldSkip }, async () => {
   const res = await fetch(`${baseUrl}/health`, {
     method: 'OPTIONS', // browser preflight
     headers: {
@@ -55,7 +57,7 @@ test('CORS: Blocks external origin (malicious-site.com)', async () => {
   // unless configured to reflect request origin (which is what we fixed to prevent).
 });
 
-test('CORS: Blocks null origin', async () => {
+test('CORS: Blocks null origin', { skip: shouldSkip }, async () => {
   const res = await fetch(`${baseUrl}/health`, {
     method: 'OPTIONS',
     headers: {

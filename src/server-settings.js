@@ -299,12 +299,70 @@ export function setServerSettings(patch = {}) {
     return next;
 }
 
+export function removeCredentialReferences(descriptor = {}) {
+    const type = String(descriptor?.type || '').trim();
+    const id = String(descriptor?.id || '').trim();
+    if (!type || !id) {
+        return getServerSettings();
+    }
+
+    const current = getServerSettings();
+    const nextAppRouting = Object.fromEntries(
+        Object.entries(current.appRouting || {}).map(([appId, config]) => {
+            const bindings = Array.isArray(config?.bindings)
+                ? config.bindings
+                    .map((binding) => {
+                        if (binding?.type !== type) return binding;
+                        const targetIds = Array.isArray(binding?.targetIds)
+                            ? binding.targetIds.filter((targetId) => targetId !== id)
+                            : [];
+                        if (binding?.targetId && !targetIds.includes(binding.targetId) && binding.targetId !== id) {
+                            targetIds.unshift(binding.targetId);
+                        }
+                        if (targetIds.length === 0) return null;
+                        return {
+                            ...binding,
+                            targetIds,
+                            targetId: targetIds[0] || null
+                        };
+                    })
+                    .filter(Boolean)
+                : [];
+
+            return [appId, {
+                ...config,
+                enabled: bindings.length > 0 ? config?.enabled === true : false,
+                bindings
+            }];
+        })
+    );
+
+    const assistantAgent = current.assistantAgent || {};
+    const boundCredential = assistantAgent.boundCredential?.type === type && assistantAgent.boundCredential?.id === id
+        ? null
+        : assistantAgent.boundCredential;
+    const fallbacks = Array.isArray(assistantAgent.fallbacks)
+        ? assistantAgent.fallbacks.filter((entry) => !(entry?.type === type && entry?.id === id))
+        : [];
+
+    return setServerSettings({
+        appRouting: nextAppRouting,
+        assistantAgent: {
+            ...assistantAgent,
+            boundCredential,
+            boundModelSource: boundCredential,
+            fallbacks
+        }
+    });
+}
+
 export { SETTINGS_FILE };
 export { normalizeChannelsConfig };
 
 export default {
     getServerSettings,
     setServerSettings,
+    removeCredentialReferences,
     SETTINGS_FILE,
     normalizeChannelsConfig
 };

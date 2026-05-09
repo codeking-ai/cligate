@@ -1,3 +1,4 @@
+import '../test-env.js';
 /**
  * Unit tests for route handlers (no server required).
  * Uses lightweight mock req/res objects to test handler logic in isolation.
@@ -34,23 +35,22 @@ function createTempDir(prefix) {
   return mkdtempSync(join(tmpdir(), prefix));
 }
 
-test.before(() => {
-  process.env.CLIGATE_CONFIG_DIR = createTempDir('cligate-route-handlers-');
-});
+process.env.CLIGATE_CONFIG_DIR = createTempDir('cligate-route-handlers-');
+process.env.CLAUDE_CONFIG_PATH = createTempDir('cligate-route-handlers-claude-');
 
 // ─── settings-route ───────────────────────────────────────────────────────────
 
-import { handleGetHaikuModel, handleSetHaikuModel, handleGetAppRouting, handleSetAppRouting, handleGetStrictCodexCompatibility, handleSetStrictCodexCompatibility, handleGetStrictTranslatorCompatibility, handleSetStrictTranslatorCompatibility, handleGetAssistantAgentConfig, handleSetAssistantAgentConfig } from '../../src/routes/settings-route.js';
-import { handleGetPricing, handleUpdatePricing, handleResetPricing } from '../../src/routes/pricing-route.js';
-import { handleGetApiKey } from '../../src/routes/api-keys-route.js';
-import { _testExports as codexConfigTestExports } from '../../src/routes/codex-config-route.js';
-import {
+const { handleGetHaikuModel, handleSetHaikuModel, handleGetAppRouting, handleSetAppRouting, handleGetStrictCodexCompatibility, handleSetStrictCodexCompatibility, handleGetStrictTranslatorCompatibility, handleSetStrictTranslatorCompatibility, handleGetAssistantAgentConfig, handleSetAssistantAgentConfig } = await import('../../src/routes/settings-route.js');
+const { handleGetPricing, handleUpdatePricing, handleResetPricing } = await import('../../src/routes/pricing-route.js');
+const { handleGetApiKey } = await import('../../src/routes/api-keys-route.js');
+const { _testExports: codexConfigTestExports } = await import('../../src/routes/codex-config-route.js');
+const {
   handleGetAssistantAgentStatus,
   handleTestAssistantBinding,
   handleGetAssistantBindingCatalog,
   handleSetAssistantBinding,
   handleResetAssistantBreaker
-} from '../../src/routes/assistant-agent-route.js';
+} = await import('../../src/routes/assistant-agent-route.js');
 
 test('handleGetHaikuModel: returns current haikuKiloModel', () => {
   const req = mockReq();
@@ -404,8 +404,12 @@ test('handleSetDirectMode: allows null body and restores direct mode', async () 
 
 // ─── accounts-route ───────────────────────────────────────────────────────────
 
-import { handleSwitchAccount } from '../../src/routes/accounts-route.js';
-import { handleAddAntigravityAccount } from '../../src/routes/antigravity-accounts-route.js';
+const { handleSwitchAccount, handleRemoveAccount, handleAddAccountManual } = await import('../../src/routes/accounts-route.js');
+const { handleAddAntigravityAccount } = await import('../../src/routes/antigravity-accounts-route.js');
+const { handleRemoveClaudeAccount } = await import('../../src/routes/claude-accounts-route.js');
+const { saveAccounts: saveChatGptAccounts } = await import('../../src/account-manager.js');
+const { saveAccounts: saveClaudeAccounts } = await import('../../src/claude-account-manager.js');
+const { getServerSettings, setServerSettings } = await import('../../src/server-settings.js');
 
 test('handleSwitchAccount: rejects missing email with 400', () => {
   const req = mockReq({});
@@ -434,6 +438,106 @@ test('handleSwitchAccount: returns result for non-existent email (graceful)', ()
   assert.ok('success' in res._body);
 });
 
+test('handleRemoveAccount: prunes ChatGPT bindings from routing and assistant settings', () => {
+  saveChatGptAccounts({
+    accounts: [{
+      email: 'chatgpt@example.com',
+      accessToken: 'token',
+      refreshToken: 'refresh',
+      addedAt: new Date().toISOString(),
+      lastUsed: new Date().toISOString()
+    }],
+    activeAccount: 'chatgpt@example.com',
+    version: 1
+  });
+  setServerSettings({
+    appRouting: {
+      codex: {
+        enabled: true,
+        fallbackToDefault: true,
+        bindings: [
+          { type: 'chatgpt-account', targetId: 'chatgpt@example.com' },
+          { type: 'api-key', targetId: 'key-still-there' }
+        ]
+      }
+    },
+    assistantAgent: {
+      ...getServerSettings().assistantAgent,
+      enabled: true,
+      boundCredential: { type: 'chatgpt-account', id: 'chatgpt@example.com' },
+      boundModelSource: { type: 'chatgpt-account', id: 'chatgpt@example.com' },
+      fallbacks: [
+        { type: 'chatgpt-account', id: 'chatgpt@example.com' },
+        { type: 'api-key', id: 'key-still-there' }
+      ]
+    }
+  });
+
+  const req = mockReq({}, { email: encodeURIComponent('chatgpt@example.com') });
+  const res = mockRes();
+  handleRemoveAccount(req, res);
+
+  assert.equal(res._body.success, true);
+  const settings = getServerSettings();
+  assert.deepEqual(
+    settings.appRouting.codex.bindings.map((binding) => ({ type: binding.type, targetId: binding.targetId })),
+    [{ type: 'api-key', targetId: 'key-still-there' }]
+  );
+  assert.equal(settings.assistantAgent.boundCredential, null);
+  assert.equal(settings.assistantAgent.boundModelSource, null);
+  assert.deepEqual(settings.assistantAgent.fallbacks, [{ type: 'api-key', id: 'key-still-there' }]);
+});
+
+test('handleRemoveClaudeAccount: prunes Claude bindings from routing and assistant settings', () => {
+  saveClaudeAccounts({
+    accounts: [{
+      email: 'claude@example.com',
+      accessToken: 'token',
+      refreshToken: 'refresh',
+      addedAt: new Date().toISOString(),
+      lastUsed: new Date().toISOString()
+    }],
+    activeAccount: 'claude@example.com',
+    version: 1
+  });
+  setServerSettings({
+    appRouting: {
+      'claude-code': {
+        enabled: true,
+        fallbackToDefault: true,
+        bindings: [
+          { type: 'claude-account', targetId: 'claude@example.com' },
+          { type: 'api-key', targetId: 'key-still-there' }
+        ]
+      }
+    },
+    assistantAgent: {
+      ...getServerSettings().assistantAgent,
+      enabled: true,
+      boundCredential: { type: 'claude-account', id: 'claude@example.com' },
+      boundModelSource: { type: 'claude-account', id: 'claude@example.com' },
+      fallbacks: [
+        { type: 'claude-account', id: 'claude@example.com' },
+        { type: 'api-key', id: 'key-still-there' }
+      ]
+    }
+  });
+
+  const req = mockReq({}, { email: encodeURIComponent('claude@example.com') });
+  const res = mockRes();
+  handleRemoveClaudeAccount(req, res);
+
+  assert.equal(res._body.success, true);
+  const settings = getServerSettings();
+  assert.deepEqual(
+    settings.appRouting['claude-code'].bindings.map((binding) => ({ type: binding.type, targetId: binding.targetId })),
+    [{ type: 'api-key', targetId: 'key-still-there' }]
+  );
+  assert.equal(settings.assistantAgent.boundCredential, null);
+  assert.equal(settings.assistantAgent.boundModelSource, null);
+  assert.deepEqual(settings.assistantAgent.fallbacks, [{ type: 'api-key', id: 'key-still-there' }]);
+});
+
 test('handleAddAntigravityAccount: rejects OAuth setup when client secret is missing', async () => {
   const req = mockReq({});
   const res = mockRes();
@@ -443,9 +547,8 @@ test('handleAddAntigravityAccount: rejects OAuth setup when client secret is mis
   assert.match(String(res._body.error || ''), /ANTIGRAVITY_GOOGLE_CLIENT_SECRET/);
 });
 
-import { handleAddAccountManual } from '../../src/routes/accounts-route.js';
-import { handleGetConfigFile } from '../../src/routes/config-files-route.js';
-import { handleListResources, handleGetResourceSummary, handleGetResourceById } from '../../src/routes/resources-route.js';
+const { handleGetConfigFile } = await import('../../src/routes/config-files-route.js');
+const { handleListResources, handleGetResourceSummary, handleGetResourceById } = await import('../../src/routes/resources-route.js');
 
 test('handleAddAccountManual: rejects missing code with 400', async () => {
   const req = mockReq({});

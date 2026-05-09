@@ -1,3 +1,4 @@
+import '../test-env.js';
 /**
  * Unit tests for src/model-mapper.js
  * Tests model name mapping, kilo detection, and routing resolution.
