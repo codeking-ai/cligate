@@ -22,6 +22,7 @@ import { getCredentialsForAccount } from '../middleware/credentials.js';
 import { sendMessageStream } from '../direct-api.js';
 import { sendClaudeMessageWithMeta, mapToClaudeModel } from '../claude-api.js';
 import { resolveModel } from '../model-mapping.js';
+import { getProviderModelOptions } from '../model-options.js';
 
 export const DEFAULT_CHATGPT_MODEL = 'gpt-5.4';
 export const DEFAULT_CLAUDE_MODEL = 'claude-sonnet-4-6';
@@ -239,6 +240,7 @@ export function listAvailableCredentials() {
             providerType: supportedType,
             label: provider.name,
             available: provider.isAvailable !== false,
+            models: getProviderModelOptions(supportedType),
             detail: provider.rateLimitedUntil && provider.rateLimitedUntil > Date.now()
                 ? 'rate-limited'
                 : ''
@@ -255,6 +257,7 @@ export function listAvailableCredentials() {
             providerType: 'anthropic',
             label: account.email,
             available: !!account.accessToken,
+            models: getProviderModelOptions('anthropic'),
             detail: account.accessToken ? '' : 'no access token'
         });
     }
@@ -269,6 +272,7 @@ export function listAvailableCredentials() {
             providerType: 'openai',
             label: account.email,
             available: true,
+            models: getProviderModelOptions('openai'),
             detail: ''
         });
     }

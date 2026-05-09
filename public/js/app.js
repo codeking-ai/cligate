@@ -483,6 +483,7 @@ document.addEventListener('alpine:init', () => {
             this.loadChatSessions();
             this.loadChatSources();
             this.loadChatModels();
+            this.loadModelMappings();
             this.loadAgentRuntimeProviders();
             this.loadAgentRuntimeSessions();
             this.initConfigViewerFromUrl();
@@ -1514,8 +1515,9 @@ document.addEventListener('alpine:init', () => {
                 this.chatSources = data.sources;
                 if (!this.chatSourceId || !this.chatSources.some((source) => source.id === this.chatSourceId)) {
                     this.chatSourceId = this.chatSources[0]?.id || '';
-                    this.syncActiveChatSession();
                 }
+                this.ensureChatModelMatchesSource();
+                this.syncActiveChatSession();
             }
             this.chatSourceLoading = false;
         },
@@ -1524,6 +1526,82 @@ document.addEventListener('alpine:init', () => {
             const { ok, data } = await this.api('/v1/models');
             if (ok && Array.isArray(data?.data)) {
                 this.chatModels = data.data.map((item) => item.id).filter(Boolean);
+                this.ensureChatModelMatchesSource();
+            }
+        },
+
+        chatSourceById(sourceId = this.chatSourceId) {
+            return this.chatSources.find((source) => source.id === sourceId) || null;
+        },
+
+        inferProviderTypeForModel(modelId) {
+            const value = String(modelId || '').trim().toLowerCase();
+            if (!value) return null;
+            if (value.startsWith('claude-')) return 'anthropic';
+            if (value.startsWith('gemini-')) return 'gemini';
+            if (value.startsWith('deepseek-') || value === 'deepseek-chat' || value === 'deepseek-reasoner') return 'deepseek';
+            if (value.startsWith('gpt-') || /^o[134](-|$)/.test(value) || value.includes('codex')) return 'openai';
+            return null;
+        },
+
+        providerTypeForChatSource(sourceId = this.chatSourceId) {
+            const source = this.chatSourceById(sourceId);
+            if (!source) return null;
+            if (source.kind === 'chatgpt-account') return 'openai';
+            if (source.kind === 'claude-account') return 'anthropic';
+            if (source.kind === 'api-key') {
+                return this.normalizeModelMappingProvider(source.meta?.providerType || '');
+            }
+            return null;
+        },
+
+        modelsForChatSource(sourceId = this.chatSourceId) {
+            const source = this.chatSourceById(sourceId);
+            const sourceModels = Array.isArray(source?.meta?.models) ? source.meta.models.filter(Boolean) : [];
+            if (sourceModels.length > 0) {
+                return sourceModels;
+            }
+            return this.providerModelsForType(this.providerTypeForChatSource(sourceId), '');
+        },
+
+        providerModelsForType(providerType, currentModel = '') {
+            const normalizedProvider = this.normalizeModelMappingProvider(providerType || '');
+            const providerModels = this.modelMappingData?.providerModels || {};
+            const discoveredModels = this.modelMappingData?.discovered?.providers?.[normalizedProvider]?.models || [];
+            const discoveredIds = Array.isArray(discoveredModels)
+                ? discoveredModels.map((entry) => entry?.id || entry).filter(Boolean)
+                : [];
+            const staticIds = Array.isArray(providerModels[normalizedProvider]) ? providerModels[normalizedProvider] : [];
+            let merged = [...new Set([...discoveredIds, ...staticIds])];
+
+            if (merged.length === 0 && normalizedProvider) {
+                merged = this.chatModels.filter((modelId) => {
+                    const inferred = this.inferProviderTypeForModel(modelId);
+                    if (normalizedProvider === 'azure-openai') return inferred === 'openai';
+                    return inferred === normalizedProvider;
+                });
+            }
+
+            if (!normalizedProvider) {
+                merged = [...this.chatModels];
+            }
+
+            if (currentModel && !merged.includes(currentModel)) {
+                merged.unshift(currentModel);
+            }
+
+            return merged;
+        },
+
+        chatModelOptions() {
+            return this.modelsForChatSource(this.chatSourceId);
+        },
+
+        ensureChatModelMatchesSource() {
+            const options = this.modelsForChatSource(this.chatSourceId);
+            if (!options.length) return;
+            if (!this.chatModel || !options.includes(this.chatModel)) {
+                this.chatModel = options[0];
             }
         },
 
@@ -3560,6 +3638,7 @@ document.addEventListener('alpine:init', () => {
                     available: entry.available !== false,
                     detail: entry.detail || '',
                     providerType: entry.providerType || '',
+                    models: Array.isArray(entry.models) ? entry.models : [],
                     descriptor: { type: entry.type, id: entry.id }
                 })) });
             }
@@ -3588,26 +3667,18 @@ document.addEventListener('alpine:init', () => {
 
         assistantProviderModelsForDescriptor(descriptor) {
             if (!descriptor?.type || !descriptor?.id) return [];
-            if (descriptor.type === 'claude-account') {
-                return ['claude-opus-4-6', 'claude-sonnet-4-6', 'claude-haiku-4-5'];
-            }
-            if (descriptor.type === 'chatgpt-account') {
-                return ['gpt-5.4', 'gpt-5.4-mini', 'gpt-5.4-nano', 'gpt-5.3-codex', 'o4-mini'];
-            }
             const flat = this.assistantAgentCredentialOptions.flatMap((g) => g.entries);
             const match = flat.find((entry) => entry.value === `${descriptor.type}::${descriptor.id}`);
-            const providerType = String(match?.providerType || '').trim();
-            const providerModels = this.modelMappingData?.providerModels || {};
-            const discoveredModels = this.modelMappingData?.discovered?.providers?.[providerType]?.models || [];
-            const discoveredIds = Array.isArray(discoveredModels)
-                ? discoveredModels.map((entry) => entry?.id || entry).filter(Boolean)
-                : [];
-            const staticIds = Array.isArray(providerModels[providerType]) ? providerModels[providerType] : [];
-            const merged = [...new Set([...discoveredIds, ...staticIds])];
-            if (descriptor.model && !merged.includes(descriptor.model)) {
-                merged.unshift(descriptor.model);
+            const sourceModels = Array.isArray(match?.models) ? match.models.filter(Boolean) : [];
+            if (sourceModels.length > 0) {
+                const merged = [...sourceModels];
+                if (descriptor.model && !merged.includes(descriptor.model)) {
+                    merged.unshift(descriptor.model);
+                }
+                return merged;
             }
-            return merged;
+            const providerType = String(match?.providerType || '').trim();
+            return this.providerModelsForType(providerType, descriptor.model || '');
         },
 
         cloneDescriptorWithModel(descriptor, model) {
@@ -3650,10 +3721,16 @@ document.addEventListener('alpine:init', () => {
         },
 
         async setAssistantPrimary(value) {
-            const currentModel = this.assistantAgentConfig.boundModelSource?.model || '';
+            const current = this.assistantAgentConfig.boundModelSource;
+            const next = this.valueToDescriptor(value);
+            const currentModel = current && next
+                && current.type === next.type
+                && current.id === next.id
+                ? (current.model || '')
+                : '';
             const descriptor = value === ''
                 ? null
-                : this.cloneDescriptorWithModel(this.valueToDescriptor(value), currentModel);
+                : this.cloneDescriptorWithModel(next, currentModel);
             await this.submitAssistantBinding({ boundModelSource: descriptor });
         },
 
@@ -3664,9 +3741,16 @@ document.addEventListener('alpine:init', () => {
 
         async setAssistantFallback(index, value) {
             const fallbacks = [...(this.assistantAgentConfig.fallbacks || [])];
+            const current = fallbacks[index] || null;
+            const next = this.valueToDescriptor(value);
+            const preservedModel = current && next
+                && current.type === next.type
+                && current.id === next.id
+                ? (current.model || '')
+                : '';
             const descriptor = this.cloneDescriptorWithModel(
-                this.valueToDescriptor(value),
-                fallbacks[index]?.model || ''
+                next,
+                preservedModel
             );
             if (!descriptor) return;
             fallbacks[index] = descriptor;

@@ -10,6 +10,7 @@ import { sendMessage, sendMessageStream } from '../direct-api.js';
 import { sendClaudeMessageWithMeta, sendClaudeStream, mapToClaudeModel, extractClaudeRateLimitHeaders } from '../claude-api.js';
 import { listApiKeys, getProviderById, recordUsage, recordError, recordRateLimit } from '../api-key-manager.js';
 import { resolveModel } from '../model-mapping.js';
+import { getProviderModelOptions, normalizeProviderType } from '../model-options.js';
 import { logger } from '../utils/logger.js';
 import { prepareAssistantRequest } from '../assistant/assistant-chat-service.js';
 import { createPendingAssistantAction, executePendingAssistantAction } from '../assistant/tool-executor.js';
@@ -32,7 +33,9 @@ export async function handleListChatSources(_req, res) {
       meta: {
         email: account.email,
         planType: account.planType,
-        isActive: account.isActive
+        isActive: account.isActive,
+        providerType: 'openai',
+        models: getProviderModelOptions('openai')
       }
     }));
 
@@ -47,7 +50,9 @@ export async function handleListChatSources(_req, res) {
       meta: {
         email: account.email,
         subscriptionType: account.subscriptionType || 'free',
-        isActive: account.email === claudeData.activeAccount
+        isActive: account.email === claudeData.activeAccount,
+        providerType: 'anthropic',
+        models: getProviderModelOptions('anthropic')
       }
     }));
 
@@ -60,8 +65,9 @@ export async function handleListChatSources(_req, res) {
       description: `${key.type} - ${key.apiKey}`,
       meta: {
         keyId: key.id,
-        providerType: key.type,
-        isAvailable: key.isAvailable
+        providerType: normalizeProviderType(key.type),
+        isAvailable: key.isAvailable,
+        models: getProviderModelOptions(key.type)
       }
     }));
 

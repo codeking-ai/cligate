@@ -619,7 +619,7 @@
                                 </div>
                                 <div class="chat-control-field min-w-0 chat-control-fixed" style="flex:0 0 168px;">
                                     <label class="chat-control-label text-[11px] font-mono text-gray-400 uppercase tracking-wider" x-text="t('chatSource')"></label>
-                                    <select x-model="chatSourceId" @change="syncActiveChatSession()" x-show="chatMode === 'assistant'"
+                                    <select x-model="chatSourceId" @change="ensureChatModelMatchesSource(); syncActiveChatSession()" x-show="chatMode === 'assistant'"
                                         class="chat-control-input input mt-1.5 h-10 bg-space-800 border-space-border text-white font-mono text-xs">
                                         <template x-for="source in chatSources" :key="source.id">
                                             <option :value="source.id" x-text="source.label"></option>
@@ -638,7 +638,7 @@
                                         class="chat-control-input input mt-1.5 h-10 bg-space-800 border-space-border text-white font-mono text-xs"
                                         :placeholder="t('chatModelPlaceholder')">
                                     <datalist id="chat-model-options">
-                                        <template x-for="model in chatModels" :key="model">
+                                        <template x-for="model in chatModelOptions()" :key="model">
                                             <option :value="model"></option>
                                         </template>
                                     </datalist>
