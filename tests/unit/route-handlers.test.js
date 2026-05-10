@@ -438,6 +438,30 @@ test('handleSwitchAccount: returns result for non-existent email (graceful)', ()
   assert.ok('success' in res._body);
 });
 
+test('handleAddAntigravityAccount: returns oauth url even when ANTIGRAVITY_GOOGLE_CLIENT_SECRET is unset', async () => {
+  const previousSecret = process.env.ANTIGRAVITY_GOOGLE_CLIENT_SECRET;
+  delete process.env.ANTIGRAVITY_GOOGLE_CLIENT_SECRET;
+
+  const req = mockReq({});
+  const res = mockRes();
+  const { handleAntigravityOAuthCleanup } = await import('../../src/routes/antigravity-accounts-route.js');
+
+  try {
+    await handleAddAntigravityAccount(req, res);
+    assert.equal(res._status, 200);
+    assert.equal(res._body.status, 'oauth_url');
+    assert.equal(res._body.pkce, true);
+    assert.match(String(res._body.oauth_url || ''), /^https:\/\/accounts\.google\.com\//);
+  } finally {
+    handleAntigravityOAuthCleanup({}, mockRes());
+    if (previousSecret === undefined) {
+      delete process.env.ANTIGRAVITY_GOOGLE_CLIENT_SECRET;
+    } else {
+      process.env.ANTIGRAVITY_GOOGLE_CLIENT_SECRET = previousSecret;
+    }
+  }
+});
+
 test('handleRemoveAccount: prunes ChatGPT bindings from routing and assistant settings', () => {
   saveChatGptAccounts({
     accounts: [{
@@ -538,13 +562,27 @@ test('handleRemoveClaudeAccount: prunes Claude bindings from routing and assista
   assert.deepEqual(settings.assistantAgent.fallbacks, [{ type: 'api-key', id: 'key-still-there' }]);
 });
 
-test('handleAddAntigravityAccount: rejects OAuth setup when client secret is missing', async () => {
+test('handleAddAntigravityAccount: allows OAuth setup when client secret is missing', async () => {
+  const previousSecret = process.env.ANTIGRAVITY_GOOGLE_CLIENT_SECRET;
+  delete process.env.ANTIGRAVITY_GOOGLE_CLIENT_SECRET;
   const req = mockReq({});
   const res = mockRes();
-  await handleAddAntigravityAccount(req, res);
-  assert.equal(res._status, 400);
-  assert.equal(res._body.success, false);
-  assert.match(String(res._body.error || ''), /ANTIGRAVITY_GOOGLE_CLIENT_SECRET/);
+  const { handleAntigravityOAuthCleanup } = await import('../../src/routes/antigravity-accounts-route.js');
+
+  try {
+    await handleAddAntigravityAccount(req, res);
+    assert.equal(res._status, 200);
+    assert.equal(res._body.status, 'oauth_url');
+    assert.equal(res._body.pkce, true);
+    assert.match(String(res._body.oauth_url || ''), /^https:\/\/accounts\.google\.com\//);
+  } finally {
+    handleAntigravityOAuthCleanup({}, mockRes());
+    if (previousSecret === undefined) {
+      delete process.env.ANTIGRAVITY_GOOGLE_CLIENT_SECRET;
+    } else {
+      process.env.ANTIGRAVITY_GOOGLE_CLIENT_SECRET = previousSecret;
+    }
+  }
 });
 
 const { handleGetConfigFile } = await import('../../src/routes/config-files-route.js');

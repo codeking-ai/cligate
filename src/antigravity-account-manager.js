@@ -117,6 +117,36 @@ function summarizeAccount(account, activeAccount) {
     };
 }
 
+function normalizeOAuthClientConfig(config) {
+    if (!config || typeof config !== 'object' || Array.isArray(config)) return null;
+    const clientId = typeof config.clientId === 'string' ? config.clientId : '';
+    const clientSecret = typeof config.clientSecret === 'string' ? config.clientSecret : '';
+    const key = typeof config.key === 'string'
+        ? config.key
+        : (typeof config.oauthClientKey === 'string' ? config.oauthClientKey : '');
+    if (!clientId && !clientSecret && !key) return null;
+    return {
+        ...(key ? { key } : {}),
+        ...(clientId ? { clientId } : {}),
+        ...(clientSecret ? { clientSecret } : {})
+    };
+}
+
+function resolveStoredOAuthClient(account) {
+    const normalizedConfig = normalizeOAuthClientConfig(
+        account?.oauthClientConfig
+        || account?.oauth_client_config
+    );
+    if (normalizedConfig) {
+        if (!normalizedConfig.key && account?.oauthClientKey) {
+            return { ...normalizedConfig, key: account.oauthClientKey };
+        }
+        return normalizedConfig;
+    }
+    if (account?.oauthClientKey) return account.oauthClientKey;
+    return null;
+}
+
 export function listAccounts() {
     const data = loadAccounts();
     return {
@@ -198,7 +228,7 @@ export async function refreshAccountToken(email) {
     }
 
     try {
-        const refreshed = await refreshAntigravityAccessToken(existing.refreshToken, existing.oauthClientKey);
+        const refreshed = await refreshAntigravityAccessToken(existing.refreshToken, resolveStoredOAuthClient(existing));
         const profile = await fetchGoogleUserInfo(refreshed.accessToken);
         const project = await fetchProjectId(refreshed.accessToken);
         const models = await fetchAvailableModels(refreshed.accessToken, project.projectId);
@@ -212,6 +242,7 @@ export async function refreshAccountToken(email) {
             refreshToken: refreshed.refreshToken,
             expiresAt: refreshed.expiresAt,
             oauthClientKey: refreshed.oauthClientKey || existing.oauthClientKey,
+            oauthClientConfig: normalizeOAuthClientConfig(refreshed.oauthClientConfig) || normalizeOAuthClientConfig(existing.oauthClientConfig),
             projectId: project.projectId,
             subscriptionType: project.subscriptionType || existing.subscriptionType || 'unknown',
             models,
@@ -268,20 +299,23 @@ export function ensureAccountsPersist() {
     loadAccounts();
 }
 
-export async function addManualAccount({ refreshToken, accessToken, expiresAt, email, displayName, oauthClientKey }) {
+export async function addManualAccount({ refreshToken, accessToken, expiresAt, email, displayName, oauthClientKey, oauthClientConfig }) {
     if (!refreshToken && !accessToken) {
         throw new Error('refreshToken or accessToken is required');
     }
+
+    const normalizedClientConfig = normalizeOAuthClientConfig(oauthClientConfig);
 
     let tokenState = {
         accessToken: accessToken || null,
         refreshToken: refreshToken || null,
         expiresAt: expiresAt || null,
-        oauthClientKey: oauthClientKey || null
+        oauthClientKey: oauthClientKey || normalizedClientConfig?.key || null,
+        oauthClientConfig: normalizedClientConfig
     };
 
     if (!tokenState.accessToken && tokenState.refreshToken) {
-        tokenState = await refreshAntigravityAccessToken(tokenState.refreshToken, oauthClientKey);
+        tokenState = await refreshAntigravityAccessToken(tokenState.refreshToken, normalizedClientConfig || oauthClientKey || null);
     }
 
     const profile = await fetchGoogleUserInfo(tokenState.accessToken);
@@ -300,7 +334,8 @@ export async function addManualAccount({ refreshToken, accessToken, expiresAt, e
         accessToken: tokenState.accessToken,
         refreshToken: tokenState.refreshToken || refreshToken || null,
         expiresAt: tokenState.expiresAt || (Date.now() + 55 * 60 * 1000),
-        oauthClientKey: tokenState.oauthClientKey || oauthClientKey || null,
+        oauthClientKey: tokenState.oauthClientKey || oauthClientKey || normalizedClientConfig?.key || null,
+        oauthClientConfig: normalizeOAuthClientConfig(tokenState.oauthClientConfig) || normalizedClientConfig,
         projectId: project.projectId,
         subscriptionType: project.subscriptionType || 'unknown',
         models,
@@ -315,10 +350,11 @@ export async function addManualAccount({ refreshToken, accessToken, expiresAt, e
     };
 }
 
-export async function addOAuthAccount({ accessToken, refreshToken, expiresIn, oauthClientKey }) {
+export async function addOAuthAccount({ accessToken, refreshToken, expiresIn, oauthClientKey, oauthClientConfig }) {
     const profile = await fetchGoogleUserInfo(accessToken);
     const project = await fetchProjectId(accessToken);
     const models = await fetchAvailableModels(accessToken, project.projectId);
+    const normalizedClientConfig = normalizeOAuthClientConfig(oauthClientConfig);
 
     if (!profile.email) {
         throw new Error('Unable to resolve account email from Google profile');
@@ -331,7 +367,8 @@ export async function addOAuthAccount({ accessToken, refreshToken, expiresIn, oa
         accessToken,
         refreshToken,
         expiresAt: Date.now() + ((expiresIn || 3600) * 1000),
-        oauthClientKey: oauthClientKey || null,
+        oauthClientKey: oauthClientKey || normalizedClientConfig?.key || null,
+        oauthClientConfig: normalizedClientConfig,
         projectId: project.projectId,
         subscriptionType: project.subscriptionType || 'unknown',
         models,
@@ -362,7 +399,8 @@ export async function importAccount(payload = {}) {
         expiresAt: source.expiresAt || source.expires_at || null,
         email: source.email || null,
         displayName: source.displayName || source.name || null,
-        oauthClientKey: source.oauthClientKey || source.oauth_client_key || null
+        oauthClientKey: source.oauthClientKey || source.oauth_client_key || null,
+        oauthClientConfig: source.oauthClientConfig || source.oauth_client_config || null
     });
 }
 

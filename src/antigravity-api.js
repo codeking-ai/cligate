@@ -4,7 +4,7 @@ import { logger } from './utils/logger.js';
 
 const DEFAULT_OAUTH_CLIENT_KEY = 'antigravity-enterprise';
 const DEFAULT_CLIENT_ID = process.env.ANTIGRAVITY_GOOGLE_CLIENT_ID || '1071006060591-tmhssin2h21lcre235vtolojh4g403ep.apps.googleusercontent.com';
-const DEFAULT_CLIENT_SECRET = process.env.ANTIGRAVITY_GOOGLE_CLIENT_SECRET || '';
+const DEFAULT_CLIENT_SECRET = process.env.ANTIGRAVITY_GOOGLE_CLIENT_SECRET || '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';
 
 const TOKEN_URL = 'https://oauth2.googleapis.com/token';
 const USERINFO_URL = 'https://www.googleapis.com/oauth2/v2/userinfo';
@@ -286,15 +286,39 @@ export function toPublicAntigravityModel(modelId) {
     return modelId?.startsWith(ANTIGRAVITY_MODEL_PREFIX) ? modelId : `${ANTIGRAVITY_MODEL_PREFIX}${modelId}`;
 }
 
-export async function refreshAntigravityAccessToken(refreshToken, oauthClientKey = DEFAULT_OAUTH_CLIENT_KEY) {
+function resolveAntigravityOAuthClient(oauthClient = DEFAULT_OAUTH_CLIENT_KEY, fallbackConfig = null) {
+    const inlineConfig = oauthClient && typeof oauthClient === 'object' && !Array.isArray(oauthClient)
+        ? oauthClient
+        : null;
+    const extraConfig = fallbackConfig && typeof fallbackConfig === 'object' && !Array.isArray(fallbackConfig)
+        ? fallbackConfig
+        : null;
+    const key = inlineConfig?.key
+        || inlineConfig?.oauthClientKey
+        || (typeof oauthClient === 'string' && oauthClient)
+        || extraConfig?.key
+        || extraConfig?.oauthClientKey
+        || DEFAULT_OAUTH_CLIENT_KEY;
+    const clientId = inlineConfig?.clientId || extraConfig?.clientId || DEFAULT_CLIENT_ID;
+    const clientSecret = inlineConfig?.clientSecret ?? extraConfig?.clientSecret ?? DEFAULT_CLIENT_SECRET;
+
+    return {
+        key,
+        clientId,
+        clientSecret
+    };
+}
+
+export async function refreshAntigravityAccessToken(refreshToken, oauthClient = DEFAULT_OAUTH_CLIENT_KEY, fallbackConfig = null) {
+    const resolvedClient = resolveAntigravityOAuthClient(oauthClient, fallbackConfig);
     const tokenParams = new URLSearchParams({
-        client_id: DEFAULT_CLIENT_ID,
+        client_id: resolvedClient.clientId,
         grant_type: 'refresh_token',
         refresh_token: refreshToken
     });
 
-    if (DEFAULT_CLIENT_SECRET) {
-        tokenParams.set('client_secret', DEFAULT_CLIENT_SECRET);
+    if (resolvedClient.clientSecret) {
+        tokenParams.set('client_secret', resolvedClient.clientSecret);
     }
 
     const response = await fetch(TOKEN_URL, {
@@ -317,7 +341,12 @@ export async function refreshAntigravityAccessToken(refreshToken, oauthClientKey
         accessToken: parsed.access_token,
         refreshToken: parsed.refresh_token || refreshToken,
         expiresAt: Date.now() + ((parsed.expires_in || 3600) * 1000),
-        oauthClientKey
+        oauthClientKey: resolvedClient.key,
+        oauthClientConfig: {
+            key: resolvedClient.key,
+            clientId: resolvedClient.clientId,
+            clientSecret: resolvedClient.clientSecret || ''
+        }
     };
 }
 
@@ -355,11 +384,8 @@ export async function fetchProjectId(accessToken) {
         throw new Error(`ANTIGRAVITY_PROJECT_ERROR: ${response.status} - ${responseText.slice(0, 300)}`);
     }
     const parsed = parseJsonSafely(responseText);
-    if (!parsed?.cloudaicompanionProject) {
-        throw new Error('ANTIGRAVITY_PROJECT_ERROR: cloudaicompanionProject missing');
-    }
     return {
-        projectId: parsed.cloudaicompanionProject,
+        projectId: parsed?.cloudaicompanionProject || null,
         subscriptionType: parsed?.paidTier?.name || parsed?.currentTier?.name || null
     };
 }

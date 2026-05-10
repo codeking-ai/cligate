@@ -14,8 +14,8 @@ import {
 } from '../antigravity-account-manager.js';
 import {
     GOOGLE_OAUTH_CONFIG,
-    hasAntigravityClientSecret,
     generateState,
+    generateCodeVerifier,
     getAuthorizationUrl,
     startCallbackServer,
     exchangeCodeForTokens,
@@ -24,6 +24,7 @@ import {
 import { logger } from '../utils/logger.js';
 
 const activeCallbackServers = new Map();
+const activePkceVerifiers = new Map();
 
 export function handleListAntigravityAccounts(req, res) {
     res.json(listAccounts());
@@ -54,28 +55,22 @@ export function handleAntigravityOAuthCleanup(req, res) {
         try { server.abort ? server.abort() : server.close(); } catch { /* ignore */ }
     }
     activeCallbackServers.clear();
+    activePkceVerifiers.clear();
     res.json({ success: true, message: 'Antigravity OAuth servers cleaned up' });
 }
 
 export async function handleAddAntigravityAccount(req, res) {
-    if (!hasAntigravityClientSecret()) {
-        return res.status(400).json({
-            success: false,
-            error: 'ANTIGRAVITY_GOOGLE_CLIENT_SECRET is required before starting Antigravity OAuth.',
-            hint: 'Set ANTIGRAVITY_GOOGLE_CLIENT_SECRET in the environment or use manual account import instead.',
-            status: 'misconfigured'
-        });
-    }
-
     const { port } = req.body || {};
     const callbackPort = port || GOOGLE_OAUTH_CONFIG.callbackPort;
     const state = generateState();
+    const codeVerifier = generateCodeVerifier();
 
     if (activeCallbackServers.has(callbackPort)) {
         const existing = activeCallbackServers.get(callbackPort);
         if (existing.abort) existing.abort();
         activeCallbackServers.delete(callbackPort);
     }
+    activePkceVerifiers.delete(state);
 
     let serverResult;
     try {
@@ -89,19 +84,23 @@ export async function handleAddAntigravityAccount(req, res) {
     }
 
     activeCallbackServers.set(callbackPort, serverResult);
-    const oauthUrl = getAuthorizationUrl(state, callbackPort);
+    activePkceVerifiers.set(state, codeVerifier);
+    const oauthUrl = getAuthorizationUrl(state, callbackPort, codeVerifier);
 
     serverResult.promise
         .then(async (code) => {
             activeCallbackServers.delete(callbackPort);
             if (!code) return;
             const actualPort = serverResult.getPort ? serverResult.getPort() : callbackPort;
-            const tokens = await exchangeCodeForTokens(code, actualPort);
+            const verifier = activePkceVerifiers.get(state);
+            activePkceVerifiers.delete(state);
+            const tokens = await exchangeCodeForTokens(code, actualPort, verifier);
             const result = await addOAuthAccount(tokens);
             logger.info(`Added antigravity account via OAuth: ${result.account?.email || 'unknown'}`);
         })
         .catch((err) => {
             activeCallbackServers.delete(callbackPort);
+            activePkceVerifiers.delete(state);
             logger.error(`Antigravity OAuth token exchange failed: ${err.message}`);
         });
 
@@ -109,23 +108,24 @@ export async function handleAddAntigravityAccount(req, res) {
         status: 'oauth_url',
         oauth_url: oauthUrl,
         state,
-        callback_port: callbackPort
+        callback_port: callbackPort,
+        pkce: true
     });
 }
 
 export async function handleAddAntigravityAccountManual(req, res) {
     try {
-        const { code, port } = req.body || {};
+        const { code, port, state } = req.body || {};
         if (code) {
-            if (!hasAntigravityClientSecret()) {
-                return res.status(400).json({
-                    success: false,
-                    error: 'ANTIGRAVITY_GOOGLE_CLIENT_SECRET is required before exchanging an Antigravity OAuth code.',
-                    hint: 'Set ANTIGRAVITY_GOOGLE_CLIENT_SECRET in the environment or import a refresh token manually.'
-                });
-            }
             const extracted = extractCodeFromInput(code);
-            const tokens = await exchangeCodeForTokens(extracted.code, port || GOOGLE_OAUTH_CONFIG.callbackPort);
+            const resolvedState = extracted.state || state || null;
+            const verifier = resolvedState ? activePkceVerifiers.get(resolvedState) : null;
+            if (resolvedState) activePkceVerifiers.delete(resolvedState);
+            const tokens = await exchangeCodeForTokens(
+                extracted.code,
+                port || GOOGLE_OAUTH_CONFIG.callbackPort,
+                verifier
+            );
             const result = await addOAuthAccount(tokens);
             logger.info(`Added antigravity account via manual OAuth: ${result.account?.email || 'unknown'}`);
             return res.json(result);

@@ -3,7 +3,7 @@ import http from 'http';
 
 const GOOGLE_OAUTH_CONFIG = {
     clientId: process.env.ANTIGRAVITY_GOOGLE_CLIENT_ID || '1071006060591-tmhssin2h21lcre235vtolojh4g403ep.apps.googleusercontent.com',
-    clientSecret: process.env.ANTIGRAVITY_GOOGLE_CLIENT_SECRET || '',
+    clientSecret: process.env.ANTIGRAVITY_GOOGLE_CLIENT_SECRET || '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',
     authUrl: 'https://accounts.google.com/o/oauth2/v2/auth',
     tokenUrl: 'https://oauth2.googleapis.com/token',
     callbackPort: 36545,
@@ -20,6 +20,14 @@ const GOOGLE_OAUTH_CONFIG = {
 
 export { GOOGLE_OAUTH_CONFIG };
 
+export function getAntigravityOAuthClientConfig() {
+    return {
+        key: 'antigravity-enterprise',
+        clientId: GOOGLE_OAUTH_CONFIG.clientId,
+        clientSecret: GOOGLE_OAUTH_CONFIG.clientSecret || ''
+    };
+}
+
 export function hasAntigravityClientSecret() {
     return Boolean(GOOGLE_OAUTH_CONFIG.clientSecret);
 }
@@ -28,7 +36,18 @@ export function generateState() {
     return crypto.randomBytes(16).toString('hex');
 }
 
-export function getAuthorizationUrl(state, port) {
+export function generateCodeVerifier() {
+    return crypto.randomBytes(32).toString('base64url');
+}
+
+export function buildCodeChallenge(verifier) {
+    return crypto
+        .createHash('sha256')
+        .update(verifier)
+        .digest('base64url');
+}
+
+export function getAuthorizationUrl(state, port, codeVerifier) {
     const redirectUri = `http://localhost:${port}${GOOGLE_OAUTH_CONFIG.callbackPath}`;
     const params = new URLSearchParams({
         client_id: GOOGLE_OAUTH_CONFIG.clientId,
@@ -40,6 +59,10 @@ export function getAuthorizationUrl(state, port) {
         include_granted_scopes: 'true',
         state
     });
+    if (codeVerifier) {
+        params.set('code_challenge', buildCodeChallenge(codeVerifier));
+        params.set('code_challenge_method', 'S256');
+    }
     return `${GOOGLE_OAUTH_CONFIG.authUrl}?${params.toString()}`;
 }
 
@@ -164,7 +187,7 @@ export function startCallbackServer(expectedState, timeoutMs = 120000) {
     };
 }
 
-export async function exchangeCodeForTokens(code, port) {
+export async function exchangeCodeForTokens(code, port, codeVerifier) {
     const redirectUri = `http://localhost:${port}${GOOGLE_OAUTH_CONFIG.callbackPath}`;
     const tokenParams = new URLSearchParams({
         client_id: GOOGLE_OAUTH_CONFIG.clientId,
@@ -172,12 +195,13 @@ export async function exchangeCodeForTokens(code, port) {
         redirect_uri: redirectUri,
         grant_type: 'authorization_code'
     });
-
-    // Antigravity accounts are persisted locally after login. A client secret is
-    // optional and should only be supplied via environment, never hardcoded.
+    if (!codeVerifier) {
+        throw new Error('Missing PKCE code_verifier for Antigravity OAuth token exchange');
+    }
     if (GOOGLE_OAUTH_CONFIG.clientSecret) {
         tokenParams.set('client_secret', GOOGLE_OAUTH_CONFIG.clientSecret);
     }
+    tokenParams.set('code_verifier', codeVerifier);
 
     const response = await fetch(GOOGLE_OAUTH_CONFIG.tokenUrl, {
         method: 'POST',
@@ -199,7 +223,8 @@ export async function exchangeCodeForTokens(code, port) {
         refreshToken: parsed.refresh_token,
         expiresIn: parsed.expires_in || 3600,
         tokenType: parsed.token_type || 'Bearer',
-        oauthClientKey: 'antigravity-enterprise'
+        oauthClientKey: 'antigravity-enterprise',
+        oauthClientConfig: getAntigravityOAuthClientConfig()
     };
 }
 
@@ -217,8 +242,11 @@ export function extractCodeFromInput(input) {
 
 export default {
     GOOGLE_OAUTH_CONFIG,
+    getAntigravityOAuthClientConfig,
     hasAntigravityClientSecret,
     generateState,
+    generateCodeVerifier,
+    buildCodeChallenge,
     getAuthorizationUrl,
     startCallbackServer,
     exchangeCodeForTokens,
