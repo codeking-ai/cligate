@@ -126,6 +126,54 @@ test('addOAuthAccount tolerates missing cloudaicompanionProject and still persis
   }
 });
 
+test('ensureAccountProjectId falls back when loadCodeAssist does not return cloudaicompanionProject', async () => {
+  const configDir = mkdtempSync(join(tmpdir(), 'cligate-antigravity-fallback-project-'));
+  process.env.CLIGATE_CONFIG_DIR = configDir;
+
+  global.fetch = async (url) => {
+    const target = String(url);
+
+    if (target.includes('/userinfo')) {
+      return new Response(JSON.stringify({
+        email: 'fallback@example.com',
+        name: 'Fallback User'
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    }
+
+    if (target.includes(':loadCodeAssist')) {
+      return new Response(JSON.stringify({
+        currentTier: { name: 'free' }
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    }
+
+    if (target.includes(':fetchAvailableModels')) {
+      return new Response(JSON.stringify({
+        models: {
+          'gemini-2.5-pro': { displayName: 'Gemini 2.5 Pro' }
+        }
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    }
+
+    throw new Error(`Unexpected fetch: ${target}`);
+  };
+
+  try {
+    const manager = await importFreshAccountManager();
+    await manager.addOAuthAccount({
+      accessToken: 'access-token-fallback',
+      refreshToken: 'refresh-token-fallback',
+      expiresIn: 3600
+    });
+
+    const projectId = await manager.ensureAccountProjectId('fallback@example.com');
+    assert.equal(projectId, 'bamboo-precept-lgxtn');
+    assert.equal(manager.getAccount('fallback@example.com').projectId, 'bamboo-precept-lgxtn');
+  } finally {
+    global.fetch = originalFetch;
+    rmSync(configDir, { recursive: true, force: true });
+  }
+});
+
 test('refreshAccountToken uses stored oauth client config when refreshing antigravity tokens', async () => {
   const configDir = mkdtempSync(join(tmpdir(), 'cligate-antigravity-refresh-'));
   process.env.CLIGATE_CONFIG_DIR = configDir;

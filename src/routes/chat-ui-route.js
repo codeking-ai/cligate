@@ -4,6 +4,13 @@ import {
   refreshAccountToken as refreshClaudeAccountToken,
   getAccount as getClaudeAccount
 } from '../claude-account-manager.js';
+import {
+  listAccounts as listAntigravityAccounts,
+  getAccount as getAntigravityAccount,
+  refreshAccountToken as refreshAntigravityAccountToken,
+  ensureAccountProjectId as ensureAntigravityAccountProjectId
+} from '../antigravity-account-manager.js';
+import { sendAntigravityMessage, toPublicAntigravityModel } from '../antigravity-api.js';
 import { recordClaudeRuntimeObservation } from '../claude-usage.js';
 import { getCredentialsForAccount } from '../middleware/credentials.js';
 import { sendMessage, sendMessageStream } from '../direct-api.js';
@@ -71,8 +78,27 @@ export async function handleListChatSources(_req, res) {
       }
     }));
 
+  const antigravityData = listAntigravityAccounts();
+  const antigravitySources = (antigravityData.accounts || [])
+    .filter((account) => account.enabled !== false)
+    .map((account) => ({
+      id: `antigravity:${account.email}`,
+      kind: 'antigravity-account',
+      label: account.displayName || account.email,
+      description: `Antigravity account - ${account.email}`,
+      meta: {
+        email: account.email,
+        subscriptionType: account.subscriptionType || 'unknown',
+        isActive: account.email === antigravityData.activeAccount,
+        providerType: 'gemini',
+        models: (account.models || [])
+          .map((model) => model.publicId || toPublicAntigravityModel(model.id))
+          .filter(Boolean)
+      }
+    }));
+
   res.json({
-    sources: [...chatgptSources, ...claudeSources, ...apiKeySources]
+    sources: [...chatgptSources, ...claudeSources, ...antigravitySources, ...apiKeySources]
   });
 }
 
@@ -230,6 +256,58 @@ export async function handleChatWithSource(req, res) {
         assistant: assistantMeta,
         reply: normalizeAnthropicResponse(response, requestedModel, { citations })
       });
+    }
+
+    if (sourceId.startsWith('antigravity:')) {
+      const email = sourceId.slice('antigravity:'.length);
+      let account = getAntigravityAccount(email);
+      if (!account?.accessToken) {
+        return res.status(404).json({ success: false, error: `Antigravity account not available: ${email}` });
+      }
+      await ensureAntigravityAccountProjectId(email);
+      account = getAntigravityAccount(email) || account;
+
+      try {
+        const response = await sendAntigravityMessage(buildAnthropicRequest({
+          model: requestedModel,
+          messages: outboundMessages,
+          temperature
+        }), account, { modelOverride: requestedModel });
+        return res.json({
+          success: true,
+          source: {
+            id: sourceId,
+            kind: 'antigravity-account',
+            label: account.displayName || email
+          },
+          model: requestedModel,
+          mappedModel: response.model || requestedModel,
+          assistant: assistantMeta,
+          reply: normalizeAnthropicResponse(response, requestedModel, { citations })
+        });
+      } catch (error) {
+        if (!error.message?.startsWith('AUTH_EXPIRED')) throw error;
+        const refreshResult = await refreshAntigravityAccountToken(email);
+        if (!refreshResult.success) throw error;
+        account = getAntigravityAccount(email) || account;
+        const response = await sendAntigravityMessage(buildAnthropicRequest({
+          model: requestedModel,
+          messages: outboundMessages,
+          temperature
+        }), account, { modelOverride: requestedModel });
+        return res.json({
+          success: true,
+          source: {
+            id: sourceId,
+            kind: 'antigravity-account',
+            label: account.displayName || email
+          },
+          model: requestedModel,
+          mappedModel: response.model || requestedModel,
+          assistant: assistantMeta,
+          reply: normalizeAnthropicResponse(response, requestedModel, { citations })
+        });
+      }
     }
 
     if (sourceId.startsWith('apikey:')) {
@@ -468,6 +546,66 @@ export async function handleStreamChatWithSource(req, res) {
           mappedModel: upstreamModel,
           citations
         });
+      }
+    }
+
+    if (sourceId.startsWith('antigravity:')) {
+      const email = sourceId.slice('antigravity:'.length);
+      let account = getAntigravityAccount(email);
+      if (!account?.accessToken) {
+        writeSse(res, { type: 'error', error: `Antigravity account not available: ${email}` });
+        return res.end();
+      }
+      await ensureAntigravityAccountProjectId(email);
+      account = getAntigravityAccount(email) || account;
+
+      writeSse(res, {
+        type: 'start',
+        source: { id: sourceId, kind: 'antigravity-account', label: account.displayName || email },
+        model: requestedModel,
+        assistant: assistantMeta
+      });
+
+      try {
+        const response = await sendAntigravityMessage(buildAnthropicRequest({
+          model: requestedModel,
+          messages: outboundMessages,
+          temperature
+        }), account, { modelOverride: requestedModel });
+        const reply = normalizeAnthropicResponse(response, requestedModel, { citations });
+        if (reply.content) {
+          writeSse(res, { type: 'delta', text: reply.content });
+        }
+        writeSse(res, {
+          type: 'done',
+          model: requestedModel,
+          mappedModel: response.model || requestedModel,
+          usage: reply.usage || null,
+          citations: reply.citations || []
+        });
+        return res.end();
+      } catch (error) {
+        if (!error.message?.startsWith('AUTH_EXPIRED')) throw error;
+        const refreshResult = await refreshAntigravityAccountToken(email);
+        if (!refreshResult.success) throw error;
+        account = getAntigravityAccount(email) || account;
+        const response = await sendAntigravityMessage(buildAnthropicRequest({
+          model: requestedModel,
+          messages: outboundMessages,
+          temperature
+        }), account, { modelOverride: requestedModel });
+        const reply = normalizeAnthropicResponse(response, requestedModel, { citations });
+        if (reply.content) {
+          writeSse(res, { type: 'delta', text: reply.content });
+        }
+        writeSse(res, {
+          type: 'done',
+          model: requestedModel,
+          mappedModel: response.model || requestedModel,
+          usage: reply.usage || null,
+          citations: reply.citations || []
+        });
+        return res.end();
       }
     }
 

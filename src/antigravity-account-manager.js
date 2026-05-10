@@ -23,6 +23,7 @@ let autoRefreshIntervalId = null;
 const TOKEN_CHECK_INTERVAL_MS = 10 * 60 * 1000;
 const TOKEN_EXPIRY_BUFFER_MS = 5 * 60 * 1000;
 let availableAccountsRotationCursor = 0;
+const DEFAULT_FALLBACK_PROJECT_ID = 'bamboo-precept-lgxtn';
 
 function ensureConfigDir() {
     if (!existsSync(CONFIG_DIR)) {
@@ -254,6 +255,45 @@ export async function refreshAccountToken(email) {
     } catch (error) {
         return { success: false, message: error.message };
     }
+}
+
+export async function ensureAccountProjectId(email) {
+    const existing = getAccount(email);
+    if (!existing?.accessToken) {
+        throw new Error(`Antigravity account not available: ${email}`);
+    }
+
+    const normalizedExisting = typeof existing.projectId === 'string' && existing.projectId.trim()
+        ? existing.projectId.trim()
+        : null;
+    if (normalizedExisting) {
+        return normalizedExisting;
+    }
+
+    let resolvedProjectId = null;
+    try {
+        const project = await fetchProjectId(existing.accessToken);
+        resolvedProjectId = project.projectId || null;
+        upsertAccountRecord({
+            ...existing,
+            projectId: resolvedProjectId,
+            subscriptionType: project.subscriptionType || existing.subscriptionType || 'unknown',
+            lastUsed: new Date().toISOString()
+        });
+    } catch {
+        // Ignore and fall back to shared project id below.
+    }
+
+    if (resolvedProjectId) {
+        return resolvedProjectId;
+    }
+
+    upsertAccountRecord({
+        ...existing,
+        projectId: DEFAULT_FALLBACK_PROJECT_ID,
+        lastUsed: new Date().toISOString()
+    });
+    return DEFAULT_FALLBACK_PROJECT_ID;
 }
 
 export async function refreshAllAccounts() {
@@ -529,6 +569,7 @@ export default {
     listAccounts,
     getStatus,
     refreshAccountToken,
+    ensureAccountProjectId,
     refreshAllAccounts,
     addManualAccount,
     addOAuthAccount,
