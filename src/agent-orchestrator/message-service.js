@@ -14,6 +14,8 @@ import supervisorTaskStore from './supervisor-task-store.js';
 import taskExecutionService, { TaskExecutionService } from './task-execution-service.js';
 import { listSupervisorTaskRecords } from './supervisor-task-memory.js';
 import stateCoordinator from '../assistant-core/domain/state-coordinator.js';
+import agentChannelConversationStore from '../agent-channels/conversation-store.js';
+import agentChannelDeliverySender from '../agent-channels/delivery-sender.js';
 
 function parseLeadingCommand(input) {
   const text = String(input || '').trim();
@@ -891,7 +893,9 @@ export class AgentOrchestratorMessageService {
     taskViewService = null,
     memoryService = null,
     policyService = null,
-    stateCoordinator: stateCoordinatorArg = stateCoordinator
+    stateCoordinator: stateCoordinatorArg = stateCoordinator,
+    conversationStore = agentChannelConversationStore,
+    deliverySender = agentChannelDeliverySender
   } = {}) {
     this.runtimeSessionManager = runtimeSessionManager;
     this.approvalPolicyStore = approvalPolicyStore;
@@ -920,6 +924,8 @@ export class AgentOrchestratorMessageService {
           approvalPolicyStore: this.approvalPolicyStore
         });
     this.stateCoordinator = stateCoordinatorArg;
+    this.conversationStore = conversationStore;
+    this.deliverySender = deliverySender;
   }
 
   syncConversationAssistantWorkingSet({
@@ -1172,6 +1178,27 @@ export class AgentOrchestratorMessageService {
     return this.stateCoordinator?.createScheduledTask?.(input) || null;
   }
 
+  updateScheduledTask(input = {}) {
+    return this.stateCoordinator?.updateScheduledTask?.(input) || null;
+  }
+
+  cancelScheduledTask(input = {}) {
+    return this.stateCoordinator?.cancelScheduledTask?.(input) || null;
+  }
+
+  listScheduledTasks({
+    conversationId = '',
+    includeCompleted = false,
+    limit = 50
+  } = {}) {
+    const store = this.stateCoordinator?.scheduledTaskStore;
+    if (!store) return [];
+    const states = includeCompleted
+      ? ['scheduled', 'running', 'paused', 'completed', 'cancelled', 'failed']
+      : ['scheduled', 'running', 'paused'];
+    return store.listByConversation(String(conversationId || '').trim(), { limit, states });
+  }
+
   async runScheduledTask(task = null) {
     const scheduledTask = task && typeof task === 'object'
       ? task
@@ -1183,7 +1210,68 @@ export class AgentOrchestratorMessageService {
     const payload = scheduledTask.payload && typeof scheduledTask.payload === 'object'
       ? scheduledTask.payload
       : {};
-    const action = String(payload.action || 'start').trim();
+    // Default to "notify_user" for plain reminders. Older callers that
+    // already set action='start'/'continue'/'status' still go through the
+    // runtime-spawn paths below.
+    const action = String(payload.action || (scheduledTask.kind === 'reminder' ? 'notify_user' : 'start')).trim();
+
+    if (action === 'notify_user') {
+      const conversationId = String(
+        payload.conversationId
+        || scheduledTask?.metadata?.conversationId
+        || ''
+      ).trim();
+      if (!conversationId) {
+        throw new Error('notify_user scheduled task requires payload.conversationId');
+      }
+      const conversation = this.conversationStore?.get?.(conversationId) || null;
+      if (!conversation?.id) {
+        throw new Error(`notify_user target conversation ${conversationId} not found`);
+      }
+      const isZh = /[㐀-鿿]/.test(String(payload.message || scheduledTask.title || ''));
+      const headerLabel = isZh ? '⏰ 定时提醒' : '⏰ Reminder';
+      const body = String(payload.message || scheduledTask.title || (isZh ? '到时间了' : 'Reminder due')).trim();
+      const text = body.startsWith(headerLabel) ? body : `${headerLabel}\n\n${body}`;
+      const deliverySender = this.deliverySender;
+      if (!deliverySender?.send) {
+        throw new Error('delivery sender is unavailable; cannot deliver scheduled reminder');
+      }
+      const delivery = await deliverySender.send({
+        conversation,
+        channel: conversation.channel,
+        sessionId: null,
+        payload: {
+          text,
+          kind: 'scheduled_reminder',
+          sourceType: 'scheduled_task',
+          scheduledTaskId: scheduledTask.id
+        },
+        message: {
+          text
+        }
+      });
+      return {
+        action,
+        scheduledTaskId: scheduledTask.id,
+        delivery,
+        summary: isZh
+          ? `已向用户发送提醒: ${body.slice(0, 80)}`
+          : `Reminder delivered to user: ${body.slice(0, 80)}`,
+        result: text
+      };
+    }
+
+    // Safety guard for malformed legacy records: an "Untitled Scheduled Task"
+    // with no payload and no meaningful input should not spin up a codex
+    // session. Refuse so the scheduler marks it failed and stops retrying.
+    const title = String(scheduledTask.title || '').trim();
+    const hasUsableInput = Boolean(
+      (payload && (payload.message || payload.input || payload.task))
+      || (title && title !== 'Untitled Scheduled Task')
+    );
+    if (!hasUsableInput) {
+      throw new Error('scheduled task has no usable title/payload; refusing to spawn an empty runtime');
+    }
 
     if (action === 'continue') {
       const session = await this.continueRuntimeTask({

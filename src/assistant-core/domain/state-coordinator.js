@@ -16,6 +16,10 @@ import {
   toText
 } from './models.js';
 import { buildTaskActivitySnapshot } from './task-activity-snapshot.js';
+import {
+  computeNextOccurrenceIso,
+  resolveOnceTriggerMs
+} from '../schedule-helpers.js';
 
 function pickIdleArchiveDays(projectKind) {
   return projectKind === 'misc' ? 30 : 180;
@@ -781,13 +785,30 @@ export class StateCoordinator {
     projectId = '',
     taskId = '',
     executionId = '',
-    kind = 'check_in',
+    kind = 'reminder',
     title = '',
     schedule = {},
     payload = null,
     source = 'system',
-    metadata = {}
+    metadata = {},
+    // Caller may pre-compute nextRunAt (used by the 'once' path which has
+    // delayMinutes/delaySeconds semantics that the model-layer normalizer
+    // doesn't see). For recurring schedules we derive nextRunAt from the
+    // declarative fields right here, so the scheduler can fire as soon as
+    // the row is persisted.
+    nextRunAt = '',
+    now = Date.now()
   } = {}) {
+    let resolvedNextRunAt = toText(nextRunAt);
+    if (!resolvedNextRunAt) {
+      const recurrence = toText(schedule?.recurrence).toLowerCase();
+      if (recurrence === 'once' || !recurrence) {
+        const onceMs = resolveOnceTriggerMs(schedule || {}, { now });
+        resolvedNextRunAt = new Date(onceMs).toISOString();
+      } else {
+        resolvedNextRunAt = computeNextOccurrenceIso(schedule || {}, { now });
+      }
+    }
     const scheduledTask = this.scheduledTaskStore.create({
       personId,
       projectId,
@@ -798,7 +819,8 @@ export class StateCoordinator {
       schedule,
       payload,
       source,
-      metadata
+      metadata,
+      nextRunAt: resolvedNextRunAt
     });
     this.recordEpisode({
       kind: 'scheduled_task.created',
@@ -810,14 +832,94 @@ export class StateCoordinator {
         scheduledTaskId: scheduledTask.id,
         taskKind: scheduledTask.kind,
         title: scheduledTask.title,
-        triggerAt: scheduledTask.schedule?.triggerAt || '',
-        scheduleType: scheduledTask.schedule?.type || ''
+        nextRunAt: scheduledTask.nextRunAt,
+        recurrence: scheduledTask.schedule?.recurrence || ''
       },
       metadata: {
         source: 'state_coordinator_scheduled_task'
       }
     });
     return scheduledTask;
+  }
+
+  updateScheduledTask({
+    id = '',
+    title,
+    schedule,
+    payload,
+    now = Date.now()
+  } = {}) {
+    const current = this.scheduledTaskStore.get(toText(id));
+    if (!current?.id) {
+      throw new Error('scheduled task not found');
+    }
+    if (['completed', 'cancelled'].includes(current.state)) {
+      throw new Error(`cannot update scheduled task in state "${current.state}"`);
+    }
+
+    const mergedSchedule = schedule && typeof schedule === 'object'
+      ? { ...(current.schedule || {}), ...schedule }
+      : current.schedule;
+
+    let nextRunAt = current.nextRunAt;
+    if (schedule && typeof schedule === 'object') {
+      const recurrence = toText(mergedSchedule.recurrence).toLowerCase();
+      if (recurrence === 'once' || !recurrence) {
+        const onceMs = resolveOnceTriggerMs(mergedSchedule, { now });
+        nextRunAt = new Date(onceMs).toISOString();
+      } else {
+        nextRunAt = computeNextOccurrenceIso(mergedSchedule, { now });
+      }
+    }
+
+    const mergedPayload = payload && typeof payload === 'object'
+      ? { ...(current.payload || {}), ...payload }
+      : current.payload;
+
+    const next = this.scheduledTaskStore.save({
+      ...current,
+      title: title != null ? toText(title) || current.title : current.title,
+      schedule: mergedSchedule,
+      payload: mergedPayload,
+      nextRunAt,
+      state: 'scheduled',
+      lastError: ''
+    });
+    this.recordEpisode({
+      kind: 'scheduled_task.updated',
+      personId: next.personId,
+      projectId: next.projectId,
+      taskId: next.taskId,
+      executionId: next.executionId,
+      payload: {
+        scheduledTaskId: next.id,
+        nextRunAt: next.nextRunAt,
+        recurrence: next.schedule?.recurrence || ''
+      },
+      metadata: {
+        source: 'state_coordinator_scheduled_task'
+      }
+    });
+    return next;
+  }
+
+  cancelScheduledTask({ id = '', reason = '' } = {}) {
+    const current = this.scheduledTaskStore.get(toText(id));
+    if (!current?.id) {
+      throw new Error('scheduled task not found');
+    }
+    if (current.state === 'cancelled') {
+      return current;
+    }
+    return this.updateScheduledTaskState({
+      id: current.id,
+      state: 'cancelled',
+      patch: {
+        nextRunAt: '',
+        lastError: ''
+      },
+      reason: toText(reason) || 'user_cancelled'
+    });
   }
 
   updateScheduledTaskState({

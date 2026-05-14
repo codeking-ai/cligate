@@ -24,7 +24,13 @@ function normalizeStringList(value, { lowercase = false } = {}) {
 
 function normalizeIso(value, fallback = '') {
   const normalized = toText(value);
-  return normalized || fallback || nowIso();
+  if (normalized) return normalized;
+  const normalizedFallback = toText(fallback);
+  if (normalizedFallback) return normalizedFallback;
+  // When BOTH value and fallback are blank, return empty — not nowIso().
+  // Defaulting to "now" silently fabricated triggerAt/nextRunAt values that
+  // made the scheduler think a half-formed task should fire immediately.
+  return '';
 }
 
 function normalizeObject(value) {
@@ -230,13 +236,48 @@ export function createExecution({
   };
 }
 
+function normalizeScheduleRecurrence(value) {
+  const text = toText(value).toLowerCase();
+  return ['once', 'daily', 'weekly', 'monthly', 'yearly'].includes(text) ? text : 'once';
+}
+
+function normalizeScheduleDayOfWeek(value) {
+  // Stored as an array of integers 0..6 (Sunday=0). Empty array means
+  // "not applicable for this recurrence". Validation is enforced by the
+  // tool layer; the model just normalizes whatever it was given.
+  if (value === null || value === undefined || value === '') return [];
+  const list = Array.isArray(value) ? value : [value];
+  const out = new Set();
+  for (const entry of list) {
+    if (typeof entry === 'number' && Number.isInteger(entry) && entry >= 0 && entry <= 7) {
+      out.add(entry === 7 ? 0 : entry);
+    } else {
+      const key = String(entry || '').trim().toLowerCase().slice(0, 3);
+      const mapping = { sun: 0, mon: 1, tue: 2, wed: 3, thu: 4, fri: 5, sat: 6 };
+      if (Object.prototype.hasOwnProperty.call(mapping, key)) {
+        out.add(mapping[key]);
+      }
+    }
+  }
+  return [...out].sort((a, b) => a - b);
+}
+
+function normalizeScheduleNumber(value, { min, max } = {}) {
+  if (value === null || value === undefined || value === '') return null;
+  const n = Number(value);
+  if (!Number.isFinite(n) || !Number.isInteger(n)) return null;
+  if (min !== undefined && n < min) return null;
+  if (max !== undefined && n > max) return null;
+  return n;
+}
+
 export function createScheduledTask({
   id = '',
   personId = '',
   projectId = '',
   taskId = '',
   executionId = '',
-  kind = 'check_in',
+  kind = 'reminder',
   title = '',
   schedule = {},
   payload = null,
@@ -251,6 +292,7 @@ export function createScheduledTask({
   metadata = {}
 } = {}) {
   const now = nowIso();
+  const normalizedSchedule = schedule && typeof schedule === 'object' ? schedule : {};
   return {
     id: toText(id) || crypto.randomUUID(),
     personId: toText(personId),
@@ -259,15 +301,21 @@ export function createScheduledTask({
     executionId: toText(executionId),
     kind: ['check_in', 'reminder', 'run_task', 'retry', 'summarize'].includes(toText(kind))
       ? toText(kind)
-      : 'check_in',
+      : 'reminder',
     title: toText(title) || 'Untitled Scheduled Task',
+    // Declarative schedule: the LLM passes recurrence + wall-clock fields,
+    // the scheduler recomputes the next firing instant from these every
+    // time. We deliberately do NOT store a fixed UTC anchor here — anchors
+    // drift across DST and lead to "fired at the wrong wall-clock time
+    // tomorrow" bugs.
     schedule: {
-      type: ['once', 'daily', 'weekly', 'cron'].includes(toText(schedule?.type))
-        ? toText(schedule.type)
-        : 'once',
-      triggerAt: toText(schedule?.triggerAt),
-      cron: toText(schedule?.cron),
-      timezone: toText(schedule?.timezone) || 'Asia/Shanghai'
+      recurrence: normalizeScheduleRecurrence(normalizedSchedule.recurrence),
+      timezone: toText(normalizedSchedule.timezone) || 'Asia/Shanghai',
+      localTime: toText(normalizedSchedule.localTime),
+      dayOfWeek: normalizeScheduleDayOfWeek(normalizedSchedule.dayOfWeek),
+      dayOfMonth: normalizeScheduleNumber(normalizedSchedule.dayOfMonth, { min: 1, max: 31 }),
+      month: normalizeScheduleNumber(normalizedSchedule.month, { min: 1, max: 12 }),
+      date: toText(normalizedSchedule.date)
     },
     payload: payload && typeof payload === 'object' ? payload : null,
     state: ['scheduled', 'running', 'paused', 'completed', 'cancelled', 'failed'].includes(toText(state))

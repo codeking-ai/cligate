@@ -6,6 +6,12 @@ import assistantClarificationStore from './clarification-store.js';
 import assistantWorkspaceStore from './workspace-store.js';
 import assistantEpisodeViewService, { AssistantEpisodeViewService } from './episode-view-service.js';
 import { resolveReferenceContext } from '../assistant-agent/reference-resolver.js';
+import {
+  resolveOnceTriggerMs,
+  computeNextOccurrenceIso,
+  describeFireMoment,
+  normalizeDayOfWeekList
+} from './schedule-helpers.js';
 
 function normalizeText(value) {
   return String(value || '').trim();
@@ -250,10 +256,409 @@ export function createDefaultAssistantToolRegistry({
     }
   });
 
+  function buildScheduledTaskReply(scheduledTask, { override = '' } = {}) {
+    if (!scheduledTask?.id) return null;
+    const tz = String(scheduledTask?.schedule?.timezone || 'Asia/Shanghai').trim() || 'Asia/Shanghai';
+    const nextFireDescription = describeFireMoment(scheduledTask.nextRunAt, tz);
+    return {
+      scheduledTaskId: scheduledTask.id,
+      title: scheduledTask.title,
+      recurrence: scheduledTask.schedule?.recurrence || 'once',
+      timezone: tz,
+      localTime: scheduledTask.schedule?.localTime || '',
+      dayOfWeek: scheduledTask.schedule?.dayOfWeek || [],
+      dayOfMonth: scheduledTask.schedule?.dayOfMonth || null,
+      month: scheduledTask.schedule?.month || null,
+      date: scheduledTask.schedule?.date || '',
+      message: scheduledTask.payload?.message || '',
+      state: scheduledTask.state,
+      nextRunAtUtc: scheduledTask.nextRunAt,
+      nextFireDescription,
+      humanReadable: override
+        || (nextFireDescription
+          ? `下次触发：${nextFireDescription}`
+          : '已记录定时任务')
+    };
+  }
+
+  function validateScheduleInputs(rawSchedule = {}) {
+    const recurrence = String(rawSchedule.recurrence || 'once').trim().toLowerCase();
+    if (!['once', 'daily', 'weekly', 'monthly', 'yearly'].includes(recurrence)) {
+      return {
+        ok: false,
+        error: `recurrence must be one of once/daily/weekly/monthly/yearly, got "${rawSchedule.recurrence}"`,
+        hint: 'Pick the recurrence that matches the user request (e.g. "每天" → daily, "每周一" → weekly, "每月 15 号" → monthly, "每年元旦" → yearly, "5 分钟后" or "今晚 8 点" → once).'
+      };
+    }
+    const timezone = String(rawSchedule.timezone || 'Asia/Shanghai').trim();
+    if (!timezone) {
+      return { ok: false, error: 'timezone is required', hint: 'Default to "Asia/Shanghai".' };
+    }
+
+    const localTime = String(rawSchedule.localTime || '').trim();
+    if (recurrence !== 'once' && !localTime) {
+      return {
+        ok: false,
+        error: `recurrence "${recurrence}" requires localTime ("HH:MM")`,
+        hint: 'For 每天/每周/每月/每年 reminders the user always names a wall-clock time. Pass localTime: "20:00" (24-hour) and timezone: "Asia/Shanghai".'
+      };
+    }
+    if (localTime && !/^\d{1,2}:\d{2}$/.test(localTime)) {
+      return {
+        ok: false,
+        error: `localTime must be "HH:MM" 24-hour, got "${localTime}"`,
+        hint: 'Use 24-hour clock: 8 PM → "20:00", 8:10 PM → "20:10".'
+      };
+    }
+
+    if (recurrence === 'weekly') {
+      try {
+        normalizeDayOfWeekList(rawSchedule.dayOfWeek);
+      } catch (err) {
+        return {
+          ok: false,
+          error: `recurrence "weekly" requires dayOfWeek: ${err?.message || err}`,
+          hint: 'dayOfWeek is "mon"/"tue"/.../"sun" (or 0-6, Sunday=0). For multi-day pass an array like ["mon","wed","fri"].'
+        };
+      }
+    }
+
+    if (recurrence === 'monthly') {
+      const dom = Number(rawSchedule.dayOfMonth);
+      if (!Number.isInteger(dom) || dom < 1 || dom > 31) {
+        return {
+          ok: false,
+          error: `recurrence "monthly" requires dayOfMonth (1..31), got "${rawSchedule.dayOfMonth}"`,
+          hint: 'For "每月 15 号" pass dayOfMonth: 15. Months with fewer days will be skipped automatically.'
+        };
+      }
+    }
+
+    if (recurrence === 'yearly') {
+      const month = Number(rawSchedule.month);
+      const dom = Number(rawSchedule.dayOfMonth);
+      if (!Number.isInteger(month) || month < 1 || month > 12) {
+        return {
+          ok: false,
+          error: `recurrence "yearly" requires month (1..12), got "${rawSchedule.month}"`,
+          hint: 'For "每年元旦" pass month: 1, dayOfMonth: 1.'
+        };
+      }
+      if (!Number.isInteger(dom) || dom < 1 || dom > 31) {
+        return {
+          ok: false,
+          error: `recurrence "yearly" requires dayOfMonth (1..31), got "${rawSchedule.dayOfMonth}"`,
+          hint: 'For "每年元旦" pass month: 1, dayOfMonth: 1.'
+        };
+      }
+    }
+
+    if (recurrence === 'once') {
+      const hasDelay = Number(rawSchedule.delayMinutes) > 0 || Number(rawSchedule.delaySeconds) > 0;
+      const hasDate = Boolean(String(rawSchedule.date || '').trim());
+      const hasLocal = Boolean(localTime);
+      if (!hasDelay && !hasLocal) {
+        return {
+          ok: false,
+          error: 'recurrence "once" requires delayMinutes (or delaySeconds), or localTime (optionally with date)',
+          hint: 'For "5 分钟后" pass delayMinutes: 5. For "今晚 8 点" pass localTime: "20:00". For "明天早上 8 点" pass date: "YYYY-MM-DD" + localTime: "08:00" (date uses YOUR timezone, read it from <wall_clock> in the prompt).'
+        };
+      }
+      if (hasDate && !hasLocal) {
+        return {
+          ok: false,
+          error: 'recurrence "once" with `date` also needs localTime',
+          hint: 'Pair date with localTime, e.g. date: "2026-06-01" + localTime: "09:00".'
+        };
+      }
+    } else {
+      // Recurring schedules MUST NOT mix in one-shot timing hints — that
+      // combination is the historical bug that pinned daily reminders to
+      // "creation time + 1 second" forever.
+      if (Number(rawSchedule.delayMinutes) > 0 || Number(rawSchedule.delaySeconds) > 0) {
+        return {
+          ok: false,
+          error: `delayMinutes/delaySeconds cannot be combined with recurrence "${recurrence}"`,
+          hint: `For "${recurrence}" reminders pass only localTime (and dayOfWeek/dayOfMonth/month as needed). Drop delayMinutes/delaySeconds entirely.`
+        };
+      }
+      if (String(rawSchedule.date || '').trim()) {
+        return {
+          ok: false,
+          error: `\`date\` is only valid for recurrence "once"`,
+          hint: 'For recurring schedules the date is implied by recurrence + dayOfWeek/dayOfMonth/month. Drop `date`.'
+        };
+      }
+    }
+
+    return { ok: true };
+  }
+
+  function buildScheduleFromInput(input = {}) {
+    // Accept fields either flat on the input or nested under input.schedule
+    // — the LLM tends to mix the two when it's been corrected mid-thought.
+    const nested = input.schedule && typeof input.schedule === 'object' ? input.schedule : {};
+    return {
+      recurrence: String(input.recurrence || nested.recurrence || 'once').trim().toLowerCase(),
+      timezone: String(input.timezone || nested.timezone || 'Asia/Shanghai').trim(),
+      localTime: String(input.localTime || nested.localTime || '').trim(),
+      dayOfWeek: input.dayOfWeek != null ? input.dayOfWeek : nested.dayOfWeek,
+      dayOfMonth: input.dayOfMonth != null ? input.dayOfMonth : nested.dayOfMonth,
+      month: input.month != null ? input.month : nested.month,
+      date: String(input.date || nested.date || '').trim(),
+      delayMinutes: input.delayMinutes != null ? input.delayMinutes : nested.delayMinutes,
+      delaySeconds: input.delaySeconds != null ? input.delaySeconds : nested.delaySeconds
+    };
+  }
+
   registry.register({
     name: 'create_scheduled_task',
-    description: 'Create a local scheduled task that later triggers assistant/runtime behavior.',
-    execute: async ({ input = {} } = {}) => messageService.createScheduledTask(input)
+    description: '创建一个定时提醒/任务。声明式参数，不要做时区或 UTC 计算。必填：title 描述、message（payload.message）提醒文本、recurrence（once/daily/weekly/monthly/yearly）。timezone 默认 Asia/Shanghai。\n— recurrence="once"：传 delayMinutes（"5 分钟后"）或 localTime（"今晚 8 点" → "20:00"，工具会自动算今天还是明天）。需要特定日期再加 date: "YYYY-MM-DD"（用户时区）。\n— recurrence="daily"：必传 localTime。\n— recurrence="weekly"：必传 localTime + dayOfWeek（"mon".."sun" 或 0-6 或数组 ["mon","wed"]）。\n— recurrence="monthly"：必传 localTime + dayOfMonth（1-31，月份天数不够会自动跳过）。\n— recurrence="yearly"：必传 localTime + month (1-12) + dayOfMonth (1-31)。\n严禁组合：循环类型 + delayMinutes/delaySeconds/date 同时出现（旧 bug 源头）。\nconversationId 由系统自动注入。创建成功后，把工具返回的 humanReadable 字段原样转述给用户即可，不要再自己做时区换算。',
+    execute: async ({ input = {}, context = {} } = {}) => {
+      const trimmedTitle = String(input?.title || '').trim();
+      const payload = input?.payload && typeof input.payload === 'object' ? { ...input.payload } : null;
+      const payloadMessage = String(payload?.message || input?.message || '').trim();
+      if (!trimmedTitle && !payloadMessage) {
+        return {
+          kind: 'tool_error',
+          error: 'create_scheduled_task requires a non-empty title or message.',
+          recoverable: true,
+          hint: 'Pass title="<short description>" (e.g. "提醒吃晚饭") and payload.message="<完整提醒文本>".'
+        };
+      }
+
+      const scheduleSpec = buildScheduleFromInput(input);
+      const validation = validateScheduleInputs(scheduleSpec);
+      if (!validation.ok) {
+        return {
+          kind: 'tool_error',
+          error: validation.error,
+          recoverable: true,
+          hint: validation.hint
+        };
+      }
+
+      // Compute initial nextRunAt here so we can return a structured
+      // "next fire" descriptor even before the store-coordinator builds it
+      // again (the coordinator will reuse what we pass).
+      let nextRunAtIso = '';
+      try {
+        if (scheduleSpec.recurrence === 'once') {
+          const ms = resolveOnceTriggerMs(scheduleSpec);
+          nextRunAtIso = new Date(ms).toISOString();
+        } else {
+          nextRunAtIso = computeNextOccurrenceIso(scheduleSpec);
+        }
+      } catch (err) {
+        return {
+          kind: 'tool_error',
+          error: `Could not compute next fire time: ${err?.message || err}`,
+          recoverable: true,
+          hint: 'Double-check localTime/dayOfWeek/dayOfMonth/month/timezone are present and consistent for the chosen recurrence.'
+        };
+      }
+
+      const conversationId = String(
+        input?.conversationId
+        || payload?.conversationId
+        || context?.conversation?.id
+        || ''
+      ).trim();
+
+      const resolvedPayload = {
+        action: 'notify_user',
+        ...(payload || {}),
+        ...(payloadMessage ? { message: payloadMessage } : {}),
+        ...(conversationId ? { conversationId } : {})
+      };
+
+      const cleanedSchedule = {
+        recurrence: scheduleSpec.recurrence,
+        timezone: scheduleSpec.timezone,
+        localTime: scheduleSpec.localTime,
+        dayOfWeek: scheduleSpec.dayOfWeek,
+        dayOfMonth: scheduleSpec.dayOfMonth,
+        month: scheduleSpec.month,
+        date: scheduleSpec.date
+      };
+
+      const created = messageService.createScheduledTask({
+        title: trimmedTitle || payloadMessage.slice(0, 80),
+        kind: 'reminder',
+        schedule: cleanedSchedule,
+        payload: resolvedPayload,
+        personId: input?.personId,
+        projectId: input?.projectId,
+        taskId: input?.taskId,
+        executionId: input?.executionId,
+        source: input?.source || 'assistant',
+        metadata: input?.metadata,
+        nextRunAt: nextRunAtIso
+      });
+
+      return buildScheduledTaskReply(created);
+    }
+  });
+
+  registry.register({
+    name: 'update_scheduled_task',
+    description: '修改一个已存在的定时任务。按 scheduledTaskId 找到任务，对要修改的字段重新赋值（其它字段保持不变）。可改字段：title、message（提醒内容）、recurrence、timezone、localTime、dayOfWeek、dayOfMonth、month、date。修改后工具会自动重算下次触发时间并把任务恢复为 scheduled 状态。',
+    execute: async ({ input = {} } = {}) => {
+      const id = String(input?.scheduledTaskId || input?.id || '').trim();
+      if (!id) {
+        return {
+          kind: 'tool_error',
+          error: 'update_scheduled_task requires scheduledTaskId',
+          recoverable: true,
+          hint: 'Pass scheduledTaskId returned by an earlier create_scheduled_task call. Use list_scheduled_tasks if you do not remember the id.'
+        };
+      }
+
+      const wantsScheduleChange = (
+        input.recurrence !== undefined
+        || input.timezone !== undefined
+        || input.localTime !== undefined
+        || input.dayOfWeek !== undefined
+        || input.dayOfMonth !== undefined
+        || input.month !== undefined
+        || input.date !== undefined
+        || (input.schedule && typeof input.schedule === 'object')
+      );
+
+      let schedulePatch = null;
+      if (wantsScheduleChange) {
+        const current = messageService.stateCoordinator?.scheduledTaskStore?.get?.(id) || null;
+        if (!current?.id) {
+          return {
+            kind: 'tool_error',
+            error: 'scheduled task not found',
+            recoverable: true,
+            hint: 'Verify the scheduledTaskId with list_scheduled_tasks.'
+          };
+        }
+        const merged = {
+          recurrence: input.recurrence != null
+            ? String(input.recurrence).trim().toLowerCase()
+            : current.schedule?.recurrence || 'once',
+          timezone: input.timezone != null
+            ? String(input.timezone).trim()
+            : current.schedule?.timezone || 'Asia/Shanghai',
+          localTime: input.localTime != null
+            ? String(input.localTime).trim()
+            : current.schedule?.localTime || '',
+          dayOfWeek: input.dayOfWeek !== undefined ? input.dayOfWeek : current.schedule?.dayOfWeek,
+          dayOfMonth: input.dayOfMonth !== undefined ? input.dayOfMonth : current.schedule?.dayOfMonth,
+          month: input.month !== undefined ? input.month : current.schedule?.month,
+          date: input.date != null ? String(input.date).trim() : current.schedule?.date || '',
+          delayMinutes: input.delayMinutes,
+          delaySeconds: input.delaySeconds
+        };
+        const validation = validateScheduleInputs(merged);
+        if (!validation.ok) {
+          return {
+            kind: 'tool_error',
+            error: validation.error,
+            recoverable: true,
+            hint: validation.hint
+          };
+        }
+        schedulePatch = {
+          recurrence: merged.recurrence,
+          timezone: merged.timezone,
+          localTime: merged.localTime,
+          dayOfWeek: merged.dayOfWeek,
+          dayOfMonth: merged.dayOfMonth,
+          month: merged.month,
+          date: merged.date,
+          delayMinutes: merged.delayMinutes,
+          delaySeconds: merged.delaySeconds
+        };
+      }
+
+      const payloadPatch = {};
+      const messageText = input.message != null
+        ? String(input.message).trim()
+        : (input.payload && typeof input.payload === 'object' ? String(input.payload.message || '').trim() : '');
+      if (messageText) payloadPatch.message = messageText;
+      if (input.payload && typeof input.payload === 'object') {
+        for (const key of Object.keys(input.payload)) {
+          if (key === 'message') continue;
+          payloadPatch[key] = input.payload[key];
+        }
+      }
+
+      try {
+        const updated = messageService.updateScheduledTask({
+          id,
+          title: input.title,
+          schedule: schedulePatch,
+          payload: Object.keys(payloadPatch).length > 0 ? payloadPatch : undefined
+        });
+        return buildScheduledTaskReply(updated, { override: '已更新定时任务' });
+      } catch (err) {
+        return {
+          kind: 'tool_error',
+          error: String(err?.message || err),
+          recoverable: true,
+          hint: 'If the task is in a terminal state (completed/cancelled), create a new one instead.'
+        };
+      }
+    }
+  });
+
+  registry.register({
+    name: 'cancel_scheduled_task',
+    description: '取消一个已存在的定时任务（按 scheduledTaskId）。任务状态会变成 cancelled，不再触发。',
+    execute: async ({ input = {} } = {}) => {
+      const id = String(input?.scheduledTaskId || input?.id || '').trim();
+      if (!id) {
+        return {
+          kind: 'tool_error',
+          error: 'cancel_scheduled_task requires scheduledTaskId',
+          recoverable: true,
+          hint: 'Use list_scheduled_tasks to find the id if you do not remember it.'
+        };
+      }
+      try {
+        const cancelled = messageService.cancelScheduledTask({
+          id,
+          reason: String(input?.reason || '').trim()
+        });
+        return {
+          scheduledTaskId: cancelled.id,
+          state: cancelled.state,
+          humanReadable: '已取消该定时任务，不会再触发。'
+        };
+      } catch (err) {
+        return {
+          kind: 'tool_error',
+          error: String(err?.message || err),
+          recoverable: true,
+          hint: 'Verify the scheduledTaskId with list_scheduled_tasks.'
+        };
+      }
+    }
+  });
+
+  registry.register({
+    name: 'list_scheduled_tasks',
+    description: '列出当前会话下还在生效的定时任务（state=scheduled/running/paused）。可选 includeCompleted=true 时附带 completed/cancelled/failed 的历史记录。conversationId 由系统自动注入。当用户问"我都有什么提醒/我有几个定时任务"时使用。',
+    execute: async ({ input = {}, context = {} } = {}) => {
+      const conversationId = String(
+        input?.conversationId
+        || context?.conversation?.id
+        || ''
+      ).trim();
+      const list = messageService.listScheduledTasks({
+        conversationId,
+        includeCompleted: input?.includeCompleted === true,
+        limit: Math.min(Math.max(Number(input?.limit || 50), 1), 200)
+      });
+      return {
+        count: list.length,
+        items: list.map((entry) => buildScheduledTaskReply(entry))
+      };
+    }
   });
 
   registry.register({

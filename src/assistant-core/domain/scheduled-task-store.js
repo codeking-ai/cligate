@@ -24,6 +24,25 @@ export class ScheduledTaskStore extends JsonEntityStore {
     });
   }
 
+  listByConversation(conversationId, {
+    limit = 100,
+    states = ['scheduled', 'running', 'paused']
+  } = {}) {
+    const normalizedConversationId = toText(conversationId);
+    if (!normalizedConversationId) return [];
+    const stateSet = new Set((states || []).map(toText).filter(Boolean));
+    return this.list({
+      limit,
+      predicate: (entry) => {
+        const cid = toText(entry?.payload?.conversationId)
+          || toText(entry?.metadata?.conversationId);
+        if (cid !== normalizedConversationId) return false;
+        if (stateSet.size === 0) return true;
+        return stateSet.has(toText(entry.state));
+      }
+    });
+  }
+
   create(payload = {}) {
     return this.save(createScheduledTask(payload));
   }

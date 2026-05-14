@@ -227,7 +227,17 @@ export class AssistantPolicyService {
       'get_task_by_runtime_session',
       'list_project_artifacts',
       'search_task_and_conversation_memory',
-      'search_project_memory'
+      'search_project_memory',
+      // Read-only inspection / lookup tools registered in tool-registry.js.
+      // Previously omitted, which caused every call to trip the default-deny
+      // gate and collapse the dialogue into the fallback runner.
+      'recall',
+      'find_task_by_keyword',
+      'list_known_cwds',
+      'get_cwd_info',
+      'resolve_reference',
+      // Conversation-scoped read-only listing of scheduled tasks.
+      'list_scheduled_tasks'
     ]);
     if (safeTools.has(normalizedTool)) {
       return buildPolicyDecision({
@@ -285,6 +295,19 @@ export class AssistantPolicyService {
         allowed,
         reason: allowed ? 'task_or_execution_scope_available' : 'task_or_execution_scope_required',
         riskLevel: 'low'
+      });
+    }
+
+    // Conversation-anchored mutations and link operations. These tools were
+    // registered in tool-registry.js but never explicitly whitelisted here,
+    // so calls like create_scheduled_task were denied by the default rule
+    // and crashed the dialogue.
+    if (['create_scheduled_task', 'update_scheduled_task', 'cancel_scheduled_task', 'handoff_execution', 'consume_execution_handoff', 'link_task_to_conversation', 'link_session_to_task', 'add_cwd_alias'].includes(normalizedTool)) {
+      const hasConversation = Boolean(conversation?.id || input.conversationId);
+      return buildPolicyDecision({
+        allowed: hasConversation,
+        reason: hasConversation ? 'conversation_scope_available' : 'conversation_scope_required',
+        riskLevel: normalizedTool === 'create_scheduled_task' ? 'medium' : 'low'
       });
     }
 

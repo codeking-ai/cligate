@@ -307,6 +307,111 @@ const TOOL_SCHEMAS = Object.freeze({
       eventLimit: { type: 'integer', minimum: 1, maximum: 100 }
     },
     required: ['sessionId']
+  },
+  create_scheduled_task: {
+    type: 'object',
+    description: '创建一个新的定时提醒/任务。声明式参数，不做任何 UTC / 时区计算 / cron 表达式 —— LLM 只翻译用户意图为以下字段，工具内部完成时间换算。',
+    properties: {
+      title: { type: 'string', description: '简短标题，例如 "提醒吃晚饭"。' },
+      message: { type: 'string', description: '到点要发给用户的提醒内容。可写在这里，或写在 payload.message。两者择一即可。' },
+      recurrence: {
+        type: 'string',
+        enum: ['once', 'daily', 'weekly', 'monthly', 'yearly'],
+        description: 'once=一次性, daily=每天, weekly=每周（需 dayOfWeek）, monthly=每月（需 dayOfMonth）, yearly=每年（需 month + dayOfMonth）'
+      },
+      timezone: { type: 'string', description: 'IANA 时区名，默认 "Asia/Shanghai"。' },
+      localTime: { type: 'string', description: '24 小时制 HH:MM 钟面时间（在 timezone 下）。晚上 8 点 = "20:00"，晚上 8:10 = "20:10"。recurrence ≠ "once" 时必填；once 可以用 delayMinutes 代替。' },
+      dayOfWeek: {
+        description: '仅 recurrence=weekly 使用。可传 "mon"/"tue"/"wed"/"thu"/"fri"/"sat"/"sun"，也可传 0-6（Sunday=0），或字符串数组如 ["mon","wed","fri"]。',
+        oneOf: [
+          { type: 'string' },
+          { type: 'integer', minimum: 0, maximum: 6 },
+          { type: 'array', items: { oneOf: [{ type: 'string' }, { type: 'integer' }] } }
+        ]
+      },
+      dayOfMonth: { type: 'integer', minimum: 1, maximum: 31, description: '仅 recurrence=monthly/yearly 使用。每月几号。29-31 在天数不够的月份会自动跳过。' },
+      month: { type: 'integer', minimum: 1, maximum: 12, description: '仅 recurrence=yearly 使用。1=一月 ... 12=十二月。' },
+      date: { type: 'string', description: '仅 recurrence=once 且需要指定具体某一天时使用，格式 "YYYY-MM-DD"（按 timezone 解读）。配合 localTime。例如 "明天早上 8 点" → date: "<明天日期>" + localTime: "08:00"。"今晚 8 点" 不要传 date，直接 localTime: "20:00" 即可，工具会自动选今天或明天。' },
+      delayMinutes: { type: 'integer', minimum: 1, description: '仅 recurrence=once 使用。"N 分钟后" → delayMinutes: N。绝对禁止跟 daily/weekly/monthly/yearly 组合（旧 bug 源头）。' },
+      delaySeconds: { type: 'integer', minimum: 1, description: '仅 recurrence=once 使用（一般只在调试/极短延迟时用）。同样禁止与循环 recurrence 组合。' },
+      payload: {
+        type: 'object',
+        description: '可选。普通用户提醒只需要 message。这里留作后续扩展（例如到点跑某个 runtime 任务）。',
+        properties: {
+          action: { type: 'string', enum: ['notify_user', 'start', 'continue', 'status'] },
+          message: { type: 'string' },
+          provider: { type: 'string' },
+          input: { type: 'string' },
+          cwd: { type: 'string' },
+          taskId: { type: 'string' },
+          sessionId: { type: 'string' }
+        }
+      }
+    },
+    required: ['title', 'recurrence']
+  },
+  update_scheduled_task: {
+    type: 'object',
+    description: '修改已有的定时任务（必须先有 scheduledTaskId）。只传想改的字段，其它字段保持。修改后会自动重算下次触发时间。',
+    properties: {
+      scheduledTaskId: { type: 'string' },
+      title: { type: 'string' },
+      message: { type: 'string', description: '新的提醒文案。' },
+      recurrence: { type: 'string', enum: ['once', 'daily', 'weekly', 'monthly', 'yearly'] },
+      timezone: { type: 'string' },
+      localTime: { type: 'string' },
+      dayOfWeek: { description: '同 create_scheduled_task.dayOfWeek。' },
+      dayOfMonth: { type: 'integer', minimum: 1, maximum: 31 },
+      month: { type: 'integer', minimum: 1, maximum: 12 },
+      date: { type: 'string' }
+    },
+    required: ['scheduledTaskId']
+  },
+  cancel_scheduled_task: {
+    type: 'object',
+    description: '取消已存在的定时任务（按 scheduledTaskId）。',
+    properties: {
+      scheduledTaskId: { type: 'string' },
+      reason: { type: 'string' }
+    },
+    required: ['scheduledTaskId']
+  },
+  list_scheduled_tasks: {
+    type: 'object',
+    description: '列出当前会话下还在生效的定时任务。当用户问 "我有哪些提醒/几个定时任务" 时使用。',
+    properties: {
+      includeCompleted: { type: 'boolean', description: '默认 false（只看还在生效的）。true 时也返回 completed/cancelled/failed 的历史记录。' },
+      limit: { type: 'integer', minimum: 1, maximum: 200 }
+    }
+  },
+  handoff_execution: {
+    type: 'object',
+    properties: {
+      executionId: { type: 'string' },
+      fromExecutionId: { type: 'string' },
+      kind: { type: 'string' },
+      title: { type: 'string' },
+      payload: { type: 'object' },
+      conversationId: { type: 'string' }
+    },
+    required: ['executionId']
+  },
+  consume_execution_handoff: {
+    type: 'object',
+    properties: {
+      executionId: { type: 'string' },
+      handoffId: { type: 'string' },
+      conversationId: { type: 'string' }
+    },
+    required: ['executionId', 'handoffId']
+  },
+  link_session_to_task: {
+    type: 'object',
+    properties: {
+      taskId: { type: 'string' },
+      runtimeSessionId: { type: 'string' }
+    },
+    required: ['taskId', 'runtimeSessionId']
   }
 });
 

@@ -17,6 +17,7 @@ import { startModelDiscovery } from './model-discovery.js';
 import agentChannelManager from './agent-channels/manager.js';
 import chatUiRuntimeObserver from './chat-ui/runtime-observer.js';
 import assistantConsolidator from './assistant-core/consolidator.js';
+import localScheduler from './assistant-core/local-scheduler.js';
 
 export function createServer({ port }) {
   ensureAccountsPersist();
@@ -93,6 +94,7 @@ export function createServer({ port }) {
   });
   chatUiRuntimeObserver.start();
   assistantConsolidator.start();
+  localScheduler.start();
 
   // Global error handler — catches unhandled errors in route handlers
   app.use((err, req, res, _next) => {
@@ -112,6 +114,7 @@ export function startServer({ port }) {
     agentChannelManager.stop().catch(() => {});
     chatUiRuntimeObserver.stop();
     assistantConsolidator.stop();
+    localScheduler.stop();
   });
   return server;
 }

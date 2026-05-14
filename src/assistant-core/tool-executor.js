@@ -47,7 +47,25 @@ export class AssistantToolExecutor {
   async executeToolCall(call = {}, context = {}) {
     const tool = this.toolRegistry.get(call.toolName);
     if (!tool) {
-      throw new Error(`Unknown assistant tool: ${call.toolName}`);
+      // Return a structured failure instead of throwing so the supervisor LLM
+      // can see "this tool doesn't exist, try another" and recover, rather
+      // than the whole ReactEngine collapsing into the fallback runner.
+      const ts = nowIso();
+      return {
+        toolName: String(call.toolName || ''),
+        input: call.input || {},
+        startedAt: ts,
+        completedAt: ts,
+        success: false,
+        policy: null,
+        summary: `Unknown assistant tool: ${call.toolName}`,
+        result: {
+          kind: 'tool_not_found',
+          error: `Unknown assistant tool: ${call.toolName}`,
+          recoverable: true,
+          hint: 'This tool name is not registered. Pick a tool that appears in the available tool list.'
+        }
+      };
     }
 
     const policy = this.policyService?.canExecuteToolCall?.({
@@ -59,7 +77,29 @@ export class AssistantToolExecutor {
       input: call.input || {}
     });
     if (policy && policy.allowed === false) {
-      throw new Error(`Assistant policy blocked tool ${call.toolName}: ${policy.reason}`);
+      // Surface policy denials as a structured tool result rather than a
+      // throw. Throwing here used to escape the ReactEngine and dump the
+      // whole dialogue into the deterministic fallback runner (the "回退到
+      // 基础 assistant 流程" canned message). The supervisor LLM can now
+      // read the denial reason and either pick a different tool or reply
+      // honestly to the user.
+      const ts = nowIso();
+      return {
+        toolName: tool.name,
+        input: call.input || {},
+        startedAt: ts,
+        completedAt: ts,
+        success: false,
+        policy,
+        summary: `Tool ${tool.name} blocked by policy: ${policy.reason || 'tool_not_permitted_by_policy'}`,
+        result: {
+          kind: 'policy_block',
+          reason: policy.reason || 'tool_not_permitted_by_policy',
+          recoverable: true,
+          requiresConfirmation: false,
+          hint: 'This tool is not permitted in the current scope. Try a different tool, or tell the user what is blocking the action.'
+        }
+      };
     }
     if (policy?.requiresConfirmation) {
       return buildPolicyToolResult(
