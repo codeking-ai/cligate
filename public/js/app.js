@@ -25,6 +25,7 @@ function createShellModule() {
     version: '1.2.1',
     connectionStatus: 'connecting',
     activeTab: 'dashboard',
+    taskSubTab: 'active',
     viewPartialPaths: {
       dashboard: '/partials/views/dashboard.html',
       accounts: '/partials/views/accounts.html',
@@ -32,7 +33,6 @@ function createShellModule() {
       logs: '/partials/views/logs.html',
       workspaceConfig: '/partials/views/workspace-config.html',
       channels: '/partials/views/channels.html',
-      conversationRecords: '/partials/views/conversation-records.html',
       assistantTasks: '/partials/views/assistant-tasks.html',
       assistantWorkbench: '/partials/views/assistant-workbench.html',
       scheduledTasks: '/partials/views/scheduled-tasks.html',
@@ -129,13 +129,19 @@ function createShellModule() {
         }
       }, 15000);
       setInterval(() => {
-        if (this.activeTab === 'conversationRecords') {
+        if (this.activeTab === 'chat' && this.chatHistoryOpen) {
           this.loadChannelConversations({ silent: true });
-          if (this.selectedChannelConversationId) {
-            this.loadChannelConversationDetail(this.selectedChannelConversationId, { silent: true });
-          }
         }
       }, 5000);
+      // Poll the active chat session so background-pushed messages
+      // (scheduled-task notifications, async assistant runs) surface in the
+      // open conversation without requiring the user to re-click their session.
+      setInterval(() => {
+        if (this.activeTab !== 'chat') return;
+        if (!this.activeChatSessionId) return;
+        if (typeof this.refreshChatSessionFromServer !== 'function') return;
+        this.refreshChatSessionFromServer(this.activeChatSessionId);
+      }, 8000);
       setInterval(() => {
         if (this.activeTab === 'assistantTasks') {
           this.loadAssistantTasks({ silent: true });
@@ -212,7 +218,7 @@ function createShellModule() {
     },
 
     sectionForTab(tab) {
-      if (['dashboard', 'chat', 'conversationRecords', 'assistantTasks', 'assistantWorkbench'].includes(tab)) return 'workspace';
+      if (['dashboard', 'chat', 'tasks', 'assistantTasks', 'assistantWorkbench', 'scheduledTasks'].includes(tab)) return 'workspace';
       if (['assistantAgent'].includes(tab)) return 'assistant';
       if (['tools'].includes(tab)) return 'cliTools';
       if (['accounts', 'apikeys', 'localModels'].includes(tab)) return 'credentials';
@@ -282,20 +288,14 @@ function createShellModule() {
         this.loadChatModels();
         this.loadAgentRuntimeProviders();
         this.loadAgentRuntimeSessions();
+        if (typeof this.loadChannelConversations === 'function') {
+          this.loadChannelConversations({ silent: true });
+        }
       }
       if (tab === 'channels') {
         this.loadChannelProviders();
         this.loadChannelCatalog();
         this.loadChannelSettings();
-      }
-      if (tab === 'conversationRecords') {
-        this.loadChannelProviders();
-        this.loadChannelCatalog();
-        this.loadChannelConversations().then(() => {
-          if (this.selectedChannelConversationId) {
-            this.loadChannelConversationDetail(this.selectedChannelConversationId, { silent: true });
-          }
-        });
       }
       if (tab === 'assistantTasks') {
         this.loadAssistantTasks().then(() => {
@@ -309,6 +309,9 @@ function createShellModule() {
       }
       if (tab === 'scheduledTasks') {
         this.loadScheduledTasks();
+      }
+      if (tab === 'tasks') {
+        this.loadTaskSubTabData(this.taskSubTab);
       }
       if (tab === 'settings') {
         this.refreshProxyStatus();
@@ -454,7 +457,38 @@ function createShellModule() {
 
     viewPartialKeyForTab(tab) {
       if (['settings', 'assistantAgent', 'routing'].includes(tab)) return 'workspaceConfig';
+      if (tab === 'tasks') {
+        if (this.taskSubTab === 'workbench') return 'assistantWorkbench';
+        if (this.taskSubTab === 'scheduled') return 'scheduledTasks';
+        return 'assistantTasks';
+      }
       return tab;
+    },
+
+    switchTaskSubTab(subTab) {
+      this.taskSubTab = subTab;
+      this.ensureViewPartialLoadedForTab('tasks');
+      this.loadTaskSubTabData(subTab);
+    },
+
+    loadTaskSubTabData(subTab) {
+      if (subTab === 'active') {
+        if (typeof this.loadAssistantTasks === 'function') {
+          this.loadAssistantTasks().then(() => {
+            if (this.selectedAssistantTaskId && typeof this.loadAssistantTaskDetail === 'function') {
+              this.loadAssistantTaskDetail(this.selectedAssistantTaskId, { silent: true });
+            }
+          });
+        }
+      } else if (subTab === 'workbench') {
+        if (typeof this.loadAssistantWorkbench === 'function') {
+          this.loadAssistantWorkbench();
+        }
+      } else if (subTab === 'scheduled') {
+        if (typeof this.loadScheduledTasks === 'function') {
+          this.loadScheduledTasks();
+        }
+      }
     },
 
     ensureViewPartialLoadedForTab(tab) {

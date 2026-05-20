@@ -1255,6 +1255,43 @@ export class AgentOrchestratorMessageService {
         results.push({ conversationId: target.conversationId, ok: false, error: 'conversation_not_found' });
         continue;
       }
+
+      // chat-ui channel has no outbound webhook (Web Chat is inbound-only).
+      // Append the notification to the conversation's UI message buffer; the
+      // Web Chat picks it up on next refresh / poll.
+      if (String(conversation.channel || '').toLowerCase() === 'chat-ui') {
+        try {
+          const messages = Array.isArray(conversation.metadata?.uiChatMessages)
+            ? conversation.metadata.uiChatMessages
+            : [];
+          this.conversationStore.patch(conversation.id, {
+            metadata: {
+              ...(conversation.metadata || {}),
+              uiChatMessages: [
+                ...messages,
+                {
+                  role: 'assistant',
+                  kind: 'scheduled-task-notification',
+                  content: text,
+                  scheduledTaskId: scheduledTask.id,
+                  scheduledTaskRunId: runId,
+                  isFailure: Boolean(isFailure),
+                  createdAt: new Date().toISOString()
+                }
+              ]
+            }
+          });
+          results.push({
+            conversationId: target.conversationId,
+            ok: true,
+            delivery: { channel: 'chat-ui', via: 'ui-chat-buffer' }
+          });
+        } catch (err) {
+          results.push({ conversationId: target.conversationId, ok: false, error: String(err?.message || err) });
+        }
+        continue;
+      }
+
       try {
         const delivery = await deliverySender.send({
           conversation,

@@ -3,7 +3,7 @@ export function createScheduledTasksPageModule() {
     // List + filter state
     scheduledTasks: [],
     scheduledTasksLoading: false,
-    scheduledTaskStateFilter: 'active',
+    scheduledTaskStateFilter: 'all',
     scheduledTaskConversationFilter: '',
     scheduledTaskQuery: '',
     // All conversations the user could plausibly use as notify targets
@@ -462,6 +462,26 @@ export function createScheduledTasksPageModule() {
         await this.loadScheduledTasks();
       } else {
         this.showToast?.(data?.error || this.t('scheduledTaskCancelFailed'), 'error');
+      }
+    },
+
+    async confirmDeleteScheduledTask(task) {
+      if (!task?.id) return;
+      const confirmText = `${this.t('scheduledTaskDeleteConfirm')}\n\n${task.title || task.id}`;
+      if (!window.confirm(confirmText)) return;
+      const { ok, data } = await this.api(
+        `/api/assistant/scheduled-tasks/${encodeURIComponent(task.id)}?hard=true`,
+        { method: 'DELETE' }
+      );
+      if (ok && data?.success) {
+        this.showToast?.(this.t('scheduledTaskDeleted'), 'success');
+        if (this.selectedScheduledTask?.id === task.id) {
+          this.selectedScheduledTask = null;
+          this.scheduledTaskRuns = [];
+        }
+        await this.loadScheduledTasks();
+      } else {
+        this.showToast?.(data?.error || this.t('scheduledTaskDeleteFailed'), 'error');
       }
     },
 

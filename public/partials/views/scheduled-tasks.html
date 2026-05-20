@@ -106,6 +106,9 @@
                         @click="confirmCancelScheduledTask(selectedScheduledTask)"
                         :disabled="selectedScheduledTask.state === 'cancelled' || selectedScheduledTask.state === 'completed'"
                         x-text="t('cancel')"></button>
+                    <button class="btn btn-xs btn-danger"
+                        @click="confirmDeleteScheduledTask(selectedScheduledTask)"
+                        x-text="t('scheduledTaskDelete')"></button>
                 </div>
             </div>
 

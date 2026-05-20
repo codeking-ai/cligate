@@ -356,9 +356,9 @@ export function createChannelsPageModule() {
       if (!options.silent) {
         this.channelConversationsLoading = true;
       }
-      const { ok, data } = await this.api('/api/agent-channels/session-records?limit=80');
-      if (ok && Array.isArray(data?.records)) {
-        this.channelConversations = data.records;
+      const { ok, data } = await this.api('/api/agent-channels/conversations?limit=80');
+      if (ok && Array.isArray(data?.conversations)) {
+        this.channelConversations = data.conversations;
         if (!this.selectedChannelConversationId && this.channelConversations.length > 0) {
           this.selectedChannelConversationId = this.channelConversations[0].id;
         }

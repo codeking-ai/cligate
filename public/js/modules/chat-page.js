@@ -12,9 +12,8 @@ export function createChatPageModule() {
     activeChatSessionId: '',
     chatStorageKey: 'cligate-chat-sessions-v1',
     chatHistoryOpen: false,
-    chatSidebarTab: 'history',
     chatSystemPromptOpen: false,
-    chatMode: 'assistant',
+    chatMode: 'agent-runtime',
     chatAssistantMode: true,
     agentRuntimeProviders: [],
     agentRuntimeSessions: [],
@@ -38,6 +37,313 @@ export function createChatPageModule() {
     chatLoading: false,
     chatSourceLoading: false,
     chatStreamController: null,
+    chatHistoryChannelFilter: 'all',
+    chatSourceHealth: {},
+
+    classifyChatError(status, text) {
+      const code = Number(status) || 0;
+      const lower = String(text || '').toLowerCase();
+      const baseRaw = String(text || '').slice(0, 600);
+      if (code === 401 || code === 403 || lower.includes('unauthor') || lower.includes('api key') || lower.includes('invalid token')) {
+        return {
+          status: code || 401,
+          category: 'auth',
+          message: this.t('chatErrorAuthMessage'),
+          raw: baseRaw,
+          jumpTo: { tab: 'apikeys', label: this.t('chatErrorJumpKeys') }
+        };
+      }
+      if (code === 429 || lower.includes('rate limit') || lower.includes('quota') || lower.includes('exceeded')) {
+        return {
+          status: code || 429,
+          category: 'quota',
+          message: this.t('chatErrorQuotaMessage'),
+          raw: baseRaw,
+          jumpTo: { tab: 'usage', label: this.t('chatErrorJumpUsage') }
+        };
+      }
+      if (code === 404 || (lower.includes('model') && (lower.includes('not found') || lower.includes('unknown') || lower.includes('does not exist')))) {
+        return {
+          status: code || 404,
+          category: 'model_not_found',
+          message: this.t('chatErrorModelMessage'),
+          raw: baseRaw,
+          jumpTo: { tab: 'routing', label: this.t('chatErrorJumpRouting') }
+        };
+      }
+      if (code === 408 || code === 504 || lower.includes('timeout') || lower.includes('timed out')) {
+        return {
+          status: code || 408,
+          category: 'timeout',
+          message: this.t('chatErrorTimeoutMessage'),
+          raw: baseRaw,
+          jumpTo: null
+        };
+      }
+      if (code === 0 || lower.includes('failed to fetch') || lower.includes('network')) {
+        return {
+          status: 0,
+          category: 'network',
+          message: this.t('chatErrorNetworkMessage'),
+          raw: baseRaw,
+          jumpTo: null
+        };
+      }
+      return {
+        status: code || 500,
+        category: 'unknown',
+        message: text ? baseRaw : this.t('chatErrorUnknownMessage'),
+        raw: baseRaw,
+        jumpTo: { tab: 'accounts', label: this.t('chatErrorJumpAccounts') }
+      };
+    },
+
+    recordChatSourceHealth(sourceId, latencyMs, success) {
+      const key = String(sourceId || '').trim();
+      if (!key) return;
+      const entry = {
+        timestamp: Date.now(),
+        latency: Math.max(0, Number(latencyMs) || 0),
+        success: success === true
+      };
+      const buffer = Array.isArray(this.chatSourceHealth[key]) ? this.chatSourceHealth[key] : [];
+      buffer.push(entry);
+      while (buffer.length > 20) buffer.shift();
+      this.chatSourceHealth = { ...this.chatSourceHealth, [key]: buffer };
+    },
+
+    chatSourceHealthStats(sourceId) {
+      const key = String(sourceId || '').trim();
+      const buffer = Array.isArray(this.chatSourceHealth[key]) ? this.chatSourceHealth[key] : [];
+      if (buffer.length === 0) return null;
+      const successes = buffer.filter((e) => e.success).length;
+      const latencies = buffer.filter((e) => e.success).map((e) => e.latency).sort((a, b) => a - b);
+      const p50 = latencies.length > 0 ? latencies[Math.floor(latencies.length / 2)] : 0;
+      return {
+        total: buffer.length,
+        successes,
+        successRate: Math.round((successes / buffer.length) * 100),
+        p50
+      };
+    },
+
+    chatSourceHealthClass(sourceId) {
+      const stats = this.chatSourceHealthStats(sourceId);
+      if (!stats) return 'text-gray-400 border-space-border/40 bg-space-800/60';
+      if (stats.successRate >= 90) return 'text-emerald-300 border-emerald-500/30 bg-emerald-500/10';
+      if (stats.successRate >= 60) return 'text-amber-300 border-amber-500/30 bg-amber-500/10';
+      return 'text-red-300 border-red-500/30 bg-red-500/10';
+    },
+
+
+    chatHistoryChannelLabel(channel) {
+      const value = String(channel || '').toLowerCase();
+      const map = {
+        web: 'Web',
+        dingtalk: '钉钉',
+        wechat: '微信',
+        wechat_kf: '微信客服',
+        wecom: '企业微信',
+        slack: 'Slack',
+        whatsapp: 'WhatsApp',
+        feishu: '飞书',
+        lark: 'Lark',
+        telegram: 'Telegram',
+        email: 'Email'
+      };
+      return map[value] || (value ? value.charAt(0).toUpperCase() + value.slice(1) : '-');
+    },
+
+    chatHistoryChannelBadgeClass(channel) {
+      const value = String(channel || '').toLowerCase();
+      const map = {
+        web: 'text-cyan-300 border-cyan-500/30 bg-cyan-500/10',
+        dingtalk: 'text-blue-300 border-blue-500/30 bg-blue-500/10',
+        wechat: 'text-emerald-300 border-emerald-500/30 bg-emerald-500/10',
+        wechat_kf: 'text-emerald-300 border-emerald-500/30 bg-emerald-500/10',
+        wecom: 'text-emerald-300 border-emerald-500/30 bg-emerald-500/10',
+        slack: 'text-violet-300 border-violet-500/30 bg-violet-500/10',
+        whatsapp: 'text-green-300 border-green-500/30 bg-green-500/10',
+        feishu: 'text-orange-300 border-orange-500/30 bg-orange-500/10',
+        lark: 'text-orange-300 border-orange-500/30 bg-orange-500/10',
+        telegram: 'text-sky-300 border-sky-500/30 bg-sky-500/10',
+        email: 'text-amber-300 border-amber-500/30 bg-amber-500/10'
+      };
+      return map[value] || 'text-gray-300 border-space-border/40 bg-space-800/60';
+    },
+
+    unifiedChatHistory() {
+      const filter = String(this.chatHistoryChannelFilter || 'all');
+      const localItems = (this.chatSessions || []).map((session) => {
+        const messages = Array.isArray(session.messages) ? session.messages : [];
+        const lastMsg = messages.length > 0 ? messages[messages.length - 1] : null;
+        const preview = lastMsg ? String(lastMsg.content || '').slice(0, 120) : '';
+        const modeLabel = session.mode === 'agent-runtime'
+          ? this.t('chatModeAgent')
+          : this.t('chatModeAssistant');
+        const subtitleParts = [modeLabel];
+        if (session.model) subtitleParts.push(session.model);
+        return {
+          id: 'local:' + session.id,
+          type: 'local',
+          channel: 'web',
+          title: this.chatSessionTitle ? this.chatSessionTitle(session) : (session.title || this.t('newChat')),
+          subtitle: subtitleParts.join(' · '),
+          preview,
+          badgeUnread: session.runtimeUnread === true,
+          updatedAt: session.updatedAt || new Date(0).toISOString(),
+          raw: session
+        };
+      });
+
+      const remoteItems = (this.channelConversations || []).map((conv) => {
+        const channel = String(conv.channel || conv.provider || 'unknown').toLowerCase();
+        const subtitleParts = [conv.provider, conv.channel].filter(Boolean);
+        return {
+          id: 'remote:' + conv.id,
+          type: 'remote',
+          channel,
+          title: conv.title || conv.externalConversationId || conv.id || '-',
+          subtitle: subtitleParts.join(' · '),
+          preview: conv.lastMessagePreview || conv.summary || '',
+          badgeUnread: false,
+          updatedAt: conv.lastMessageAt || conv.updatedAt || new Date(0).toISOString(),
+          raw: conv
+        };
+      });
+
+      const all = [...localItems, ...remoteItems];
+      const filtered = filter === 'all' ? all : all.filter((card) => card.channel === filter);
+      filtered.sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt));
+      return filtered;
+    },
+
+    chatHistoryChannelOptions() {
+      const seen = new Set();
+      const opts = [];
+      const push = (id) => {
+        const value = String(id || '').toLowerCase();
+        if (!value || seen.has(value)) return;
+        seen.add(value);
+        opts.push({ id: value, label: this.chatHistoryChannelLabel(value) });
+      };
+      push('web');
+      for (const conv of (this.channelConversations || [])) {
+        push(conv.channel);
+      }
+      return opts;
+    },
+
+    activeSessionOriginChannel() {
+      const session = this.getActiveChatSession ? this.getActiveChatSession() : null;
+      return session?.originChannel || '';
+    },
+
+    async openRemoteConversation(remoteCard, options = {}) {
+      if (!remoteCard || remoteCard.type !== 'remote') return;
+      const conv = remoteCard.raw;
+      const conversationId = String(conv?.conversationId || conv?.id || '').trim();
+      if (!conversationId) return;
+      const shadowSessionId = 'chat_remote_' + conversationId;
+      const channel = String(conv.channel || conv.provider || '').toLowerCase();
+
+      let deliveries = [];
+      let fetchOk = false;
+      try {
+        const { ok, data } = await this.api('/api/agent-channels/conversations/' + encodeURIComponent(conversationId));
+        fetchOk = ok === true;
+        const list = Array.isArray(data?.conversation?.deliveries) ? data.conversation.deliveries
+          : (Array.isArray(data?.deliveries) ? data.deliveries : []);
+        if (fetchOk) deliveries = list;
+      } catch (err) {
+        fetchOk = false;
+      }
+
+      if (!fetchOk && typeof this.showToast === 'function') {
+        this.showToast(this.t('chatHistoryLoadFailed'), 'error');
+      }
+
+      const remoteMsgs = deliveries.map((record) => {
+        const payload = record.payload || {};
+        const isInbound = record.direction === 'inbound';
+        return {
+          role: isInbound ? 'user' : 'assistant',
+          content: isInbound
+            ? (payload.text || '')
+            : (payload.fullText || payload.text || payload.summary || ''),
+          _origin: 'remote',
+          _originId: record.id,
+          _originChannel: channel,
+          _originTimestamp: record.updatedAt || record.createdAt || '',
+          isError: record.status === 'failed'
+        };
+      });
+
+      const existing = this.chatSessions.find((s) => s.id === shadowSessionId);
+      const webMsgs = existing && Array.isArray(existing.messages)
+        ? existing.messages.filter((m) => m._origin === 'web')
+        : [];
+
+      const messages = fetchOk
+        ? [...remoteMsgs, ...webMsgs]
+        : (existing?.messages || []);
+
+      const session = {
+        id: shadowSessionId,
+        title: conv.title || conv.externalConversationId || conversationId,
+        mode: 'agent-runtime',
+        sourceId: existing?.sourceId || '',
+        runtimeProvider: existing?.runtimeProvider || this.chatRuntimeProvider || 'codex',
+        runtimeSessionId: existing?.runtimeSessionId || '',
+        attachedRuntimeProvider: existing?.attachedRuntimeProvider || '',
+        attachedRuntimeModel: existing?.attachedRuntimeModel || '',
+        runtimeStatus: existing?.runtimeStatus || '',
+        runtimeLastEventSeq: Number(existing?.runtimeLastEventSeq || 0),
+        runtimePendingQuestion: existing?.runtimePendingQuestion || null,
+        runtimePendingApprovals: Array.isArray(existing?.runtimePendingApprovals)
+          ? existing.runtimePendingApprovals
+          : [],
+        runtimeUnread: false,
+        model: existing?.model || '',
+        assistantMode: this.chatAssistantMode === true,
+        systemPrompt: existing?.systemPrompt || '',
+        messages,
+        originChannel: channel,
+        originProvider: conv.provider || '',
+        originConversationId: conversationId,
+        originRuntimeSessionId: conv.runtimeSessionId || '',
+        originExternalId: conv.externalConversationId || '',
+        originTitle: conv.title || '',
+        updatedAt: new Date().toISOString()
+      };
+
+      const idx = this.chatSessions.findIndex((s) => s.id === shadowSessionId);
+      if (idx >= 0) {
+        this.chatSessions[idx] = session;
+      } else {
+        this.chatSessions.unshift(session);
+      }
+      this.persistChatSessions();
+      this.openChatSession(shadowSessionId);
+      if (!options.keepDrawerOpen && window.innerWidth < 1280) {
+        this.chatHistoryOpen = false;
+      }
+    },
+
+    async refreshActiveRemoteConversation() {
+      const session = this.getActiveChatSession ? this.getActiveChatSession() : null;
+      if (!session?.originConversationId) return;
+      const remoteConv = (this.channelConversations || []).find(
+        (c) => c.id === session.originConversationId
+      ) || {
+        id: session.originConversationId,
+        channel: session.originChannel,
+        provider: session.originProvider,
+        title: session.originTitle,
+        externalConversationId: session.originExternalId
+      };
+      await this.openRemoteConversation({ type: 'remote', raw: remoteConv }, { keepDrawerOpen: true });
+    },
 
     async loadChatSources() {
       this.chatSourceLoading = true;
@@ -259,14 +565,15 @@ export function createChatPageModule() {
       return firstUserMessage.content.trim().slice(0, 24) || this.t('newChat');
     },
 
-    newChatSession() {
+    buildBlankChatSession(targetMode) {
+      const mode = targetMode === 'assistant' ? 'assistant' : 'agent-runtime';
       const sessionId = 'chat_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
-      const session = {
+      return {
         id: sessionId,
         title: this.t('newChat'),
-        mode: this.chatMode || 'assistant',
-        sourceId: this.chatSourceId || this.chatSources[0]?.id || '',
-        runtimeProvider: this.chatRuntimeProvider || 'codex',
+        mode,
+        sourceId: mode === 'assistant' ? (this.chatSourceId || this.chatSources[0]?.id || '') : '',
+        runtimeProvider: mode === 'agent-runtime' ? (this.chatRuntimeProvider || 'codex') : '',
         runtimeSessionId: '',
         attachedRuntimeProvider: '',
         attachedRuntimeModel: '',
@@ -275,16 +582,39 @@ export function createChatPageModule() {
         runtimePendingQuestion: null,
         runtimePendingApprovals: [],
         runtimeUnread: false,
-        model: this.chatModel || 'gpt-5.2',
+        model: mode === 'assistant' ? (this.chatModel || 'gpt-5.2') : '',
         assistantMode: this.chatAssistantMode === true,
         systemPrompt: '',
         messages: [],
         updatedAt: new Date().toISOString()
       };
+    },
 
+    switchChatMode(targetMode) {
+      const mode = targetMode === 'assistant' ? 'assistant' : 'agent-runtime';
+      if (mode === this.chatMode) return;
+
+      const empty = this.chatSessions.find((s) =>
+        s.mode === mode
+        && !s.originConversationId
+        && (!Array.isArray(s.messages) || s.messages.length === 0)
+      );
+      if (empty) {
+        this.openChatSession(empty.id);
+        return;
+      }
+
+      const session = this.buildBlankChatSession(mode);
       this.chatSessions.unshift(session);
-      this.openChatSession(sessionId);
       this.persistChatSessions();
+      this.openChatSession(session.id);
+    },
+
+    newChatSession() {
+      const session = this.buildBlankChatSession(this.chatMode || 'agent-runtime');
+      this.chatSessions.unshift(session);
+      this.persistChatSessions();
+      this.openChatSession(session.id);
       this.chatHistoryOpen = false;
     },
 
@@ -295,10 +625,14 @@ export function createChatPageModule() {
       this.closeAgentRuntimeStream();
       this.stopAssistantRunPolling();
       this.activeChatSessionId = session.id;
-      this.chatMode = session.mode || 'assistant';
+      this.chatMode = session.mode || 'agent-runtime';
       this.chatSourceId = session.sourceId || this.chatSources[0]?.id || '';
       this.chatRuntimeProvider = session.runtimeProvider || 'codex';
-      this.chatModel = session.model || 'gpt-5.2';
+      if (session.model) {
+        this.chatModel = session.model;
+      } else if (!this.chatModel) {
+        this.chatModel = 'gpt-5.2';
+      }
       this.chatAssistantMode = session.assistantMode !== false;
       this.chatSystemPrompt = session.systemPrompt || '';
       this.chatMessages = Array.isArray(session.messages) ? session.messages : [];
@@ -610,26 +944,33 @@ export function createChatPageModule() {
 
     runtimeSessionConfigChanged(session) {
       if (!session?.runtimeSessionId) return false;
+      // Assistant lane: the user doesn't pick provider/model in the UI — the
+      // backend Assistant Agent + bound CLI decide. Comparing the frontend's
+      // chatRuntimeProvider against whatever the runtime actually resolved
+      // would produce a "provider changed" false positive on every follow-up
+      // turn and inject a noisy "已切换到新会话" notice into the message stream.
+      if (this.chatMode === 'agent-runtime') return false;
       const selectedProvider = String(this.chatRuntimeProvider || session.runtimeProvider || 'codex').trim();
-      const selectedModel = String(this.chatModel || session.model || '').trim();
+      const selectedModel = String(session.model || '').trim();
       const attachedProvider = String(session.attachedRuntimeProvider || '').trim();
       const attachedModel = String(session.attachedRuntimeModel || '').trim();
       if (attachedProvider && selectedProvider && attachedProvider !== selectedProvider) {
         return true;
       }
+      if (!attachedModel || !selectedModel) return false;
       return attachedModel !== selectedModel;
     },
 
     buildRuntimeSessionRestartNotice(session) {
       const reasons = [];
       const selectedProvider = String(this.chatRuntimeProvider || session?.runtimeProvider || 'codex').trim();
-      const selectedModel = String(this.chatModel || session?.model || '').trim();
+      const selectedModel = String(session?.model || '').trim();
       const attachedProvider = String(session?.attachedRuntimeProvider || '').trim();
       const attachedModel = String(session?.attachedRuntimeModel || '').trim();
       if (attachedProvider && selectedProvider && attachedProvider !== selectedProvider) {
         reasons.push(this.t('agentRuntimeProviderChanged'));
       }
-      if (attachedModel !== selectedModel) {
+      if (attachedModel && selectedModel && attachedModel !== selectedModel) {
         reasons.push(this.t('agentRuntimeModelChanged'));
       }
       const detail = reasons.length > 0
@@ -799,12 +1140,26 @@ export function createChatPageModule() {
     syncActiveChatSession() {
       const session = this.chatSessions.find((item) => item.id === this.activeChatSessionId);
       if (!session) return;
-      session.mode = this.chatMode || 'assistant';
-      session.sourceId = this.chatSourceId || '';
-      session.runtimeProvider = this.chatRuntimeProvider || 'codex';
-      session.model = this.chatModel || 'gpt-5.2';
+      const mode = this.chatMode || 'agent-runtime';
+      session.mode = mode;
+      if (mode === 'assistant') {
+        // Model-chat mode: user explicitly picks source + model in the UI;
+        // mirror them onto the session so reloads remember the choice.
+        session.sourceId = this.chatSourceId || '';
+        session.model = (this.chatModel || '').trim();
+        session.systemPrompt = this.chatSystemPrompt || '';
+        session.runtimeProvider = '';
+      } else {
+        // Assistant (agent-runtime) mode: backend / CLI decides model.
+        // Never overwrite session.model from the frontend's chatModel state —
+        // that state belongs to the model-chat lane and would be a category
+        // mismatch for the runtime CLI (e.g. 'gpt-5.2' fed to claude-code).
+        session.runtimeProvider = this.chatRuntimeProvider || session.runtimeProvider || 'codex';
+        if (!('sourceId' in session)) session.sourceId = '';
+        if (!('model' in session)) session.model = '';
+        if (!('systemPrompt' in session)) session.systemPrompt = '';
+      }
       session.assistantMode = this.chatAssistantMode === true;
-      session.systemPrompt = this.chatSystemPrompt || '';
       session.messages = [...this.chatMessages];
       session.title = this.buildChatSessionTitle(session.messages);
       session.updatedAt = new Date().toISOString();
@@ -842,7 +1197,7 @@ export function createChatPageModule() {
       if (!this.chatSourceId) return;
 
       const shouldAutoScroll = this.shouldStickChatToBottom();
-      const userMessage = { role: 'user', content: this.chatInput.trim() };
+      const userMessage = { role: 'user', content: this.chatInput.trim(), _origin: 'web' };
       this.chatMessages.push(userMessage);
       this.chatInput = '';
       this.syncActiveChatSession();
@@ -858,7 +1213,8 @@ export function createChatPageModule() {
         sourceLabel: this.chatSourceLabel(this.chatSourceId),
         citations: [],
         pendingAction: null,
-        _confirming: false
+        _confirming: false,
+        _origin: 'web'
       };
       this.chatMessages.push(assistantMessage);
       this.syncActiveChatSession();
@@ -874,6 +1230,8 @@ export function createChatPageModule() {
       }
 
       this.chatStreamController = new AbortController();
+      const sentSourceId = this.chatSourceId;
+      const startedAt = Date.now();
 
       try {
         const response = await fetch('/api/chat/stream', {
@@ -891,7 +1249,10 @@ export function createChatPageModule() {
 
         if (!response.ok || !response.body) {
           const errorText = await response.text();
-          throw new Error(errorText || this.t('requestFailed'));
+          const detail = this.classifyChatError(response.status, errorText);
+          const err = new Error(detail.message);
+          err._detail = detail;
+          throw err;
         }
 
         const streamResult = await this.consumeChatStream(response.body, assistantMessage);
@@ -900,10 +1261,13 @@ export function createChatPageModule() {
         } else if (!streamResult.seenDelta && !streamResult.seenDone && !assistantMessage.isError) {
           await this.fetchChatCompletionFallback(requestMessages, assistantMessage);
         }
+        this.recordChatSourceHealth(sentSourceId, Date.now() - startedAt, !assistantMessage.isError);
       } catch (error) {
-        assistantMessage.content = error.message || this.t('requestFailed');
+        const detail = error._detail || this.classifyChatError(0, error.message);
+        assistantMessage.content = detail.message;
         assistantMessage.isError = true;
-        this.showToast(assistantMessage.content, 'error');
+        assistantMessage.errorDetail = detail;
+        this.recordChatSourceHealth(sentSourceId, Date.now() - startedAt, false);
       } finally {
         this.chatLoading = false;
         this.chatStreamController = null;
@@ -924,7 +1288,7 @@ export function createChatPageModule() {
       }
 
       const shouldAutoScroll = this.shouldStickChatToBottom();
-      this.chatMessages.push({ role: 'user', content: input });
+      this.chatMessages.push({ role: 'user', content: input, _origin: 'web' });
       this.chatInput = '';
       this.chatLoading = true;
       this.syncActiveChatSession();
@@ -939,14 +1303,20 @@ export function createChatPageModule() {
         }
 
         const pendingQuestionId = session.runtimePendingQuestion?.questionId || null;
+        // Assistant (agent-runtime) lane: never send a model from the frontend.
+        // The backend / bound CLI provider resolves its own appropriate model.
+        // Sending `this.chatModel` here would be a category error — that state
+        // belongs to the 模型对话 lane (chatSources models, e.g. 'gpt-5.2') and
+        // would conflict with the actual runtime CLI's model namespace
+        // (e.g. 'claude-sonnet-4-6' for claude-code).
+        const agentRequestBody = {
+          sessionId: session.id,
+          input,
+          provider: session.runtimeProvider || this.chatRuntimeProvider
+        };
         const { ok, data, error } = await this.api('/api/chat/agent-message', {
           method: 'POST',
-          body: JSON.stringify({
-            sessionId: session.id,
-            input,
-            provider: this.chatRuntimeProvider,
-            model: this.chatModel.trim() || ''
-          })
+          body: JSON.stringify(agentRequestBody)
         });
         const result = data?.result;
         if (!ok || !result) {
@@ -1209,16 +1579,6 @@ export function createChatPageModule() {
       this.chatMessages = [...this.chatMessages];
     },
 
-    openChatSidebar(tab = 'history') {
-      this.chatSidebarTab = tab;
-      this.chatHistoryOpen = true;
-      if (tab === 'runtime') {
-        this.loadAgentRuntimeSessions();
-      } else if (tab === 'mind') {
-        this.loadAssistantMind();
-      }
-    },
-
     async cancelAssistantClarification(clarificationId) {
       const id = String(clarificationId || '').trim();
       if (!id) return;
@@ -1418,11 +1778,23 @@ export function createChatPageModule() {
     },
 
     toggleChatHistory() {
-      if (this.chatHistoryOpen && this.chatSidebarTab === 'history') {
+      this.chatHistoryOpen = !this.chatHistoryOpen;
+      if (this.chatHistoryOpen && typeof this.loadChannelConversations === 'function') {
+        this.loadChannelConversations({ silent: true });
+      }
+    },
+
+    openHistoryCard(card) {
+      if (!card) return;
+      if (card.type === 'local' && card.raw?.id) {
+        this.openChatSession(card.raw.id);
         this.chatHistoryOpen = false;
         return;
       }
-      this.openChatSidebar('history');
+      if (card.type === 'remote') {
+        this.openRemoteConversation(card);
+        this.chatHistoryOpen = false;
+      }
     },
 
     toggleSystemPrompt() {

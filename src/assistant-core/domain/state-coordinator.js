@@ -973,6 +973,19 @@ export class StateCoordinator {
     });
   }
 
+  removeScheduledTask({ id = '' } = {}) {
+    const key = toText(id);
+    if (!key) {
+      throw new Error('id is required');
+    }
+    const current = this.scheduledTaskStore.get(key);
+    if (!current?.id) {
+      throw new Error('scheduled task not found');
+    }
+    const removed = this.scheduledTaskStore.remove(key);
+    return removed || current;
+  }
+
   updateScheduledTaskState({
     id = '',
     state = '',

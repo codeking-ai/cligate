@@ -37,22 +37,24 @@ export class JsonEntityStore {
     }
   }
 
-  _save() {
+  _save({ skipMerge = false } = {}) {
     this.ensureDirs();
-    let diskRecords = [];
-    if (existsSync(this.file)) {
-      try {
-        const parsed = JSON.parse(readFileSync(this.file, 'utf8'));
-        diskRecords = Array.isArray(parsed?.[this.rootKey]) ? parsed[this.rootKey] : [];
-      } catch {
-        diskRecords = [];
+    if (!skipMerge) {
+      let diskRecords = [];
+      if (existsSync(this.file)) {
+        try {
+          const parsed = JSON.parse(readFileSync(this.file, 'utf8'));
+          diskRecords = Array.isArray(parsed?.[this.rootKey]) ? parsed[this.rootKey] : [];
+        } catch {
+          diskRecords = [];
+        }
       }
+      this.records = mergeJsonRecords({
+        currentRecords: this.records,
+        diskRecords,
+        keyOf: this.keyOf
+      });
     }
-    this.records = mergeJsonRecords({
-      currentRecords: this.records,
-      diskRecords,
-      keyOf: this.keyOf
-    });
     writeFileSync(
       this.file,
       JSON.stringify({ [this.rootKey]: this.records }, null, 2),
@@ -88,6 +90,20 @@ export class JsonEntityStore {
     }
     this._save();
     return record;
+  }
+
+  remove(id) {
+    const key = String(id || '').trim();
+    if (!key) return null;
+    const index = this.records.findIndex((entry) => String(this.keyOf(entry)) === key);
+    if (index < 0) return null;
+    const [removed] = this.records.splice(index, 1);
+    // Skip the merge-with-disk step: mergeJsonRecords is a union, so re-reading
+    // the file and unioning would resurrect the just-removed record from disk.
+    // The merge is intended to protect concurrent writes from sibling store
+    // instances, which our singletons don't have.
+    this._save({ skipMerge: true });
+    return removed;
   }
 }
 

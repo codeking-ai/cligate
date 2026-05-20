@@ -649,6 +649,14 @@ export function handleCancelAssistantScheduledTask(req, res) {
     if (!id) {
       return res.status(400).json({ success: false, error: 'id is required' });
     }
+    // `?hard=true` performs a physical delete (removes the record entirely).
+    // The default behavior remains a soft cancel (state → 'cancelled') so
+    // existing UI affordances keep working.
+    const hard = String(req.query?.hard ?? '').trim().toLowerCase() === 'true';
+    if (hard) {
+      const removed = stateCoordinator.removeScheduledTask({ id });
+      return res.json({ success: true, scheduledTask: removed, removed: true });
+    }
     const cancelled = stateCoordinator.cancelScheduledTask({
       id,
       reason: toText(req.body?.reason) || 'manual_ui_cancel'
