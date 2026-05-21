@@ -13,6 +13,8 @@ jobs:
     permissions:
       contents: read
       id-token: write
+    env:
+      NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
     steps:
       - name: Checkout
@@ -40,21 +42,16 @@ jobs:
       - name: Show latest published npm version
         run: npm view cligate version || echo "Package not found on npm yet"
 
-      - name: Verify npm token identity
-        if: ${{ secrets.NPM_TOKEN != '' }}
-        run: npm whoami
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-
-      - name: Publish npm package with token
-        if: ${{ secrets.NPM_TOKEN != '' }}
-        run: npm publish --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-
-      - name: Publish npm package with trusted publishing
-        if: ${{ secrets.NPM_TOKEN == '' }}
-        run: npm publish --access public --provenance
+      - name: Publish npm package
+        run: |
+          if [ -n "$NODE_AUTH_TOKEN" ]; then
+            echo "Publishing with NPM_TOKEN"
+            npm whoami
+            npm publish --access public
+          else
+            echo "Publishing with npm trusted publishing"
+            npm publish --access public --provenance
+          fi
 
   build:
     strategy:
