@@ -49,9 +49,18 @@ export class AgentChannelManager {
     this.router = router;
     this.outboundDispatcher = outboundDispatcher;
     if (this.outboundDispatcher) {
-      this.outboundDispatcher.registry = {
+      // Build an instance-aware registry shim that resolves provider instances
+      // (which have `.settings` populated by start()) instead of the raw
+      // template registry (which never carries settings). Inject it into both
+      // the dispatcher AND its delivery sender — without the second injection
+      // the delivery path keeps falling back to the template provider and the
+      // App-API/auth lookups silently fail. See dingtalk-provider.sendViaAppApi
+      // which depends on `this.settings.clientId/clientSecret`.
+      const instanceAwareRegistry = {
         get: (providerId, instanceId) => this.getInstance(providerId, instanceId)
       };
+      this.outboundDispatcher.registry = instanceAwareRegistry;
+      this.outboundDispatcher.deliverySender?.setRegistry?.(instanceAwareRegistry);
     }
     this.settingsProvider = settingsProvider;
     this.settingsWriter = settingsWriter;

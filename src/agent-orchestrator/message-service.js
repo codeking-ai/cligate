@@ -1431,13 +1431,29 @@ export class AgentOrchestratorMessageService {
         title: scheduledTask.title,
         bodyText: body
       });
+
+      // Surface the underlying delivery error so the scheduler can record it
+      // in `lastError` / `lastResultPreview`. Without this the task silently
+      // reports "delivered to 0 target(s)" with no hint of why.
+      const failures = (results || []).filter((r) => !r?.ok);
+      if (delivered === 0 && failures.length > 0) {
+        const firstError = String(failures[0]?.error || 'unknown delivery error');
+        const err = new Error(`reminder failed to deliver to ${failures.length} target(s): ${firstError}`);
+        err.deliveryResults = results;
+        throw err;
+      }
+
+      const summaryParts = [`reminder delivered to ${delivered}/${targets.length} target(s)`];
+      if (failures.length > 0) {
+        summaryParts.push(`failures: ${failures.map((f) => f.error || 'unknown').join(' | ')}`);
+      }
       return {
         action,
         scheduledTaskId: scheduledTask.id,
         scheduledTaskRunId: runId,
         delivered,
         deliveryResults: results,
-        summary: `reminder delivered to ${delivered} target(s)`,
+        summary: summaryParts.join(' — '),
         result: body
       };
     }

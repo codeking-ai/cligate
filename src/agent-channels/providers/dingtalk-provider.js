@@ -753,11 +753,19 @@ export class DingTalkChannelProvider {
     const textChunks = splitDingTalkText(textWithActions);
     let result = null;
 
+    // Prefer the sessionWebhook path when it's still fresh — it's cheap and
+    // works for inbound-reply windows. If DingTalk rejects (consumed / session
+    // closed server-side), fall through to App API instead of failing.
     if (sessionWebhook && (!expiredAt || expiredAt > now + 15_000)) {
-      for (const chunk of textChunks) {
-        result = await this.sendViaSessionWebhook(sessionWebhook, chunk);
+      try {
+        for (const chunk of textChunks) {
+          result = await this.sendViaSessionWebhook(sessionWebhook, chunk);
+        }
+        return result;
+      } catch (err) {
+        // sessionWebhook may already be consumed/expired on DingTalk's side
+        // even though `expiredAt` says otherwise. Fall through to App API.
       }
-      return result;
     }
 
     for (const chunk of textChunks) {
