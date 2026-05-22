@@ -44,6 +44,10 @@ const DEFAULT_SETTINGS = {
             azureOpenaiApiKeyBridge: false
         }
     },
+    skills: {
+        enabled: true,
+        config: []
+    },
     channels: {
         telegram: {
             enabled: false,
@@ -150,6 +154,38 @@ function normalizeChannelsConfig(channels = {}) {
     };
 }
 
+function normalizeSkillConfigEntry(entry = {}) {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+        return null;
+    }
+    const path = typeof entry.path === 'string' && entry.path.trim()
+        ? entry.path.trim()
+        : '';
+    const name = typeof entry.name === 'string' && entry.name.trim()
+        ? entry.name.trim()
+        : '';
+    if (!path && !name) {
+        return null;
+    }
+    return {
+        ...(path ? { path } : {}),
+        ...(name ? { name } : {}),
+        enabled: entry.enabled !== false
+    };
+}
+
+function normalizeSkillsConfig(config = {}) {
+    const current = config && typeof config === 'object' && !Array.isArray(config)
+        ? config
+        : {};
+    return {
+        enabled: current.enabled !== false,
+        config: Array.isArray(current.config)
+            ? current.config.map(normalizeSkillConfigEntry).filter(Boolean)
+            : []
+    };
+}
+
 const ASSISTANT_CREDENTIAL_TYPES = new Set(['api-key', 'chatgpt-account', 'claude-account']);
 const ASSISTANT_FALLBACKS_MAX = 3;
 const ASSISTANT_BREAKER_DEFAULTS = Object.freeze({
@@ -248,6 +284,7 @@ export {
     normalizeBoundCredential,
     normalizeFallbacks,
     normalizeCircuitBreaker,
+    normalizeSkillsConfig,
     ASSISTANT_CREDENTIAL_TYPES,
     ASSISTANT_FALLBACKS_MAX,
     ASSISTANT_BREAKER_DEFAULTS,
@@ -275,6 +312,7 @@ export function getServerSettings() {
             accountStrategy: normalizeStrategyName(data.accountStrategy),
             appRouting: normalizeAppRoutingConfig(data.appRouting),
             assistantAgent: normalizeAssistantAgentConfig(data.assistantAgent),
+            skills: normalizeSkillsConfig(data.skills),
             channels: normalizeChannelsConfig(data.channels)
         };
     } catch (error) {
@@ -291,6 +329,7 @@ export function setServerSettings(patch = {}) {
         accountStrategy: normalizeStrategyName(patch.accountStrategy ?? current.accountStrategy),
         appRouting: normalizeAppRoutingConfig(patch.appRouting || current.appRouting),
         assistantAgent: normalizeAssistantAgentConfig(patch.assistantAgent || current.assistantAgent),
+        skills: normalizeSkillsConfig(patch.skills || current.skills),
         channels: normalizeChannelsConfig(patch.channels || current.channels)
     };
 
@@ -364,5 +403,6 @@ export default {
     setServerSettings,
     removeCredentialReferences,
     SETTINGS_FILE,
-    normalizeChannelsConfig
+    normalizeChannelsConfig,
+    normalizeSkillsConfig
 };

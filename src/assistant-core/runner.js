@@ -6,6 +6,15 @@ import AssistantToolExecutor from './tool-executor.js';
 import { ASSISTANT_RUN_CLOSURE_STATE, ASSISTANT_RUN_STATUS, createAssistantRunCheckpoint } from './models.js';
 import assistantPlanner, { AssistantPlanner } from './planner.js';
 import assistantTaskViewService from './task-view-service.js';
+import {
+  skillManager,
+  collectExplicitSkillMentions,
+  collectSuggestedSkills,
+  activateSkillsForRun,
+  restoreActiveSkillsFromCheckpoint,
+  replaceActiveSkills,
+  shouldReplaceActiveSkills
+} from '../skills/index.js';
 
 function isChineseText(text) {
   return /[\u3400-\u9fff]/.test(String(text || ''));
@@ -303,7 +312,55 @@ export class AssistantRunner {
           completedStepCount: Array.isArray(run?.steps) ? run.steps.length : 0,
           toolResults: Array.isArray(run?.metadata?.toolResults) ? run.metadata.toolResults : [],
           lastCompletedStep: Array.isArray(run?.steps) && run.steps.length > 0 ? run.steps[run.steps.length - 1] : null,
-          resumable: true
+          resumable: true,
+          skills: restoreActiveSkillsFromCheckpoint(run)
+        })
+      }
+    });
+
+    const discoveredSkills = skillManager.discoverForCwd(cwd || process.cwd()).skills;
+    const restoredSkillState = restoreActiveSkillsFromCheckpoint(currentRun);
+    const explicitSkills = resume
+      ? []
+      : collectExplicitSkillMentions(text, discoveredSkills);
+    const suggestedSkills = resume || explicitSkills.length > 0
+      ? []
+      : collectSuggestedSkills(text, discoveredSkills);
+    const nextSelectedSkills = explicitSkills.length > 0 ? explicitSkills : suggestedSkills;
+    const shouldReplace = !resume && shouldReplaceActiveSkills(
+      text,
+      restoredSkillState.active,
+      discoveredSkills
+    );
+    const baseRunForActivation = shouldReplace
+      ? {
+          ...currentRun,
+          metadata: {
+            ...(currentRun.metadata || {}),
+            skills: replaceActiveSkills(currentRun, [])
+          }
+        }
+      : currentRun;
+    const resolvedSkillState = resume
+      ? restoredSkillState
+      : activateSkillsForRun({
+          run: baseRunForActivation,
+          availableSkills: discoveredSkills,
+          selectedSkills: nextSelectedSkills,
+          loadSkillContent: (skill) => skillManager.loadSkillContent(skill)
+        });
+    currentRun = this.runStore.save({
+      ...currentRun,
+      metadata: {
+        ...(currentRun.metadata || {}),
+        skills: resolvedSkillState,
+        checkpoint: createAssistantRunCheckpoint({
+          plan,
+          completedStepCount: Array.isArray(run?.steps) ? run.steps.length : 0,
+          toolResults: Array.isArray(run?.metadata?.toolResults) ? run.metadata.toolResults : [],
+          lastCompletedStep: Array.isArray(run?.steps) && run.steps.length > 0 ? run.steps[run.steps.length - 1] : null,
+          resumable: true,
+          skills: resolvedSkillState
         })
       }
     });
@@ -376,7 +433,8 @@ export class AssistantRunner {
               completedStepCount: steps.length,
               toolResults,
               lastCompletedStep: steps[steps.length - 1] || null,
-              resumable: true
+              resumable: true,
+              skills: currentRun?.metadata?.skills || null
             })
           }
         });
@@ -465,7 +523,8 @@ export class AssistantRunner {
             completedStepCount: steps.length,
             toolResults,
             lastCompletedStep: steps[steps.length - 1] || null,
-            resumable: false
+            resumable: false,
+            skills: currentRun?.metadata?.skills || null
           }),
           stopPolicy: {
             status: finalStatus,
@@ -496,7 +555,8 @@ export class AssistantRunner {
             completedStepCount: steps.length,
             toolResults,
             lastCompletedStep: steps[steps.length - 1] || null,
-            resumable: true
+            resumable: true,
+            skills: currentRun?.metadata?.skills || null
           })
         }
       });

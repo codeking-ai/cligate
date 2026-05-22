@@ -1,0 +1,266 @@
+<div class="skills-workspace-header flex items-center justify-between gap-4 mb-6">
+                    <div class="flex flex-wrap items-center gap-4">
+                        <div>
+                            <div class="text-[11px] font-mono uppercase tracking-[0.18em] text-gray-500" x-text="t('skillsWorkspaceEyebrow')"></div>
+                            <h1 class="text-2xl font-bold text-white tracking-tight mt-2" x-text="t('skillsTitle')"></h1>
+                            <p class="text-sm text-gray-500 mt-2 max-w-3xl" x-text="t('skillsOverviewDesc')"></p>
+                        </div>
+                        <div class="meta-chip flex items-center h-6 px-3 rounded-full bg-space-800/80 border border-space-border/50 shadow-sm backdrop-blur-sm">
+                            <span class="text-[10px] font-mono uppercase tracking-wider" x-text="filteredInstalledSkills.length + ' ' + t('skillsInstalledCountLabel')"></span>
+                        </div>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <button class="btn btn-sm btn-surface gap-1.5" @click="loadSkills({ forceReload: true })" :disabled="skillsLoading">
+                            <svg class="w-3.5 h-3.5" :class="{'animate-spin': skillsLoading}" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                            </svg>
+                            <span x-text="t('refresh')"></span>
+                        </button>
+                        <button class="btn btn-sm btn-accent-purple gap-1.5" @click="openSkillImportModal()">
+                            <span>+</span>
+                            <span x-text="t('skillsImport')"></span>
+                        </button>
+                    </div>
+                </div>
+
+                <div class="grid gap-6 xl:grid-cols-[360px_minmax(0,1fr)]">
+                    <div class="space-y-4 min-w-0">
+                        <div class="view-card">
+                            <div class="flex items-center justify-between gap-3 mb-4">
+                                <div>
+                                    <div class="text-xs font-mono text-gray-400 uppercase tracking-widest" x-text="t('skillsSystemSwitch')"></div>
+                                    <div class="text-sm text-gray-500 mt-1" x-text="t('skillsSystemSwitchDesc')"></div>
+                                </div>
+                                <button class="relative inline-flex h-6 w-11 items-center rounded-full transition-colors duration-200 focus:outline-none"
+                                    :class="skillsEnabled ? 'bg-neon-green' : 'bg-space-700'"
+                                    @click="toggleSkillsEnabled()">
+                                    <span class="inline-block h-4 w-4 transform rounded-full bg-white transition-transform duration-200"
+                                        :class="skillsEnabled ? 'translate-x-6' : 'translate-x-1'"></span>
+                                </button>
+                            </div>
+                            <div class="text-[11px] font-mono"
+                                :class="skillsEnabled ? 'text-neon-green' : 'text-red-300'"
+                                x-text="skillsEnabled ? t('skillsEnabledSummary') : t('skillsDisabledSummary')"></div>
+                        </div>
+
+                        <div class="view-card">
+                            <div class="flex items-center justify-between gap-3 mb-4">
+                                <div class="text-xs font-mono text-gray-400 uppercase tracking-widest" x-text="t('skillsInstalledTitle')"></div>
+                                <span class="text-[10px] font-mono text-gray-500" x-text="skillsRoots.length + ' ' + t('skillsRootsLabel')"></span>
+                            </div>
+                            <div class="relative mb-3">
+                                <input type="text" x-model="skillsSearchQuery" :placeholder="t('skillsSearchPlaceholder')"
+                                    class="input-search-sm w-full h-9 pl-8 pr-3 text-sm font-mono">
+                                <svg class="w-3.5 h-3.5 absolute left-3 top-3 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                                </svg>
+                            </div>
+                            <div class="space-y-2 max-h-[420px] overflow-auto custom-scrollbar pr-1">
+                                <template x-for="skill in filteredInstalledSkills" :key="skill.pathToSkillMd">
+                                    <button class="w-full text-left rounded-lg border px-3 py-3 transition-colors"
+                                        :class="selectedSkillPath === skill.pathToSkillMd
+                                            ? 'border-neon-cyan/40 bg-neon-cyan/5'
+                                            : 'border-space-border/40 bg-space-900/30 hover:bg-space-800/40'"
+                                        @click="loadSkillDetail(skill.pathToSkillMd)">
+                                        <div class="flex items-start justify-between gap-3">
+                                            <div class="min-w-0">
+                                                <div class="text-sm font-semibold text-white truncate" x-text="skill.name"></div>
+                                                <div class="text-xs text-gray-500 mt-1 line-clamp-2" x-text="skill.shortDescription || skill.description"></div>
+                                            </div>
+                                            <span class="inline-flex items-center h-5 px-2 rounded-full text-[10px] font-bold border shrink-0"
+                                                :class="skillStatusBadgeClass(skill)"
+                                                x-text="skillStatusLabel(skill)"></span>
+                                        </div>
+                                        <div class="flex flex-wrap items-center gap-2 mt-3">
+                                            <span class="inline-flex items-center h-5 px-2 rounded-full text-[10px] font-mono border"
+                                                :class="skillScopeBadgeClass(skill.scope)"
+                                                x-text="skillScopeLabel(skill.scope)"></span>
+                                            <template x-for="tag in (skill.tags || []).slice(0, 2)" :key="tag">
+                                                <span class="inline-flex items-center h-5 px-2 rounded-full text-[10px] font-mono bg-space-800/60 border border-space-border/50 text-gray-400" x-text="tag"></span>
+                                            </template>
+                                        </div>
+                                    </button>
+                                </template>
+                                <div x-show="!skillsLoading && filteredInstalledSkills.length === 0" class="text-sm text-gray-500 py-8 text-center" x-text="t('skillsInstalledEmpty')"></div>
+                            </div>
+                        </div>
+
+                        <div class="view-card" x-show="filteredLegacyRepoSkills.length > 0">
+                            <div class="flex items-center justify-between gap-3 mb-4">
+                                <div class="text-xs font-mono text-gray-400 uppercase tracking-widest" x-text="t('skillsLegacyRepoTitle')"></div>
+                                <span class="text-[10px] font-mono text-gray-500" x-text="filteredLegacyRepoSkills.length + ' ' + t('skillsCountLabel')"></span>
+                            </div>
+                            <div class="space-y-2 max-h-[220px] overflow-auto custom-scrollbar pr-1">
+                                <template x-for="skill in filteredLegacyRepoSkills" :key="skill.pathToSkillMd">
+                                    <button class="w-full text-left rounded-lg border border-space-border/40 bg-space-900/20 px-3 py-3 transition-colors hover:bg-space-800/35"
+                                        :class="selectedSkillPath === skill.pathToSkillMd ? 'border-neon-cyan/30 bg-neon-cyan/5' : ''"
+                                        @click="loadSkillDetail(skill.pathToSkillMd)">
+                                        <div class="flex items-start justify-between gap-3">
+                                            <div class="min-w-0">
+                                                <div class="text-sm font-semibold text-white truncate" x-text="skill.name"></div>
+                                                <div class="text-xs text-gray-500 mt-1 line-clamp-2" x-text="skill.shortDescription || skill.description"></div>
+                                            </div>
+                                            <span class="inline-flex items-center h-5 px-2 rounded-full text-[10px] font-mono border bg-neon-cyan/10 text-neon-cyan border-neon-cyan/30" x-text="t('skillsScopeRepoLegacy')"></span>
+                                        </div>
+                                    </button>
+                                </template>
+                            </div>
+                        </div>
+
+                        <div class="view-card">
+                            <div class="flex items-center justify-between gap-3 mb-4">
+                                <div class="text-xs font-mono text-gray-400 uppercase tracking-widest" x-text="t('skillsBundledTitle')"></div>
+                                <span class="text-[10px] font-mono text-gray-500" x-text="filteredBundledSkills.length + ' ' + t('skillsCountLabel')"></span>
+                            </div>
+                            <div class="space-y-2 max-h-[240px] overflow-auto custom-scrollbar pr-1">
+                                <template x-for="skill in filteredBundledSkills" :key="skill.pathToSkillMd">
+                                    <button class="w-full text-left rounded-lg border border-space-border/40 bg-space-900/20 px-3 py-3 transition-colors hover:bg-space-800/35"
+                                        :class="selectedSkillPath === skill.pathToSkillMd ? 'border-amber-400/30 bg-amber-500/5' : ''"
+                                        @click="loadSkillDetail(skill.pathToSkillMd)">
+                                        <div class="flex items-start justify-between gap-3">
+                                            <div class="min-w-0">
+                                                <div class="text-sm font-semibold text-white truncate" x-text="skill.name"></div>
+                                                <div class="text-xs text-gray-500 mt-1 line-clamp-2" x-text="skill.shortDescription || skill.description"></div>
+                                            </div>
+                                            <span class="inline-flex items-center h-5 px-2 rounded-full text-[10px] font-mono border bg-amber-500/10 text-amber-300 border-amber-500/30" x-text="t('skillsBundledReadonly')"></span>
+                                        </div>
+                                    </button>
+                                </template>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="space-y-4 min-w-0">
+                        <div class="view-card" x-show="selectedSkillSummary">
+                            <div class="flex flex-wrap items-start justify-between gap-4">
+                                <div class="min-w-0">
+                                    <div class="flex flex-wrap items-center gap-2">
+                                        <h2 class="text-xl font-semibold text-white truncate" x-text="selectedSkillSummary?.name || '-'"></h2>
+                                        <span class="inline-flex items-center h-5 px-2 rounded-full text-[10px] font-mono border"
+                                            :class="skillScopeBadgeClass(selectedSkillSummary?.scope)"
+                                            x-text="skillScopeLabel(selectedSkillSummary?.scope)"></span>
+                                        <span class="inline-flex items-center h-5 px-2 rounded-full text-[10px] font-bold border"
+                                            :class="skillStatusBadgeClass(selectedSkillSummary)"
+                                            x-text="skillStatusLabel(selectedSkillSummary)"></span>
+                                    </div>
+                                    <div class="text-sm text-gray-400 mt-2" x-text="selectedSkill?.description || selectedSkillSummary?.description || ''"></div>
+                                </div>
+                                <div class="flex flex-wrap items-center gap-2" x-show="skillCanManage(selectedSkillSummary)">
+                                    <button class="btn btn-xs btn-outline text-gray-300"
+                                        @click="setSkillEnabled(selectedSkillSummary, selectedSkillSummary?.enabled === false)"
+                                        x-text="selectedSkillSummary?.enabled === false ? t('actionEnable') : t('actionDisable')"></button>
+                                    <button class="btn btn-xs border border-red-500/30 bg-red-500/10 text-red-300"
+                                        :disabled="skillDeletePending"
+                                        @click="deleteSkill(selectedSkill)"
+                                        x-text="t('delete')"></button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="view-card" x-show="selectedSkillSummary">
+                            <div class="grid gap-4 md:grid-cols-2">
+                                <div>
+                                    <div class="text-xs font-mono text-gray-500 uppercase tracking-widest mb-2" x-text="t('skillsPath')"></div>
+                                    <div class="text-xs font-mono text-gray-400 break-all" x-text="selectedSkillSummary?.pathToSkillMd || '-'"></div>
+                                </div>
+                                <div>
+                                    <div class="text-xs font-mono text-gray-500 uppercase tracking-widest mb-2" x-text="t('skillsWhenToUse')"></div>
+                                    <div class="text-sm text-gray-300 whitespace-pre-wrap break-words" x-text="selectedSkill?.whenToUse || t('notSet')"></div>
+                                </div>
+                            </div>
+                            <div class="grid gap-4 md:grid-cols-2 mt-5">
+                                <div>
+                                    <div class="text-xs font-mono text-gray-500 uppercase tracking-widest mb-2" x-text="t('skillsTags')"></div>
+                                    <div class="flex flex-wrap gap-2">
+                                        <template x-for="tag in (selectedSkill?.tags || [])" :key="tag">
+                                            <span class="inline-flex items-center h-6 px-2.5 rounded-full text-[11px] font-mono bg-space-800/60 border border-space-border/50 text-gray-300" x-text="tag"></span>
+                                        </template>
+                                        <div x-show="!(selectedSkill?.tags || []).length" class="text-sm text-gray-500" x-text="t('skillsNoTags')"></div>
+                                    </div>
+                                </div>
+                                <div>
+                                    <div class="text-xs font-mono text-gray-500 uppercase tracking-widest mb-2" x-text="t('skillsConflicts')"></div>
+                                    <div class="flex flex-wrap gap-2">
+                                        <template x-for="conflict in (selectedSkill?.conflictsWith || [])" :key="conflict">
+                                            <span class="inline-flex items-center h-6 px-2.5 rounded-full text-[11px] font-mono bg-amber-500/10 border border-amber-500/30 text-amber-300" x-text="conflict"></span>
+                                        </template>
+                                        <div x-show="!(selectedSkill?.conflictsWith || []).length" class="text-sm text-gray-500" x-text="t('skillsNoConflicts')"></div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="view-card" x-show="selectedSkillSummary">
+                            <div class="flex items-center justify-between gap-3 mb-4">
+                                <div class="text-xs font-mono text-gray-400 uppercase tracking-widest" x-text="t('skillsContent')"></div>
+                                <span x-show="skillDetailLoading" class="text-[11px] font-mono text-gray-500" x-text="t('loading')"></span>
+                            </div>
+                            <pre class="text-xs font-mono text-gray-200 bg-space-950 border border-space-border/20 rounded-lg p-4 max-h-[560px] overflow-auto custom-scrollbar whitespace-pre-wrap break-words"
+                                x-text="selectedSkill?.rawContent || ''"></pre>
+                        </div>
+
+                        <div class="view-card" x-show="!selectedSkillSummary && !skillsLoading">
+                            <div class="py-12 text-center text-gray-500" x-text="t('skillsSelectPrompt')"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <div x-show="showSkillImportModal" x-transition class="fixed inset-0 z-50 flex items-center justify-center p-4" style="display: none;">
+                    <div class="absolute inset-0 bg-black/70 backdrop-blur-sm" @click="closeSkillImportModal()"></div>
+                    <div class="relative bg-space-900 border border-space-border rounded-xl shadow-2xl w-full max-w-2xl overflow-hidden">
+                        <div class="flex items-center justify-between gap-4 px-6 py-5 border-b border-space-border/30">
+                            <div>
+                                <h3 class="text-lg font-semibold text-white" x-text="t('skillsImportTitle')"></h3>
+                                <p class="text-sm text-gray-500 mt-1" x-text="t('skillsImportDesc')"></p>
+                            </div>
+                            <button class="btn btn-sm btn-ghost btn-square" @click="closeSkillImportModal()">✕</button>
+                        </div>
+
+                        <div class="p-6 space-y-5">
+                            <div>
+                                <label class="text-xs text-gray-500 mb-1.5 block" x-text="t('skillsImportModeLabel')"></label>
+                                <div class="inline-flex rounded-xl border border-space-border/40 bg-space-900/50 p-1.5">
+                                    <button class="btn btn-sm border-none rounded-lg"
+                                        :class="skillsImportMode === 'directory' ? 'btn-accent-green' : 'btn-ghost text-gray-500'"
+                                        @click="skillsImportMode = 'directory'"
+                                        x-text="t('skillsImportModeDirectory')"></button>
+                                    <button class="btn btn-sm border-none rounded-lg"
+                                        :class="skillsImportMode === 'zip' ? 'btn-accent-purple' : 'btn-ghost text-gray-500'"
+                                        @click="skillsImportMode = 'zip'"
+                                        x-text="t('skillsImportModeZip')"></button>
+                                </div>
+                            </div>
+
+                            <div x-show="skillsImportMode === 'directory'" class="space-y-3">
+                                <div class="text-sm text-gray-400" x-text="t('skillsImportDirectoryHint')"></div>
+                                <input id="skills-directory-input" type="file" webkitdirectory directory multiple class="hidden"
+                                    @change="setSkillDirectorySelection($event.target.files)">
+                                <button class="btn btn-sm btn-accent-green"
+                                    @click="document.getElementById('skills-directory-input').click()"
+                                    x-text="t('skillsChooseDirectory')"></button>
+                                <div class="rounded-lg border border-space-border/40 bg-space-900/30 px-3 py-2"
+                                    x-show="skillDirectoryName || skillDirectoryFiles.length > 0">
+                                    <div class="text-xs font-mono text-white break-all" x-text="skillDirectoryName || t('skillsDirectoryPending')"></div>
+                                    <div class="text-[11px] text-gray-500 mt-1" x-text="skillDirectoryFiles.length + ' ' + t('skillsFilesSelected')"></div>
+                                </div>
+                                <div class="text-xs text-gray-500 font-mono" x-text="t('skillsDirectoryFormatHint')"></div>
+                            </div>
+
+                            <div x-show="skillsImportMode === 'zip'" class="space-y-3">
+                                <div class="text-sm text-gray-400" x-text="t('skillsImportZipHint')"></div>
+                                <input type="file" accept=".zip,application/zip" @change="skillZipFile = $event.target.files[0] || null; skillZipName = skillZipFile?.name || ''"
+                                    class="file-input file-input-bordered w-full bg-space-800 border-space-border text-white">
+                                <div class="text-xs text-gray-500 font-mono" x-text="skillZipName || t('skillsNoZipSelected')"></div>
+                            </div>
+                        </div>
+
+                        <div class="px-6 py-4 border-t border-space-border/30 flex items-center justify-end gap-2">
+                            <button class="btn btn-sm btn-ghost" @click="closeSkillImportModal()" x-text="t('cancel')"></button>
+                            <button class="btn btn-sm btn-accent-purple"
+                                :disabled="skillImporting"
+                                @click="submitSkillImport(skillsImportMode === 'directory' ? document.getElementById('skills-directory-input') : null)">
+                                <span x-text="skillImporting ? t('saving') : t('skillsImportAction')"></span>
+                            </button>
+                        </div>
+                    </div>
+                </div>

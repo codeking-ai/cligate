@@ -84,7 +84,8 @@ export function createAssistantRunCheckpoint({
   completedStepCount = 0,
   toolResults = [],
   lastCompletedStep = null,
-  resumable = false
+  resumable = false,
+  skills = null
 } = {}) {
   return {
     resumable: resumable === true,
@@ -92,6 +93,7 @@ export function createAssistantRunCheckpoint({
     pendingStepCount: Math.max(0, Number(plan?.steps?.length || 0) - Number(completedStepCount || 0)),
     lastCompletedStep: lastCompletedStep && typeof lastCompletedStep === 'object' ? lastCompletedStep : null,
     toolResults: Array.isArray(toolResults) ? toolResults : [],
+    skills: skills && typeof skills === 'object' ? skills : null,
     updatedAt: nowIso()
   };
 }

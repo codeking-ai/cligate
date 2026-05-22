@@ -1,3 +1,5 @@
+import { renderAvailableSkills, renderActiveSkills } from '../skills/renderer.js';
+
 function truncate(value, limit = 400) {
   const text = String(value || '').trim();
   if (!text) return '';
@@ -6,6 +8,11 @@ function truncate(value, limit = 400) {
 
 function formatJson(value) {
   return JSON.stringify(value || {}, null, 2);
+}
+
+function formatOptionalBlock(value = '') {
+  const text = String(value || '').trim();
+  return text ? [text] : [];
 }
 
 function getAssistantControlMode(conversation = null) {
@@ -307,6 +314,8 @@ function buildSystemPrompt(language = 'en') {
     return [
       '你是 CliGate Assistant。',
       '你是一个 LLM 驱动的 supervisor agent，负责理解用户目标、查看上下文、按需调用工具、按需委派 Codex 或 Claude Code 执行任务，并最终以自然语言回复用户。',
+      '如果当前请求明显匹配某个 available skill 的用途，你应主动使用该 skill，而不是等待用户显式点名。skill 一旦在本 run 内激活，后续步骤继续遵守它。',
+      '如果当前请求已经切换到另一类工作，而新的 skill 更匹配，就应替换旧的 active skill，而不是把不相关的旧 skill 一直带着。',
       '优先像一个人一样与用户协作，不要把内部工具调用过程直接当作最终回复。',
       '如果不需要工具和 runtime，就直接回答。',
       '如果需要查看状态或上下文，再调用只读工具。',
@@ -347,6 +356,8 @@ function buildSystemPrompt(language = 'en') {
   return [
     'You are CliGate Assistant.',
     'You are an LLM-driven supervisor agent that understands user goals, inspects context, calls tools when useful, delegates execution to Codex or Claude Code when necessary, and replies in natural language.',
+    'If the current request clearly matches an available skill, activate and use that skill proactively instead of waiting for the user to mention it by name. Once a skill is active for this run, continue following it in later steps of the same run.',
+    'If the task has clearly shifted to a different kind of work and a different skill is now a better match, replace the old active skill instead of carrying unrelated skills forward.',
     'Speak like a collaborative assistant, not like an internal task router.',
     'Answer directly when no tools or runtime work are needed.',
     'Use read-only tools when you need context.',
@@ -605,10 +616,17 @@ export function buildInitialAnthropicMessages({
   referenceResolution,
   recentIntentTimeline,
   thisTurnActions,
+  runSkills,
   defaultRuntimeProvider = 'codex',
   cwd = '',
   model = ''
 } = {}) {
+  const availableSkillsBlock = typeof renderAvailableSkills === 'function'
+    ? renderAvailableSkills(runSkills?.available || [])
+    : '';
+  const activeSkillsBlock = typeof renderActiveSkills === 'function'
+    ? renderActiveSkills(runSkills?.active || [])
+    : '';
   return {
     system: buildSystemPrompt(language),
     messages: [{
@@ -631,6 +649,8 @@ export function buildInitialAnthropicMessages({
               cwd,
               model
             }),
+            ...formatOptionalBlock(availableSkillsBlock),
+            ...formatOptionalBlock(activeSkillsBlock),
             '',
             '<user_request>',
             String(text || '').trim(),

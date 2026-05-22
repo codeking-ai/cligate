@@ -1,7 +1,7 @@
 import '../test-env.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -1030,6 +1030,129 @@ test('Assistant ReAct prompt includes user profile when global preferences exist
   assert.match(promptText, /<user_profile>/);
   assert.match(promptText, /"replyLanguage": "zh-CN"/);
   assert.match(promptText, /"preferredRuntimeProvider": "claude-code"/);
+});
+
+test('Assistant ReAct replaces an old active skill when a new request matches a different skill better', async () => {
+  const service = createAssistantService({
+    llmResponses: [{
+      text: 'done'
+    }]
+  });
+
+  const conversation = service.conversationStore.findOrCreateBySessionId('assistant-react-skill-replace-1', {
+    assistantCore: {
+      controlMode: 'assistant'
+    }
+  });
+
+  const cwd = createTempDir('cligate-skill-replace-');
+  const repoSkillDir = join(cwd, '.cligate', 'skills', 'repo-investigation');
+  const prSkillDir = join(cwd, '.cligate', 'skills', 'pr-review');
+  mkdirSync(repoSkillDir, { recursive: true });
+  mkdirSync(prSkillDir, { recursive: true });
+  writeFileSync(join(repoSkillDir, 'SKILL.md'), `---
+name: repo-investigation
+description: Investigate an unfamiliar repository before making changes.
+---
+Inspect the repo first.
+`, 'utf8');
+  writeFileSync(join(prSkillDir, 'SKILL.md'), `---
+name: pr-review
+description: Review a pull request before merging.
+---
+Check correctness and risk before merge.
+`, 'utf8');
+
+  const run = service.runStore.create({
+    assistantSessionId: 'assistant-session-skill-replace',
+    conversationId: conversation.id,
+    triggerText: 'old task',
+    metadata: {
+      skills: {
+        available: [],
+        active: [{
+          name: 'repo-investigation',
+          pathToSkillMd: join(repoSkillDir, 'SKILL.md'),
+          content: 'Inspect the repo first.'
+        }],
+        history: []
+      }
+    }
+  });
+
+  const executed = await service.dialogueService.run({
+    run,
+    conversation,
+    text: 'please review this pull request before merging',
+    cwd
+  });
+
+  assert.equal(executed.run.metadata?.skills?.active?.length, 1);
+  assert.equal(executed.run.metadata.skills.active[0].name, 'pr-review');
+});
+
+test('Assistant ReAct does not keep conflicting skills active at the same time', async () => {
+  const service = createAssistantService({
+    llmResponses: [{
+      text: 'done'
+    }]
+  });
+
+  const conversation = service.conversationStore.findOrCreateBySessionId('assistant-react-skill-conflict-1', {
+    assistantCore: {
+      controlMode: 'assistant'
+    }
+  });
+
+  const cwd = createTempDir('cligate-skill-conflict-');
+  const repoSkillDir = join(cwd, '.cligate', 'skills', 'repo-investigation');
+  const quickFixSkillDir = join(cwd, '.cligate', 'skills', 'quick-fix');
+  mkdirSync(repoSkillDir, { recursive: true });
+  mkdirSync(quickFixSkillDir, { recursive: true });
+  writeFileSync(join(repoSkillDir, 'SKILL.md'), `---
+name: repo-investigation
+description: Investigate an unfamiliar repository before making changes.
+when_to_use: Use when exploring an unfamiliar repo
+conflicts_with: [quick-fix]
+---
+Inspect the repo first.
+`, 'utf8');
+  writeFileSync(join(quickFixSkillDir, 'SKILL.md'), `---
+name: quick-fix
+description: Apply a fast narrow fix with minimal repo exploration.
+when_to_use: Use for a quick one-file fix
+conflicts_with: [repo-investigation]
+---
+Make a minimal targeted change.
+`, 'utf8');
+
+  const run = service.runStore.create({
+    assistantSessionId: 'assistant-session-skill-conflict',
+    conversationId: conversation.id,
+    triggerText: 'old task',
+    metadata: {
+      skills: {
+        available: [],
+        active: [{
+          name: 'repo-investigation',
+          pathToSkillMd: join(repoSkillDir, 'SKILL.md'),
+          content: 'Inspect the repo first.',
+          conflictsWith: ['quick-fix']
+        }],
+        history: []
+      }
+    }
+  });
+
+  const executed = await service.dialogueService.run({
+    run,
+    conversation,
+    text: 'apply a quick fix in one file',
+    cwd
+  });
+
+  assert.equal(executed.run.metadata?.skills?.active?.length, 1);
+  assert.equal(executed.run.metadata.skills.active[0].name, 'quick-fix');
 });
 
 test('Assistant ReAct can continue a task by task id instead of activeRuntimeSessionId', async () => {

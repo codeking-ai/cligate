@@ -11,7 +11,7 @@ import '../test-env.js';
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -44,6 +44,17 @@ const { handleGetHaikuModel, handleSetHaikuModel, handleGetAppRouting, handleSet
 const { handleGetPricing, handleUpdatePricing, handleResetPricing } = await import('../../src/routes/pricing-route.js');
 const { handleGetApiKey } = await import('../../src/routes/api-keys-route.js');
 const { _testExports: codexConfigTestExports } = await import('../../src/routes/codex-config-route.js');
+const {
+  handleListSkills,
+  handleGetSkillSettings,
+  handleUpdateSkillSettings,
+  handleSetSkillEnabled,
+  handleGetSkillContent,
+  handleImportSkill,
+  handleCreateSkill,
+  handleUpdateSkill,
+  handleDeleteSkill
+} = await import('../../src/routes/skills-route.js');
 const {
   handleGetAssistantAgentStatus,
   handleTestAssistantBinding,
@@ -257,6 +268,168 @@ test('handleGetAssistantBindingCatalog: returns inventory groups', () => {
   assert.ok(res._body.catalog?.apiKeys);
   assert.ok(Array.isArray(res._body.catalog?.claudeAccounts));
   assert.ok(Array.isArray(res._body.catalog?.chatgptAccounts));
+});
+
+test('skills routes list discovered skills and update skill settings', () => {
+  const cwd = createTempDir('cligate-route-skills-cwd-');
+  const skillDir = join(cwd, '.cligate', 'skills', 'demo');
+  mkdirSync(skillDir, { recursive: true });
+  writeFileSync(join(skillDir, 'SKILL.md'), `---
+name: demo
+description: Demo skill
+---
+Body
+`, 'utf8');
+
+  const listReq = mockReq({}, {}, { cwd });
+  const listRes = mockRes();
+  handleListSkills(listReq, listRes);
+  assert.equal(listRes._status, 200);
+  assert.equal(listRes._body.success, true);
+  assert.equal(Array.isArray(listRes._body.skills), true);
+  assert.equal(listRes._body.skills.some((entry) => entry.name === 'demo'), true);
+
+  const settingsRes = mockRes();
+  handleGetSkillSettings(mockReq(), settingsRes);
+  assert.equal(settingsRes._status, 200);
+  assert.equal(settingsRes._body.success, true);
+  assert.equal(typeof settingsRes._body.skills.enabled, 'boolean');
+
+  const toggleReq = mockReq({
+    name: 'demo',
+    enabled: false
+  });
+  const toggleRes = mockRes();
+  handleSetSkillEnabled(toggleReq, toggleRes);
+  assert.equal(toggleRes._status, 200);
+  assert.equal(toggleRes._body.success, true);
+
+  const globalSettingsReq = mockReq({ enabled: true });
+  const globalSettingsRes = mockRes();
+  handleUpdateSkillSettings(globalSettingsReq, globalSettingsRes);
+  assert.equal(globalSettingsRes._status, 200);
+  assert.equal(globalSettingsRes._body.success, true);
+
+  const listAfterRes = mockRes();
+  handleListSkills(listReq, listAfterRes);
+  const demo = listAfterRes._body.skills.find((entry) => entry.name === 'demo');
+  assert.equal(Boolean(demo), true);
+  assert.equal(demo.enabled, false);
+});
+
+test('skills routes create, read, update, and delete a user skill', () => {
+  const cwd = createTempDir('cligate-route-skills-manage-cwd-');
+  const createReq = mockReq({
+    cwd,
+    scope: 'user',
+    name: 'new-skill',
+    description: 'New skill',
+    shortDescription: 'Short',
+    whenToUse: 'Use when testing',
+    tags: ['test', 'skill'],
+    conflictsWith: ['other-skill'],
+    body: 'Follow the instructions'
+  });
+  const createRes = mockRes();
+  handleCreateSkill(createReq, createRes);
+  assert.equal(createRes._status, 200);
+  assert.equal(createRes._body.success, true);
+  assert.equal(createRes._body.skill?.name, 'new-skill');
+
+  const contentReq = mockReq({}, {}, { cwd, path: createRes._body.skill.pathToSkillMd });
+  const contentRes = mockRes();
+  handleGetSkillContent(contentReq, contentRes);
+  assert.equal(contentRes._status, 200);
+  assert.equal(contentRes._body.success, true);
+  assert.equal(contentRes._body.skill?.whenToUse, 'Use when testing');
+  assert.deepEqual(contentRes._body.skill?.tags, ['test', 'skill']);
+
+  const updateReq = mockReq({
+    cwd,
+    path: createRes._body.skill.pathToSkillMd,
+    name: 'new-skill',
+    description: 'Updated skill',
+    shortDescription: 'Updated short',
+    whenToUse: 'Use when updating',
+    tags: ['updated'],
+    conflictsWith: [],
+    body: 'Updated body'
+  });
+  const updateRes = mockRes();
+  handleUpdateSkill(updateReq, updateRes);
+  assert.equal(updateRes._status, 200);
+  assert.equal(updateRes._body.success, true);
+  assert.equal(updateRes._body.skill?.description, 'Updated skill');
+
+  const deleteReq = mockReq({
+    cwd,
+    path: createRes._body.skill.pathToSkillMd
+  });
+  const deleteRes = mockRes();
+  handleDeleteSkill(deleteReq, deleteRes);
+  assert.equal(deleteRes._status, 200);
+  assert.equal(deleteRes._body.success, true);
+});
+
+test('skills routes return fallback detail for legacy skill packages', () => {
+  const cwd = createTempDir('cligate-route-skills-legacy-cwd-');
+  const skillDir = join(cwd, '.cligate', 'skills', 'legacy-pptx-demo');
+  mkdirSync(join(skillDir, 'scripts'), { recursive: true });
+  writeFileSync(join(skillDir, 'SKILL.md'), 'gAAAAABlegacypayload', 'utf8');
+  writeFileSync(join(skillDir, 'editing.md'), '# 编辑演示文稿\n\nLegacy body', 'utf8');
+
+  const listRes = mockRes();
+  handleListSkills(mockReq({}, {}, { cwd }), listRes);
+  assert.equal(listRes._status, 200);
+  assert.equal(listRes._body.success, true);
+  const skill = listRes._body.legacyRepoSkills.find((entry) => entry.name === 'legacy-pptx-demo');
+  assert.ok(skill);
+
+  const contentRes = mockRes();
+  handleGetSkillContent(mockReq({}, {}, { cwd, path: skill.pathToSkillMd }), contentRes);
+  assert.equal(contentRes._status, 200);
+  assert.equal(contentRes._body.success, true);
+  assert.equal(contentRes._body.skill.name, 'legacy-pptx-demo');
+  assert.equal(contentRes._body.skill.shortDescription, '编辑演示文稿');
+  assert.match(contentRes._body.skill.rawContent, /gAAAAABlegacypayload/);
+});
+
+test('skills routes import a directory-style repo skill package', () => {
+  const cwd = createTempDir('cligate-route-skills-import-cwd-');
+  writeFileSync(join(cwd, 'package.json'), '{"name":"skills-import-test"}', 'utf8');
+
+  const importReq = mockReq({
+    cwd,
+    scope: 'repo',
+    mode: 'directory',
+    rootName: 'imported-demo',
+    files: [
+      {
+        relativePath: 'imported-demo/SKILL.md',
+        content: `---
+name: imported-demo
+description: Imported demo skill
+---
+Follow imported instructions
+`,
+        encoding: 'utf8'
+      },
+      {
+        relativePath: 'imported-demo/assets/readme.txt',
+        content: 'asset payload',
+        encoding: 'utf8'
+      }
+    ]
+  });
+  const importRes = mockRes();
+  handleImportSkill(importReq, importRes);
+  assert.equal(importRes._status, 200);
+  assert.equal(importRes._body.success, true);
+  assert.equal(importRes._body.skill?.name, 'imported-demo');
+
+  const listRes = mockRes();
+  handleListSkills(mockReq({}, {}, { cwd }), listRes);
+  assert.equal(listRes._body.installedSkills.some((entry) => entry.name === 'imported-demo'), true);
 });
 
 test('handleSetAssistantBinding: rejects non-object body', () => {

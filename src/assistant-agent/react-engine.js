@@ -4,6 +4,15 @@ import { buildInitialAnthropicMessages } from './prompt-builder.js';
 import { deriveAssistantRunStopState } from './stop-policy.js';
 import { composeAssistantReply } from './response-composer.js';
 import assistantReflectionService, { AssistantReflectionService } from './reflection-service.js';
+import {
+  skillManager,
+  collectExplicitSkillMentions,
+  collectSuggestedSkills,
+  activateSkillsForRun,
+  restoreActiveSkillsFromCheckpoint,
+  replaceActiveSkills,
+  shouldReplaceActiveSkills
+} from '../skills/index.js';
 
 function nowIso() {
   return new Date().toISOString();
@@ -95,6 +104,33 @@ export class AssistantReactEngine {
     model = ''
   } = {}) {
     const language = isChineseText(text) ? 'zh-CN' : 'en';
+    const discoveredSkills = skillManager.discoverForCwd(cwd || process.cwd()).skills;
+    const restoredSkills = restoreActiveSkillsFromCheckpoint(run);
+    const explicitSkills = collectExplicitSkillMentions(text, discoveredSkills);
+    const selectedSkills = explicitSkills.length > 0
+      ? explicitSkills
+      : collectSuggestedSkills(text, discoveredSkills);
+    const baseRun = shouldReplaceActiveSkills(text, restoredSkills.active, discoveredSkills)
+      ? {
+          ...run,
+          metadata: {
+            ...(run?.metadata || {}),
+            skills: replaceActiveSkills(run, [])
+          }
+        }
+      : {
+          ...run,
+          metadata: {
+            ...(run?.metadata || {}),
+            skills: restoredSkills
+          }
+        };
+    const runSkills = activateSkillsForRun({
+      run: baseRun,
+      availableSkills: discoveredSkills,
+      selectedSkills,
+      loadSkillContent: (skill) => skillManager.loadSkillContent(skill)
+    });
     const prompt = buildInitialAnthropicMessages({
       language,
       conversation,
@@ -105,6 +141,7 @@ export class AssistantReactEngine {
       workspaceContext,
       referenceResolution,
       recentIntentTimeline,
+      runSkills,
       defaultRuntimeProvider,
       cwd,
       model
@@ -131,7 +168,8 @@ export class AssistantReactEngine {
           cwd,
           requestedModel: model || '',
           iterations: 0
-        }
+        },
+        skills: runSkills
       }
     };
 

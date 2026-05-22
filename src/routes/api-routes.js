@@ -66,6 +66,17 @@ import {
   handleAddAssistantWorkspaceAlias
 } from './assistant-observation-route.js';
 import {
+  handleListSkills,
+  handleGetSkillSettings,
+  handleUpdateSkillSettings,
+  handleSetSkillEnabled,
+  handleGetSkillContent,
+  handleImportSkill,
+  handleCreateSkill,
+  handleUpdateSkill,
+  handleDeleteSkill
+} from './skills-route.js';
+import {
   handleListAssistantRuns,
   handleGetAssistantRun,
   handleResumeAssistantRun
@@ -401,6 +412,15 @@ export function registerApiRoutes(app, { port }) {
 
   // ─── Assistant Observation ───────────────────────────────────────────────
   app.get('/api/assistant/workspace-context', handleGetAssistantWorkspaceContext);
+  app.get('/api/assistant/skills', handleListSkills);
+  app.get('/api/assistant/skills/content', handleGetSkillContent);
+  app.post('/api/assistant/skills/import', handleImportSkill);
+  app.post('/api/assistant/skills', handleCreateSkill);
+  app.put('/api/assistant/skills', handleUpdateSkill);
+  app.delete('/api/assistant/skills', handleDeleteSkill);
+  app.get('/api/assistant/skills/settings', handleGetSkillSettings);
+  app.put('/api/assistant/skills/settings', handleUpdateSkillSettings);
+  app.post('/api/assistant/skills/settings', handleSetSkillEnabled);
   app.get('/api/assistant/runtime-sessions', handleListAssistantRuntimeSessions);
   app.get('/api/assistant/runtime-sessions/:id', handleGetAssistantRuntimeSession);
   app.get('/api/assistant/runtime-sessions/:id/turns/:turnId', handleGetAssistantRuntimeTurn);

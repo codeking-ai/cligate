@@ -12,6 +12,7 @@ import {
   describeFireMoment,
   normalizeDayOfWeekList
 } from './schedule-helpers.js';
+import { buildSkillAwareRuntimeInput } from '../skills/index.js';
 
 function normalizeText(value) {
   return String(value || '').trim();
@@ -81,6 +82,13 @@ export function createDefaultAssistantToolRegistry({
     };
   }
 
+  function withMountedSkillTask(task, context = {}) {
+    return buildSkillAwareRuntimeInput(
+      task,
+      context?.run?.metadata?.skills?.active || []
+    );
+  }
+
   function requireConversation(context = {}) {
     const conversation = context?.conversation || null;
     if (!conversation?.id) {
@@ -130,7 +138,7 @@ export function createDefaultAssistantToolRegistry({
     description: 'Start a brand-new runtime task through the shared runtime control service. Use only when the user clearly wants a fresh execution and no existing task should be reused.',
     execute: async ({ input = {}, context = {} } = {}) => messageService.startRuntimeTask({
       provider: input.provider,
-      input: input.task,
+      input: withMountedSkillTask(input.task, context),
       cwd: input.cwd,
       model: input.model,
       metadata: withAssistantConversationMetadata(input, context)
@@ -142,7 +150,7 @@ export function createDefaultAssistantToolRegistry({
     description: 'Delegate a brand-new task to Codex. Use for fresh execution, not for continuing an existing task.',
     execute: async ({ input = {}, context = {} } = {}) => messageService.startRuntimeTask({
       provider: 'codex',
-      input: input.task,
+      input: withMountedSkillTask(input.task, context),
       cwd: input.cwd,
       model: input.model,
       metadata: withAssistantConversationMetadata(input, context)
@@ -154,7 +162,7 @@ export function createDefaultAssistantToolRegistry({
     description: 'Delegate a brand-new task to Claude Code. Use for fresh execution, not for continuing an existing task.',
     execute: async ({ input = {}, context = {} } = {}) => messageService.startRuntimeTask({
       provider: 'claude-code',
-      input: input.task,
+      input: withMountedSkillTask(input.task, context),
       cwd: input.cwd,
       model: input.model,
       metadata: withAssistantConversationMetadata(input, context)
@@ -180,7 +188,7 @@ export function createDefaultAssistantToolRegistry({
     description: 'Start a new execution for a supervisor task. Prefer this when you already know the task identity and want to preserve task ownership while launching fresh execution.',
     execute: async ({ input = {}, context = {} } = {}) => messageService.startRuntimeTask({
       provider: input.provider,
-      input: input.task,
+      input: withMountedSkillTask(input.task, context),
       cwd: input.cwd,
       model: input.model,
       metadata: withAssistantConversationMetadata({
@@ -863,7 +871,7 @@ export function createDefaultAssistantToolRegistry({
       }
       return messageService.startRuntimeTask({
         provider: input.provider,
-        input: input.task,
+        input: withMountedSkillTask(input.task, context),
         cwd: input.cwd,
         model: input.model,
         metadata: withAssistantConversationMetadata(input, context)
