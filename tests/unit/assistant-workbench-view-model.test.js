@@ -44,6 +44,14 @@ test('assistant workbench loads project -> task -> dashboard -> transcript/conte
     task: {
       ...task,
       summary: 'Working through route migration',
+      workingMemory: {
+        objective: 'land workbench cutover',
+        currentPlan: 'render new state in UI',
+        lastMeaningfulProgress: 'task working memory is now projected',
+        nextAction: 'finish workbench display',
+        artifactRefs: ['artifact-1'],
+        lastUpdatedAt: '2026-05-24T10:00:00.000Z'
+      },
       plan: ['inspect', 'patch', 'verify'],
       todos: ['verify new route'],
       blockers: ['need ui follow-up'],
@@ -85,6 +93,21 @@ test('assistant workbench loads project -> task -> dashboard -> transcript/conte
             assistantMode: 'assistant',
             trackedTaskIds: ['task-1']
           },
+          relevantArtifacts: [{
+            id: 'artifact-1',
+            kind: 'image',
+            role: 'user',
+            source: 'chat_ui_upload',
+            title: 'UI screenshot',
+            summary: 'Uploaded screenshot of the workbench',
+            updatedAt: '2026-05-24T10:01:00.000Z'
+          }],
+          recentChatTurns: [{
+            role: 'user',
+            text: 'continue with the workbench cutover',
+            artifactRefs: ['artifact-1'],
+            createdAt: '2026-05-24T10:02:00.000Z'
+          }],
           workspace: {
             workspaceRef: 'D:\\repo'
           },
@@ -104,6 +127,9 @@ test('assistant workbench loads project -> task -> dashboard -> transcript/conte
   assert.equal(app.assistantWorkbenchTranscript?.session?.id, 'runtime-1');
   assert.equal(app.assistantWorkbenchConversationContext?.conversation?.id, 'conversation-1');
   assert.deepEqual(app.assistantWorkbenchList(app.assistantWorkbenchDashboard?.task?.plan), ['inspect', 'patch', 'verify']);
+  assert.equal(app.assistantWorkbenchWorkingMemoryItems().length, 4);
+  assert.equal(app.assistantWorkbenchRelevantArtifacts()[0]?.id, 'artifact-1');
+  assert.equal(app.assistantWorkbenchRecentChatTurns()[0]?.text, 'continue with the workbench cutover');
   assert.ok(calls.some((entry) => entry.startsWith('/api/assistant/conversations/conversation-1')));
 });
 

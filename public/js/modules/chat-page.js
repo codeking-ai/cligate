@@ -7,13 +7,14 @@ export function createChatPageModule() {
     chatModel: 'gpt-5.2',
     chatSystemPrompt: '',
     chatInput: '',
+    chatPendingImage: null,
     chatMessages: [],
     chatSessions: [],
     activeChatSessionId: '',
     chatStorageKey: 'cligate-chat-sessions-v1',
     chatHistoryOpen: false,
     chatSystemPromptOpen: false,
-    chatMode: 'agent-runtime',
+    chatMode: 'assistant',
     chatAssistantMode: true,
     agentRuntimeProviders: [],
     agentRuntimeSessions: [],
@@ -24,7 +25,9 @@ export function createChatPageModule() {
       pendingQuestions: [],
       pendingApprovals: [],
       knownCwds: [],
-      recentTasks: []
+      recentTasks: [],
+      relevantArtifacts: [],
+      recentChatTurns: []
     },
     assistantMindSummary: {
       knownCwdCount: 0
@@ -178,9 +181,9 @@ export function createChatPageModule() {
         const messages = Array.isArray(session.messages) ? session.messages : [];
         const lastMsg = messages.length > 0 ? messages[messages.length - 1] : null;
         const preview = lastMsg ? String(lastMsg.content || '').slice(0, 120) : '';
-        const modeLabel = session.mode === 'agent-runtime'
-          ? this.t('chatModeAgent')
-          : this.t('chatModeAssistant');
+        const modeLabel = session.mode === 'direct-chat'
+          ? this.t('chatModeAssistant')
+          : this.t('chatModeAgent');
         const subtitleParts = [modeLabel];
         if (session.model) subtitleParts.push(session.model);
         return {
@@ -445,8 +448,8 @@ export function createChatPageModule() {
     },
 
     chatModeLabel(mode) {
-      if (mode === 'agent-runtime') return this.t('chatModeAgent');
-      return this.t('chatModeAssistant');
+      if (mode === 'direct-chat') return this.t('chatModeAssistant');
+      return this.t('chatModeAgent');
     },
 
     chatRuntimeProviderLabel(providerId) {
@@ -565,15 +568,23 @@ export function createChatPageModule() {
       return firstUserMessage.content.trim().slice(0, 24) || this.t('newChat');
     },
 
+    normalizeBlankChatMode(targetMode) {
+      const mode = String(targetMode || '').trim();
+      if (mode === 'direct-chat') return 'direct-chat';
+      if (mode === 'assistant') return 'assistant';
+      if (mode === 'agent-runtime') return 'assistant';
+      return 'assistant';
+    },
+
     buildBlankChatSession(targetMode) {
-      const mode = targetMode === 'assistant' ? 'assistant' : 'agent-runtime';
+      const mode = this.normalizeBlankChatMode(targetMode);
       const sessionId = 'chat_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
       return {
         id: sessionId,
         title: this.t('newChat'),
         mode,
-        sourceId: mode === 'assistant' ? (this.chatSourceId || this.chatSources[0]?.id || '') : '',
-        runtimeProvider: mode === 'agent-runtime' ? (this.chatRuntimeProvider || 'codex') : '',
+        sourceId: mode === 'direct-chat' ? (this.chatSourceId || this.chatSources[0]?.id || '') : '',
+        runtimeProvider: mode !== 'direct-chat' ? (this.chatRuntimeProvider || 'codex') : '',
         runtimeSessionId: '',
         attachedRuntimeProvider: '',
         attachedRuntimeModel: '',
@@ -582,16 +593,17 @@ export function createChatPageModule() {
         runtimePendingQuestion: null,
         runtimePendingApprovals: [],
         runtimeUnread: false,
-        model: mode === 'assistant' ? (this.chatModel || 'gpt-5.2') : '',
+        model: mode === 'direct-chat' ? (this.chatModel || 'gpt-5.2') : '',
         assistantMode: this.chatAssistantMode === true,
         systemPrompt: '',
+        pendingImage: null,
         messages: [],
         updatedAt: new Date().toISOString()
       };
     },
 
     switchChatMode(targetMode) {
-      const mode = targetMode === 'assistant' ? 'assistant' : 'agent-runtime';
+      const mode = targetMode === 'direct-chat' ? 'direct-chat' : 'assistant';
       if (mode === this.chatMode) return;
 
       const empty = this.chatSessions.find((s) =>
@@ -611,7 +623,7 @@ export function createChatPageModule() {
     },
 
     newChatSession() {
-      const session = this.buildBlankChatSession(this.chatMode || 'agent-runtime');
+      const session = this.buildBlankChatSession(this.chatMode || 'assistant');
       this.chatSessions.unshift(session);
       this.persistChatSessions();
       this.openChatSession(session.id);
@@ -625,7 +637,7 @@ export function createChatPageModule() {
       this.closeAgentRuntimeStream();
       this.stopAssistantRunPolling();
       this.activeChatSessionId = session.id;
-      this.chatMode = session.mode || 'agent-runtime';
+      this.chatMode = session.mode || 'assistant';
       this.chatSourceId = session.sourceId || this.chatSources[0]?.id || '';
       this.chatRuntimeProvider = session.runtimeProvider || 'codex';
       if (session.model) {
@@ -637,6 +649,7 @@ export function createChatPageModule() {
       this.chatSystemPrompt = session.systemPrompt || '';
       this.chatMessages = Array.isArray(session.messages) ? session.messages : [];
       this.chatInput = '';
+      this.chatPendingImage = session.pendingImage || null;
       session.runtimeLastEventSeq = Number(session.runtimeLastEventSeq || 0);
       session.runtimeUnread = false;
       if (!Array.isArray(session.runtimePendingApprovals)) {
@@ -647,7 +660,7 @@ export function createChatPageModule() {
       }
       this.scrollChatToBottom();
       this.refreshChatSessionFromServer(session.id);
-      if (this.chatMode === 'agent-runtime' && session.runtimeSessionId) {
+      if (session.mode === 'agent-runtime' && session.runtimeSessionId) {
         this.connectAgentRuntimeStream(session);
       }
     },
@@ -717,6 +730,18 @@ export function createChatPageModule() {
 
     ensureAgentRuntimeSessionDefaults(session) {
       if (!session) return;
+      const normalizedMode = String(session.mode || '').trim();
+      const hasRuntimeBinding = Boolean(
+        String(session.runtimeSessionId || '').trim()
+        || String(session.originConversationId || '').trim()
+      );
+      if (normalizedMode === 'agent-runtime' && !hasRuntimeBinding) {
+        session.mode = 'assistant';
+      } else if (normalizedMode === 'direct-runtime') {
+        session.mode = 'assistant';
+      } else if (!normalizedMode) {
+        session.mode = hasRuntimeBinding ? 'agent-runtime' : 'assistant';
+      }
       session.runtimeProvider = session.runtimeProvider || this.chatRuntimeProvider || 'codex';
       session.runtimeSessionId = session.runtimeSessionId || '';
       session.attachedRuntimeProvider = session.attachedRuntimeProvider || '';
@@ -949,7 +974,7 @@ export function createChatPageModule() {
       // chatRuntimeProvider against whatever the runtime actually resolved
       // would produce a "provider changed" false positive on every follow-up
       // turn and inject a noisy "已切换到新会话" notice into the message stream.
-      if (this.chatMode === 'agent-runtime') return false;
+      if (session?.mode === 'agent-runtime') return false;
       const selectedProvider = String(this.chatRuntimeProvider || session.runtimeProvider || 'codex').trim();
       const selectedModel = String(session.model || '').trim();
       const attachedProvider = String(session.attachedRuntimeProvider || '').trim();
@@ -1127,22 +1152,28 @@ export function createChatPageModule() {
 
     chatSendDisabled() {
       if (this.chatLoading) return true;
-      if (this.chatMode === 'assistant') {
+      if (this.chatMode === 'direct-chat') {
         return !this.chatSourceId;
       }
       const session = this.getActiveChatSession();
       if (session?.runtimePendingApprovals?.length) {
         return true;
       }
-      return !this.chatRuntimeProvider;
+      if (!this.chatRuntimeProvider) {
+        return true;
+      }
+      if (this.chatMode === 'assistant') {
+        return !String(this.chatInput || '').trim() && !this.chatPendingImage;
+      }
+      return !String(this.chatInput || '').trim();
     },
 
     syncActiveChatSession() {
       const session = this.chatSessions.find((item) => item.id === this.activeChatSessionId);
       if (!session) return;
-      const mode = this.chatMode || 'agent-runtime';
+      const mode = this.chatMode || 'assistant';
       session.mode = mode;
-      if (mode === 'assistant') {
+      if (mode === 'direct-chat') {
         // Model-chat mode: user explicitly picks source + model in the UI;
         // mirror them onto the session so reloads remember the choice.
         session.sourceId = this.chatSourceId || '';
@@ -1159,6 +1190,7 @@ export function createChatPageModule() {
         if (!('model' in session)) session.model = '';
         if (!('systemPrompt' in session)) session.systemPrompt = '';
       }
+      session.pendingImage = this.chatPendingImage || null;
       session.assistantMode = this.chatAssistantMode === true;
       session.messages = [...this.chatMessages];
       session.title = this.buildChatSessionTitle(session.messages);
@@ -1180,6 +1212,7 @@ export function createChatPageModule() {
           this.chatMessages = [];
           this.chatSystemPrompt = '';
           this.chatInput = '';
+          this.chatPendingImage = null;
           this.newChatSession();
           return;
         }
@@ -1189,11 +1222,26 @@ export function createChatPageModule() {
     },
 
     async sendChatMessage() {
-      if (this.chatLoading || !this.chatInput.trim()) return;
+      const hasText = Boolean(String(this.chatInput || '').trim());
+      const hasPendingImage = Boolean(this.chatPendingImage);
+      if (this.chatLoading) return;
+      if (this.chatMode === 'assistant') {
+        if (!hasText && !hasPendingImage) return;
+      } else if (!hasText) {
+        return;
+      }
+      if (this.chatMode === 'assistant') {
+        await this.sendAssistantConversationMessage();
+        return;
+      }
       if (this.chatMode === 'agent-runtime') {
         await this.sendAgentRuntimeMessage();
         return;
       }
+      await this.sendDirectChatMessage();
+    },
+
+    async sendDirectChatMessage() {
       if (!this.chatSourceId) return;
 
       const shouldAutoScroll = this.shouldStickChatToBottom();
@@ -1241,7 +1289,7 @@ export function createChatPageModule() {
             sourceId: this.chatSourceId,
             model: this.chatModel.trim() || 'gpt-5.2',
             messages: requestMessages,
-            assistantMode: this.chatAssistantMode === true,
+            assistantMode: this.chatMode !== 'direct-chat' && this.chatAssistantMode === true,
             uiLang: this.lang
           }),
           signal: this.chatStreamController.signal
@@ -1274,6 +1322,155 @@ export function createChatPageModule() {
         this.chatMessages = [...this.chatMessages];
         this.syncActiveChatSession();
       }
+    },
+
+    async sendAssistantConversationMessage() {
+      const input = this.chatInput.trim();
+      const session = this.getActiveChatSession();
+      const pendingImage = this.chatPendingImage || null;
+      if ((!input && !pendingImage) || !session) return;
+
+      this.ensureAgentRuntimeSessionDefaults(session);
+      if (session.runtimePendingApprovals.length > 0) {
+        this.showToast(this.t('agentRuntimeApprovalPending'), 'warning');
+        return;
+      }
+
+      const shouldAutoScroll = this.shouldStickChatToBottom();
+      const previewSuffix = pendingImage ? '\n[Image attached]' : '';
+      this.chatMessages.push({
+        role: 'user',
+        content: `${input}${previewSuffix}`.trim() || '[Image attached]',
+        attachments: pendingImage ? [{
+          kind: 'image',
+          name: pendingImage.name || 'image',
+          mediaType: pendingImage.mediaType || '',
+          previewUrl: pendingImage.previewUrl || pendingImage.imageUrl || ''
+        }] : [],
+        _origin: 'web'
+      });
+      this.chatInput = '';
+      this.chatPendingImage = null;
+      this.chatLoading = true;
+      this.syncActiveChatSession();
+      this.scrollChatToBottom(shouldAutoScroll);
+
+      const inputParts = [];
+      if (input) {
+        inputParts.push({ type: 'text', text: input });
+      }
+      if (pendingImage?.imageUrl) {
+        inputParts.push({
+          type: 'input_image',
+          image_url: pendingImage.imageUrl,
+          ...(pendingImage.mediaType ? { media_type: pendingImage.mediaType } : {})
+        });
+      }
+
+      try {
+        const { ok, data, error } = await this.api('/api/chat/agent-message', {
+          method: 'POST',
+          body: JSON.stringify({
+            sessionId: session.id,
+            conversationId: String(session.originConversationId || ''),
+            input,
+            inputParts,
+            provider: session.runtimeProvider || this.chatRuntimeProvider
+          })
+        });
+        const result = data?.result;
+        if (!ok || !result) {
+          throw new Error(data?.error || error || this.t('requestFailed'));
+        }
+
+        if (
+          result.type === 'command_error'
+          || result.type === 'supervisor_status'
+          || result.type === 'preference_saved'
+          || result.type === 'assistant_mode_entered'
+          || result.type === 'assistant_mode_exited'
+          || result.type === 'assistant_response'
+        ) {
+          this.appendAgentRuntimeMessage(session.id, {
+            kind: 'agent-status',
+            content: result.message || this.t('requestFailed'),
+            isError: result.type === 'command_error',
+            pendingAction: result.pendingAction || null,
+            assistantRunId: result.assistantRun?.id || '',
+            observability: result.observability || null,
+            runStatus: result.assistantRun?.status || ''
+          });
+          if (result.type === 'command_error') {
+            this.showToast(result.message || this.t('requestFailed'), 'warning');
+          }
+        }
+
+        if (result.type === 'assistant_run_accepted' && result.assistantRun?.id) {
+          session.pendingAssistantRunId = result.assistantRun.id;
+          this.appendAgentRuntimeMessage(session.id, {
+            kind: 'agent-status',
+            content: result.message || '',
+            isError: false,
+            assistantRunId: result.assistantRun.id,
+            runStatus: result.assistantRun.status || 'queued',
+            observability: result.observability || null
+          });
+          this.stopAssistantRunPolling();
+          this.pollAssistantRunUntilFinal(session.id, result.assistantRun.id);
+        }
+
+        if (result.session?.id) {
+          session.runtimeSessionId = result.session.id;
+          session.runtimeProvider = result.session.provider || this.chatRuntimeProvider;
+          session.attachedRuntimeProvider = result.session.provider || this.chatRuntimeProvider;
+          session.attachedRuntimeModel = result.session.model || '';
+          session.runtimeStatus = result.session.status || 'running';
+          this.connectAgentRuntimeStream(session);
+        }
+      } catch (error) {
+        this.appendAgentRuntimeMessage(session.id, {
+          kind: 'agent-status',
+          content: error.message || this.t('requestFailed'),
+          isError: true
+        });
+        this.showToast(error.message || this.t('requestFailed'), 'error');
+      } finally {
+        this.chatLoading = false;
+        this.loadAgentRuntimeSessions();
+        this.syncActiveChatSession();
+      }
+    },
+
+    async handleAssistantImagePicked(event) {
+      const file = event?.target?.files?.[0];
+      if (!file) return;
+      try {
+        const dataUrl = await new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(String(reader.result || ''));
+          reader.onerror = () => reject(reader.error || new Error('file read failed'));
+          reader.readAsDataURL(file);
+        });
+        this.chatPendingImage = {
+          name: file.name || 'image',
+          mediaType: file.type || '',
+          size: Number(file.size || 0),
+          imageUrl: dataUrl,
+          previewUrl: dataUrl
+        };
+        this.syncActiveChatSession();
+      } catch (error) {
+        this.showToast(error?.message || this.t('requestFailed'), 'error');
+      } finally {
+        if (event?.target) {
+          event.target.value = '';
+        }
+      }
+    },
+
+    clearAssistantPendingImage() {
+      this.chatPendingImage = null;
+      this.syncActiveChatSession();
     },
 
     async sendAgentRuntimeMessage() {
@@ -1495,7 +1692,7 @@ export function createChatPageModule() {
           sourceId: this.chatSourceId,
           model: this.chatModel.trim() || 'gpt-5.2',
           messages: requestMessages,
-          assistantMode: this.chatAssistantMode === true,
+          assistantMode: this.chatMode !== 'direct-chat' && this.chatAssistantMode === true,
           uiLang: this.lang
         })
       });
@@ -1619,6 +1816,8 @@ export function createChatPageModule() {
         let pendingQuestions = [];
         let pendingApprovals = [];
         let recentTasks = [];
+        let relevantArtifacts = [];
+        let recentChatTurns = [];
         const session = this.getActiveChatSession();
         let conversationId = '';
         if (session?.id) {
@@ -1632,6 +1831,8 @@ export function createChatPageModule() {
             pendingClarification = convRes.data.pendingClarification || null;
             pendingQuestions = Array.isArray(convRes.data.pendingQuestions) ? convRes.data.pendingQuestions : [];
             pendingApprovals = Array.isArray(convRes.data.pendingApprovals) ? convRes.data.pendingApprovals : [];
+            relevantArtifacts = Array.isArray(convRes.data.relevantArtifacts) ? convRes.data.relevantArtifacts : [];
+            recentChatTurns = Array.isArray(convRes.data.recentChatTurns) ? convRes.data.recentChatTurns : [];
           }
           const taskRes = await this.api(`/api/assistant/tasks?conversationId=${encodeURIComponent(conversationId)}&limit=8`);
           if (taskRes.ok && Array.isArray(taskRes.data?.tasks)) {
@@ -1649,7 +1850,9 @@ export function createChatPageModule() {
           pendingQuestions,
           pendingApprovals,
           knownCwds: wsKnownCwds,
-          recentTasks
+          recentTasks,
+          relevantArtifacts,
+          recentChatTurns
         };
         this.assistantMindSummary = {
           knownCwdCount: wsKnownCwds.length
@@ -1659,6 +1862,27 @@ export function createChatPageModule() {
       } finally {
         this.assistantMindLoading = false;
       }
+    },
+
+    assistantMindArtifactPreview(artifact) {
+      if (!artifact || typeof artifact !== 'object') return '-';
+      return artifact.summary
+        || artifact.title
+        || artifact.contentText
+        || artifact.path
+        || artifact.imageUrl
+        || '-';
+    },
+
+    assistantMindRecentTurnPreview(turn) {
+      if (!turn || typeof turn !== 'object') return '-';
+      const text = String(turn.text || '').trim();
+      if (text) return text;
+      const parts = Array.isArray(turn.parts) ? turn.parts : [];
+      if (parts.some((part) => part?.type === 'input_image')) {
+        return '[image]';
+      }
+      return '-';
     },
 
     findLocalChatSessionByRuntimeId(runtimeSessionId) {

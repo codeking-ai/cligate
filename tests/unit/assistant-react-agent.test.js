@@ -1,7 +1,7 @@
 import '../test-env.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -24,6 +24,7 @@ import { AssistantSessionStore } from '../../src/assistant-core/session-store.js
 import AssistantModeService from '../../src/assistant-core/mode-service.js';
 import AssistantDialogueService from '../../src/assistant-agent/dialogue-service.js';
 import { SupervisorTaskStore } from '../../src/agent-orchestrator/supervisor-task-store.js';
+import assistantPendingActionStore from '../../src/assistant-core/pending-action-store.js';
 import createDefaultAssistantToolRegistry from '../../src/assistant-core/tool-registry.js';
 import { buildAnthropicToolDefinitions } from '../../src/assistant-agent/tool-schema.js';
 import { AssistantLlmClient } from '../../src/assistant-agent/llm-client.js';
@@ -115,7 +116,8 @@ function createFixture() {
     runtimeSessionManager,
     taskStore,
     supervisorTaskStore,
-    deliveryStore
+    deliveryStore,
+    assistantRunStore: runStore
   });
   const taskViewService = new AssistantTaskViewService({
     conversationStore,
@@ -196,6 +198,7 @@ function createAssistantService({ llmResponses }) {
     observationService: fixture.observationService,
     taskViewService: fixture.taskViewService,
     messageService: fixture.messageService,
+    enableBuiltinExecutionTools: true,
     llmClient
   });
   const assistantModeService = new AssistantModeService({
@@ -230,6 +233,7 @@ function createAssistantServiceWithLlmClient(llmClient) {
     observationService: fixture.observationService,
     taskViewService: fixture.taskViewService,
     messageService: fixture.messageService,
+    enableBuiltinExecutionTools: true,
     llmClient
   });
   const assistantModeService = new AssistantModeService({
@@ -306,6 +310,148 @@ test('Assistant ReAct loop can inspect task state through structured tool calls'
   assert.match(String(result.message || ''), /没有可见任务/);
   assert.equal(result.assistantRun.steps[1]?.toolName, 'list_tasks');
   assert.equal(service.llmClient.calls.length, 2);
+});
+
+test('Assistant ReAct mainline can execute builtin read_file tools end-to-end', async () => {
+  const service = createAssistantService({
+    llmResponses: [
+      {
+        toolCalls: [{
+          id: 'tool_read_file_1',
+          name: 'read_file',
+          input: {
+            path: 'notes.txt'
+          }
+        }]
+      },
+      {
+        text: 'The file contains the expected note.'
+      }
+    ]
+  });
+
+  const cwd = createTempDir('cligate-assistant-execution-read-');
+  writeFileSync(join(cwd, 'notes.txt'), 'hello from execution tools\n', 'utf8');
+
+  const result = await service.chatService.routeMessage({
+    sessionId: 'assistant-react-execution-read-1',
+    text: '/cligate read the local note file',
+    cwd
+  });
+
+  assert.equal(result.type, 'assistant_response');
+  assert.equal(result.assistantRun.status, 'completed');
+  assert.ok(result.assistantRun.steps.some((entry) => entry.toolName === 'read_file'));
+  assert.equal(service.dialogueService.executionWorkspaceRoot, cwd);
+  const secondCallMessages = service.llmClient.calls[1]?.messages || [];
+  const toolResultMessage = secondCallMessages[secondCallMessages.length - 1];
+  const toolResultContent = String(toolResultMessage?.content?.[0]?.content || '');
+  assert.match(toolResultContent, /hello from execution tools/);
+  assert.match(toolResultContent, /notes\.txt/);
+});
+
+test('Assistant mode surfaces pendingAction for builtin execution-tool approval blocks', async () => {
+  const service = createAssistantService({
+    llmResponses: [
+      {
+        toolCalls: [{
+          id: 'tool_shell_approval_1',
+          name: 'run_shell_command',
+          input: {
+            command: 'echo hello'
+          }
+        }]
+      },
+      {
+        text: 'I need your approval before running that command.'
+      }
+    ]
+  });
+
+  const cwd = createTempDir('cligate-assistant-execution-approval-');
+  const result = await service.chatService.routeMessage({
+    sessionId: 'assistant-react-execution-approval-1',
+    text: '/cligate run a local shell command',
+    cwd
+  });
+
+  assert.equal(result.type, 'assistant_response');
+  assert.equal(result.assistantRun.status, 'waiting_user');
+  assert.equal(result.assistantRun.metadata?.stopPolicy?.reason, 'assistant_confirmation_required');
+  assert.ok(result.pendingAction);
+  assert.equal(result.pendingAction.toolName, 'run_shell_command');
+  assert.equal(result.pendingAction.input?.command, 'echo hello');
+});
+
+test('Assistant ReAct replays rich multimodal tool_result content for view_image', async () => {
+  const service = createAssistantService({
+    llmResponses: [
+      {
+        toolCalls: [{
+          id: 'tool_view_image_1',
+          name: 'view_image',
+          input: {
+            path: 'pixel.png',
+            detail: 'high'
+          }
+        }]
+      },
+      {
+        text: 'The image is a tiny PNG.'
+      }
+    ]
+  });
+
+  const cwd = createTempDir('cligate-assistant-execution-image-');
+  const imageBase64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a7d0AAAAASUVORK5CYII=';
+  writeFileSync(join(cwd, 'pixel.png'), Buffer.from(imageBase64, 'base64'));
+
+  const result = await service.chatService.routeMessage({
+    sessionId: 'assistant-react-execution-image-1',
+    text: '/cligate inspect the local image',
+    cwd
+  });
+
+  assert.equal(result.type, 'assistant_response');
+  assert.equal(result.assistantRun.status, 'completed');
+  assert.ok(result.assistantRun.steps.some((entry) => entry.toolName === 'view_image'));
+  const secondCallMessages = service.llmClient.calls[1]?.messages || [];
+  const toolResultMessage = secondCallMessages[secondCallMessages.length - 1];
+  const richToolResult = toolResultMessage?.content?.[0]?.content;
+  assert.ok(Array.isArray(richToolResult));
+  assert.equal(richToolResult[0]?.type, 'image');
+  assert.equal(richToolResult[0]?.source?.type, 'base64');
+  assert.equal(richToolResult[0]?.source?.media_type, 'image/png');
+  assert.ok(String(richToolResult[0]?.source?.data || '').length > 0);
+});
+
+test('Assistant ReAct passes structured image input into the first user prompt', async () => {
+  const service = createAssistantService({
+    llmResponses: [
+      {
+        text: 'I can see the attached image.'
+      }
+    ]
+  });
+
+  const result = await service.chatService.routeMessage({
+    sessionId: 'assistant-react-image-input-1',
+    text: '/cligate describe this image',
+    inputParts: [{
+      type: 'input_image',
+      image_url: 'data:image/png;base64,abc'
+    }]
+  });
+
+  assert.equal(result.type, 'assistant_response');
+  assert.equal(result.assistantRun.status, 'completed');
+  const firstCallMessages = service.llmClient.calls[0]?.messages || [];
+  const firstUserMessage = firstCallMessages[0];
+  assert.equal(firstUserMessage?.role, 'user');
+  assert.equal(firstUserMessage?.content?.[1]?.type, 'image');
+  assert.equal(firstUserMessage?.content?.[1]?.source?.type, 'base64');
+  assert.equal(firstUserMessage?.content?.[1]?.source?.media_type, 'image/png');
+  assert.equal(firstUserMessage?.content?.[1]?.source?.data, 'abc');
 });
 
 test('Assistant ReAct loop can delegate runtime work and return a natural-language summary', async () => {
@@ -822,6 +968,219 @@ test('Assistant mode routes pending runtime approval through the LLM tool path',
   assert.match(String(llmClient.calls[0]?.system || ''), /resolve_runtime_approval/);
 });
 
+test('Assistant mode exposes pending assistant confirmation to the LLM tool path', async () => {
+  const service = createAssistantService({
+    llmResponses: [{
+      text: '我看到了待确认动作。'
+    }]
+  });
+
+  const targetPath = join(createTempDir('cligate-assistant-confirmation-prompt-'), 'target.md');
+  const conversation = service.conversationStore.findOrCreateBySessionId('assistant-react-pending-confirmation-prompt-1', {
+    assistantCore: {
+      mode: 'assistant',
+      pendingActionConfirmToken: 'persisted-confirm-token-prompt'
+    }
+  });
+  const assistantSession = service.assistantModeService.ensureAssistantSession(conversation);
+  const waitingRun = service.runStore.create({
+    id: 'assistant-waiting-confirmation-prompt-run-1',
+    assistantSessionId: assistantSession.id,
+    conversationId: conversation.id,
+    triggerText: `帮我写入 ${targetPath}`,
+    status: 'waiting_user',
+    summary: '等待确认',
+    result: '这一步需要你确认后我才能继续。',
+    metadata: {
+      toolResults: [
+        {
+          toolName: 'write_file',
+          input: {
+            path: targetPath,
+            content: 'prompt check',
+            mode: 'overwrite'
+          },
+          status: 'requires_approval',
+          content: [{
+            type: 'text',
+            text: 'Tool call requires approval: mutating_tool_requires_confirmation'
+          }],
+          structured: {
+            kind: 'policy_block',
+            toolName: 'write_file',
+            reason: 'mutating_tool_requires_confirmation',
+            requiresApproval: true,
+            requiresConfirmation: true,
+            requestedPath: targetPath
+          },
+          metadata: {
+            policy: {
+              allowed: true,
+              requiresApproval: true,
+              reason: 'mutating_tool_requires_confirmation',
+              grantedPermissions: {
+                read: [],
+                write: [targetPath]
+              }
+            }
+          }
+        }
+      ],
+      stopPolicy: {
+        status: 'waiting_user',
+        closure: 'waiting_user',
+        reason: 'assistant_confirmation_required'
+      }
+    }
+  });
+  service.conversationStore.patch(conversation.id, {
+    metadata: {
+      ...(conversation.metadata || {}),
+      assistantCore: {
+        ...(conversation.metadata?.assistantCore || {}),
+        assistantSessionId: assistantSession.id,
+        lastRunId: waitingRun.id,
+        lastRunSummary: '等待确认',
+        pendingActionConfirmToken: 'persisted-confirm-token-prompt'
+      }
+    }
+  });
+  assistantPendingActionStore.dismiss('persisted-confirm-token-prompt');
+
+  try {
+    const run = service.runStore.create({
+      assistantSessionId: assistantSession.id,
+      conversationId: conversation.id,
+      triggerText: '继续',
+      status: 'running'
+    });
+    await service.dialogueService.run({
+      run,
+      conversation: service.conversationStore.get(conversation.id),
+      text: '继续吧'
+    });
+
+    const promptText = String(service.llmClient.calls[0]?.messages?.[0]?.content?.[0]?.text || '');
+    assert.match(promptText, /<pending_assistant_confirmation>/);
+    assert.match(promptText, /persisted-confirm-token-prompt/);
+    assert.match(promptText, /write_file/);
+    assert.match(String(service.llmClient.calls[0]?.system || ''), /resolve_assistant_confirmation/);
+  } finally {
+    assistantPendingActionStore.dismiss('persisted-confirm-token-prompt');
+  }
+});
+
+test('Assistant mode routes natural-language approval for pending assistant confirmation through the LLM tool path and executes it', async () => {
+  const service = createAssistantService({
+    llmResponses: [
+      {
+        toolCalls: [{
+          id: 'tool_assistant_confirm_1',
+          name: 'resolve_assistant_confirmation',
+          input: {
+            decision: 'approve'
+          }
+        }]
+      },
+      {
+        text: '我已经按你的确认继续执行，并完成写入。'
+      }
+    ]
+  });
+
+  const targetDir = createTempDir('cligate-assistant-confirmation-run-');
+  const targetPath = join(targetDir, 'shanghai_foods.md');
+  const conversation = service.conversationStore.findOrCreateBySessionId('assistant-react-pending-confirmation-run-1', {
+    assistantCore: {
+      mode: 'assistant',
+      pendingActionConfirmToken: 'persisted-confirm-token-run'
+    }
+  });
+  const assistantSession = service.assistantModeService.ensureAssistantSession(conversation);
+  const waitingRun = service.runStore.create({
+    id: 'assistant-waiting-confirmation-run-1',
+    assistantSessionId: assistantSession.id,
+    conversationId: conversation.id,
+    triggerText: `帮我写入 ${targetPath}`,
+    status: 'waiting_user',
+    summary: '等待确认',
+    result: '这一步需要你确认后我才能继续。',
+    metadata: {
+      toolResults: [
+        {
+          toolName: 'write_file',
+          input: {
+            path: targetPath,
+            content: 'hello from semantic confirmation',
+            mode: 'overwrite'
+          },
+          status: 'requires_approval',
+          content: [{
+            type: 'text',
+            text: 'Tool call requires approval: mutating_tool_requires_confirmation'
+          }],
+          structured: {
+            kind: 'policy_block',
+            toolName: 'write_file',
+            reason: 'mutating_tool_requires_confirmation',
+            requiresApproval: true,
+            requiresConfirmation: true,
+            requestedPath: targetPath
+          },
+          metadata: {
+            policy: {
+              allowed: true,
+              requiresApproval: true,
+              reason: 'mutating_tool_requires_confirmation',
+              grantedPermissions: {
+                read: [],
+                write: [targetPath]
+              }
+            }
+          }
+        }
+      ],
+      stopPolicy: {
+        status: 'waiting_user',
+        closure: 'waiting_user',
+        reason: 'assistant_confirmation_required'
+      }
+    }
+  });
+  service.conversationStore.patch(conversation.id, {
+    metadata: {
+      ...(conversation.metadata || {}),
+      assistantCore: {
+        ...(conversation.metadata?.assistantCore || {}),
+        assistantSessionId: assistantSession.id,
+        lastRunId: waitingRun.id,
+        lastRunSummary: '等待确认',
+        pendingActionConfirmToken: 'persisted-confirm-token-run'
+      }
+    }
+  });
+  assistantPendingActionStore.dismiss('persisted-confirm-token-run');
+
+  try {
+    const result = await service.chatService.routeMessage({
+      sessionId: 'assistant-react-pending-confirmation-run-1',
+      text: '可以，同意，请继续'
+    });
+
+    assert.equal(result.type, 'assistant_response');
+    assert.match(String(result.message || ''), /继续执行|完成写入/);
+    assert.equal(service.llmClient.calls.length, 2);
+    const promptText = String(service.llmClient.calls[0]?.messages?.[0]?.content?.[0]?.text || '');
+    assert.match(promptText, /<pending_assistant_confirmation>/);
+    assert.match(promptText, /persisted-confirm-token-run/);
+    assert.match(String(service.llmClient.calls[0]?.system || ''), /resolve_assistant_confirmation/);
+    assert.equal(assistantPendingActionStore.get('persisted-confirm-token-run'), null);
+    assert.equal(readFileSync(targetPath, 'utf8'), 'hello from semantic confirmation');
+  } finally {
+    assistantPendingActionStore.dismiss('persisted-confirm-token-run');
+  }
+});
+
 test('Assistant ReAct prompt includes pending clarification context when present', async () => {
   const service = createAssistantService({
     llmResponses: [{
@@ -976,6 +1335,7 @@ test('Assistant ReAct prompt includes reference resolution and recent intent tim
   const promptText = String(service.llmClient.calls[0]?.messages?.[0]?.content?.[0]?.text || '');
   assert.match(promptText, /<reference_resolution>/);
   assert.match(promptText, /<recent_intent_timeline>/);
+  assert.match(promptText, /<recent_chat_turns>/);
   assert.match(promptText, /"phrase":/);
   assert.match(promptText, /"recommendedAction":/);
   assert.match(promptText, /"confidence":/);
@@ -1030,6 +1390,197 @@ test('Assistant ReAct prompt includes user profile when global preferences exist
   assert.match(promptText, /<user_profile>/);
   assert.match(promptText, /"replyLanguage": "zh-CN"/);
   assert.match(promptText, /"preferredRuntimeProvider": "claude-code"/);
+});
+
+test('Assistant ReAct prompt includes recent tool artifacts from prior assistant runs', async () => {
+  const service = createAssistantService({
+    llmResponses: [{
+      text: 'I remember the recent tool work.'
+    }]
+  });
+
+  const conversation = service.conversationStore.findOrCreateBySessionId('assistant-react-tool-artifacts-1', {
+    assistantCore: {
+      mode: 'assistant'
+    }
+  });
+  service.runStore.create({
+    assistantSessionId: 'assistant-session-tool-artifacts',
+    conversationId: conversation.id,
+    triggerText: '/cligate continue work',
+    status: 'completed',
+    metadata: {
+      toolResults: [{
+        toolName: 'read_file',
+        input: {
+          path: 'docs/plan.md',
+          startLine: 1,
+          endLine: 40
+        },
+        status: 'completed',
+        result: {
+          path: 'docs/plan.md',
+          text: 'plan line 1\nplan line 2'
+        }
+      }, {
+        toolName: 'write_file',
+        input: {
+          path: 'docs/output.md',
+          content: 'generated output',
+          mode: 'overwrite'
+        },
+        status: 'completed',
+        result: {
+          path: 'docs/output.md'
+        }
+      }, {
+        toolName: 'run_shell_command',
+        input: {
+          command: 'npm test'
+        },
+        status: 'completed',
+        result: {
+          success: true,
+          stdout: 'all tests passed',
+          stderr: '',
+          cwd: 'D:\\repo'
+        }
+      }]
+    }
+  });
+
+  const run = service.runStore.create({
+    assistantSessionId: 'assistant-session-tool-artifacts',
+    conversationId: conversation.id,
+    triggerText: '/cligate what happened',
+    status: 'running'
+  });
+  await service.dialogueService.run({
+    run,
+    conversation,
+    text: '刚才你做了什么？'
+  });
+
+  const promptText = String(service.llmClient.calls[0]?.messages?.[0]?.content?.[0]?.text || '');
+  assert.match(promptText, /<recent_tool_artifacts>/);
+  assert.match(promptText, /"kind": "read_file"/);
+  assert.match(promptText, /docs\/plan\.md|docs\\\\plan\.md/);
+  assert.match(promptText, /"kind": "write_file"/);
+  assert.match(promptText, /docs\/output\.md|docs\\\\output\.md/);
+  assert.match(promptText, /"kind": "run_shell_command"/);
+  assert.match(promptText, /npm test/);
+});
+
+test('Assistant ReAct prompt includes task working memory when the assistant task has it', async () => {
+  const service = createAssistantService({
+    llmResponses: [{
+      text: 'I remember the current task state.'
+    }]
+  });
+
+  const conversation = service.conversationStore.findOrCreateBySessionId('assistant-react-task-working-memory-1', {
+    assistantCore: {
+      mode: 'assistant'
+    },
+    assistantDomain: {
+      workingSet: {
+        primaryTaskId: 'assistant-task-working-memory-1'
+      }
+    }
+  });
+  service.taskViewService.assistantTaskStore.create({
+    id: 'assistant-task-working-memory-1',
+    projectId: 'assistant-project-working-memory-1',
+    ownerPersonId: 'person-working-memory-1',
+    title: 'working memory task',
+    goal: 'finish artifact integration',
+    workingMemory: {
+      objective: 'finish artifact integration',
+      currentPlan: 'wire task memory into prompts',
+      lastMeaningfulProgress: 'artifact store has already been added',
+      nextAction: 'continue_execution',
+      artifactRefs: ['artifact-1'],
+      lastUpdatedAt: '2026-05-24T00:00:00.000Z'
+    }
+  });
+
+  const run = service.runStore.create({
+    assistantSessionId: 'assistant-session-working-memory',
+    conversationId: conversation.id,
+    triggerText: '/cligate continue task',
+    status: 'running'
+  });
+  await service.dialogueService.run({
+    run,
+    conversation,
+    text: '继续'
+  });
+
+  const promptText = String(service.llmClient.calls[0]?.messages?.[0]?.content?.[0]?.text || '');
+  assert.match(promptText, /<task_working_memory>/);
+  assert.match(promptText, /finish artifact integration/);
+  assert.match(promptText, /wire task memory into prompts/);
+  assert.match(promptText, /artifact store has already been added/);
+});
+
+test('Assistant ReAct replays recent chat-ui image artifacts into the next user prompt', async () => {
+  const service = createAssistantService({
+    llmResponses: [{
+      text: 'I can continue from the last image.'
+    }]
+  });
+
+  const conversation = service.conversationStore.findOrCreateBySessionId('assistant-react-chat-image-replay-1', {
+    assistantCore: {
+      mode: 'assistant'
+    }
+  });
+  const artifact = service.observationService.artifactService.createArtifact({
+    kind: 'image',
+    source: 'chat_ui_upload',
+    conversationId: conversation.id,
+    role: 'user',
+    title: 'last uploaded image',
+    mediaType: 'image/png',
+    imageUrl: 'data:image/png;base64,abc'
+  });
+  service.deliveryStore.saveInbound({
+    channel: 'chat-ui',
+    conversationId: conversation.id,
+    payload: {
+      text: '[image attachment]',
+      kind: 'chat_ui_assistant_turn',
+      sourceType: 'chat-ui',
+      artifactRefs: [artifact.id]
+    }
+  });
+
+  const run = service.runStore.create({
+    assistantSessionId: 'assistant-session-chat-image-replay',
+    conversationId: conversation.id,
+    triggerText: '/cligate continue from the screenshot',
+    status: 'running'
+  });
+  await service.dialogueService.run({
+    run,
+    conversation,
+    text: '继续基于刚才那张图'
+  });
+
+  const firstCallMessages = service.llmClient.calls[0]?.messages || [];
+  const firstUserMessage = firstCallMessages[0];
+  assert.equal(firstUserMessage?.role, 'user');
+  assert.equal(firstUserMessage?.content?.[1]?.type, 'image');
+  assert.equal(firstUserMessage?.content?.[1]?.source?.type, 'base64');
+  assert.equal(firstUserMessage?.content?.[1]?.source?.media_type, 'image/png');
+  assert.equal(firstUserMessage?.content?.[1]?.source?.data, 'abc');
+
+  const promptText = String(firstUserMessage?.content?.[0]?.text || '');
+  assert.match(promptText, /<recent_chat_turns>/);
+  assert.match(promptText, /<recent_tool_artifacts>/);
+  assert.match(promptText, /"kind": "chat_input_image"/);
+  assert.match(promptText, /<relevant_artifacts>/);
+  assert.match(promptText, /last uploaded image/);
 });
 
 test('Assistant ReAct replaces an old active skill when a new request matches a different skill better', async () => {

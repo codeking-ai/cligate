@@ -507,6 +507,54 @@ test('AgentOrchestratorMessageService reuses remembered task identity for retry 
   assert.match(String(result.message || ''), /Retrying remembered task/i);
 });
 
+test('AgentOrchestratorMessageService starts a fresh execution for remembered follow-up when the bound runtime session has already failed', async () => {
+  const { messageService, runtimeSessionManager } = createFixture();
+
+  const failed = await messageService.startRuntimeTask({
+    provider: 'codex',
+    input: 'create a login page',
+    metadata: {
+      taskId: 'task-failed-followup',
+      conversationId: 'conv-failed-followup'
+    }
+  });
+  runtimeSessionManager.patchSession(failed.id, {
+    status: 'failed',
+    error: 'authentication failed'
+  });
+
+  const result = await messageService.routeUserMessage({
+    message: { text: '把按钮改成绿色' },
+    conversation: {
+      activeRuntimeSessionId: failed.id,
+      metadata: {
+        supervisor: {
+          brief: {
+            kind: 'last_completed',
+            taskId: 'task-source-followup',
+            title: 'Create a login page',
+            provider: 'claude-code',
+            providerLabel: 'Claude Code',
+            status: 'completed',
+            summary: 'Created the initial login page.',
+            result: 'index.html is ready.',
+            error: '',
+            waitingReason: '',
+            nextSuggestion: 'You can ask for a revision, a follow-up change, or start a related task.'
+          }
+        }
+      }
+    },
+    defaultRuntimeProvider: 'claude-code'
+  });
+
+  assert.equal(result.type, 'runtime_started');
+  assert.equal(result.startedFresh, true);
+  assert.equal(result.provider, 'codex');
+  assert.notEqual(result.session.id, failed.id);
+  assert.match(String(result.message || ''), /Continuing remembered task/i);
+});
+
 test('AgentOrchestratorMessageService starts a related sibling task with source-task memory but fresh task identity', async () => {
   const { messageService, supervisorTaskStore } = createFixture();
 

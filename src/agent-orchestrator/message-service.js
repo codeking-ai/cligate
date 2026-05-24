@@ -690,6 +690,14 @@ function isSessionBusy(session) {
   ].includes(session?.status);
 }
 
+function canAutoContinueSession(session) {
+  if (!session) return false;
+  return ![
+    AGENT_SESSION_STATUS.FAILED,
+    AGENT_SESSION_STATUS.CANCELLED
+  ].includes(session.status);
+}
+
 function normalizeDecisionText(input) {
   return String(input || '').trim().toLowerCase();
 }
@@ -840,7 +848,7 @@ function decidePhase2NaturalLanguageAction({
   parsed = null,
   phase2Route = null,
   taskRoute = null,
-  resolvedSessionId = '',
+  canAutoContinueResolvedSession = false,
   supervisorBrief = null
 } = {}) {
   if (parsed?.command) {
@@ -862,15 +870,15 @@ function decidePhase2NaturalLanguageAction({
     return { action: 'status_single' };
   }
 
-  if (resolvedSessionId && isNaturalLanguageTaskContinueIntent(text)) {
+  if (canAutoContinueResolvedSession && isNaturalLanguageTaskContinueIntent(text)) {
     return { action: 'continue_existing' };
   }
 
-  if (resolvedSessionId && phase2Route?.canContinuePreferredExecution) {
+  if (canAutoContinueResolvedSession && phase2Route?.canContinuePreferredExecution) {
     return { action: 'continue_existing' };
   }
 
-  const rememberedIntent = !resolvedSessionId
+  const rememberedIntent = !canAutoContinueResolvedSession
     ? classifyRememberedTaskIntent(text, supervisorBrief)
     : null;
   if (rememberedIntent) {
@@ -1610,6 +1618,7 @@ export class AgentOrchestratorMessageService {
       || ''
     ).trim() || null;
     const resolvedSession = resolvedSessionId ? this.getRuntimeSession(resolvedSessionId) : null;
+    const canAutoContinueResolvedSession = canAutoContinueSession(resolvedSession);
     const pendingApprovalSessionId = resolvePendingApprovalSessionId(this, {
       pendingApprovalId,
       pendingApprovalSessionId: pendingApprovalSessionIdHint,
@@ -1634,7 +1643,7 @@ export class AgentOrchestratorMessageService {
       parsed,
       phase2Route,
       taskRoute,
-      resolvedSessionId,
+      canAutoContinueResolvedSession,
       supervisorBrief
     });
     const preferredProvider = selectRuntimeProvider({
@@ -1948,7 +1957,7 @@ export class AgentOrchestratorMessageService {
       };
     }
 
-    if (resolvedSessionId) {
+    if (resolvedSessionId && canAutoContinueResolvedSession) {
       if (isSessionBusy(resolvedSession)) {
         return buildBusyResponse(resolvedSession, conversation);
       }
@@ -1970,7 +1979,7 @@ export class AgentOrchestratorMessageService {
 
     const rememberedIntent = phase2Action.action === 'start_fresh'
       ? phase2Action.rememberedIntent || null
-      : (!resolvedSessionId ? classifyRememberedTaskIntent(text, supervisorBrief) : null);
+      : (!canAutoContinueResolvedSession ? classifyRememberedTaskIntent(text, supervisorBrief) : null);
     const startMetadata = rememberedIntent
       ? {
           ...metadata,

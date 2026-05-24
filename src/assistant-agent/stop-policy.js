@@ -1,35 +1,34 @@
 import { ASSISTANT_RUN_CLOSURE_STATE, ASSISTANT_RUN_STATUS } from '../assistant-core/models.js';
+import {
+  extractToolResultSession,
+  getToolResultPendingCounts,
+  isToolResultConfirmationRequired,
+  normalizeAssistantToolResultEntry
+} from './tool-result.js';
 
 function normalizeStatus(value) {
   return String(value || '').trim();
 }
 
 function collectSessionCandidates(toolResults = []) {
-  return toolResults.flatMap((entry) => {
-    const result = entry?.result;
-    if (!result || typeof result !== 'object') return [];
-    if (result.session?.id) return [result.session];
-    if (result.id && result.provider && result.status) return [result];
-    return [];
-  });
+  return toolResults.map((entry) => extractToolResultSession(entry)).filter(Boolean);
 }
 
 function hasPendingContent(toolResults = []) {
   return toolResults.some((entry) => {
-    const result = entry?.result;
-    if (!result || typeof result !== 'object') return false;
-    const approvals = Array.isArray(result.pendingApprovals) ? result.pendingApprovals.length : Number(result.pendingApprovals || 0);
-    const questions = Array.isArray(result.pendingQuestions) ? result.pendingQuestions.length : Number(result.pendingQuestions || 0);
-    return approvals > 0 || questions > 0;
+    const pending = getToolResultPendingCounts(entry);
+    return pending.approvals > 0 || pending.questions > 0;
   });
 }
 
 function deriveWaitingReason(toolResults = []) {
   for (const entry of [...toolResults].reverse()) {
-    const result = entry?.result;
-    const status = normalizeStatus(result?.session?.status || result?.status);
-    const approvals = Array.isArray(result?.pendingApprovals) ? result.pendingApprovals.length : Number(result?.pendingApprovals || 0);
-    const questions = Array.isArray(result?.pendingQuestions) ? result.pendingQuestions.length : Number(result?.pendingQuestions || 0);
+    const session = extractToolResultSession(entry);
+    const normalized = normalizeAssistantToolResultEntry(entry);
+    const status = normalizeStatus(session?.status || normalized.payload?.status || normalized.status);
+    const pending = getToolResultPendingCounts(entry);
+    const approvals = pending.approvals;
+    const questions = pending.questions;
     if (status === 'waiting_approval' || approvals > 0) {
       return 'runtime_waiting_approval';
     }
@@ -41,10 +40,7 @@ function deriveWaitingReason(toolResults = []) {
 }
 
 function hasConfirmationBlock(toolResults = []) {
-  return toolResults.some((entry) => (
-    entry?.result?.kind === 'policy_block'
-    && entry?.result?.requiresConfirmation === true
-  ));
+  return toolResults.some((entry) => isToolResultConfirmationRequired(entry));
 }
 
 export function deriveAssistantRunStopState({

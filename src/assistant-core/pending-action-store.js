@@ -25,6 +25,7 @@ export class AssistantPendingActionStore {
   }
 
   create({
+    confirmToken = '',
     kind = 'assistant_tool_confirmation',
     conversationId = '',
     assistantRunId = '',
@@ -35,10 +36,10 @@ export class AssistantPendingActionStore {
     metadata = {}
   } = {}) {
     this.cleanupExpired();
-    const confirmToken = crypto.randomUUID();
+    const normalizedConfirmToken = normalizeText(confirmToken) || crypto.randomUUID();
     const createdAt = nowTs();
     const action = {
-      confirmToken,
+      confirmToken: normalizedConfirmToken,
       kind: normalizeText(kind) || 'assistant_tool_confirmation',
       conversationId: normalizeText(conversationId),
       assistantRunId: normalizeText(assistantRunId),
@@ -50,7 +51,7 @@ export class AssistantPendingActionStore {
       createdAt,
       expiresAt: createdAt + PENDING_ACTION_TTL_MS
     };
-    this.actions.set(confirmToken, action);
+    this.actions.set(normalizedConfirmToken, action);
     return action;
   }
 

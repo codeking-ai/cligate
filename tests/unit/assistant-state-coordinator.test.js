@@ -110,6 +110,48 @@ test('StateCoordinator creates task and execution, binds runtime, and exposes da
   assert.equal(dashboard.activitySnapshot.hasRunningExecution, true);
 });
 
+test('StateCoordinator syncTaskExecutionBridge updates task workingMemory with objective and next action', () => {
+  const { conversationStore, coordinator } = createCoordinator();
+  const conversation = conversationStore.findOrCreateByExternal({
+    channel: 'chat-ui',
+    accountId: 'default',
+    externalConversationId: 'wm-sync-1',
+    externalUserId: 'local-user',
+    title: 'Chat UI / wm-sync-1'
+  });
+  const supervisorTask = {
+    id: 'supervisor-wm-1',
+    title: 'Inspect repo',
+    goal: 'Inspect repository state',
+    metadata: {},
+    lastConversationId: conversation.id,
+    conversationId: conversation.id
+  };
+  const session = {
+    id: 'runtime-wm-1',
+    provider: 'codex',
+    status: 'waiting_approval',
+    summary: 'Need approval before editing files.',
+    cwd: 'D:\\github\\proxypool-hub',
+    updatedAt: '2026-05-24T00:00:00.000Z'
+  };
+
+  const synced = coordinator.syncTaskExecutionBridge({
+    supervisorTask,
+    session,
+    input: 'inspect repo and prepare changes',
+    cwd: session.cwd,
+    conversationId: conversation.id,
+    provider: 'codex'
+  });
+
+  assert.ok(synced?.task?.id);
+  const persistedTask = coordinator.taskStore.get(synced.task.id);
+  assert.equal(persistedTask?.workingMemory?.objective, 'inspect repo and prepare changes');
+  assert.equal(persistedTask?.workingMemory?.lastMeaningfulProgress, 'Need approval before editing files.');
+  assert.equal(persistedTask?.workingMemory?.nextAction, 'await_user_approval');
+});
+
 test('StateCoordinator maintains conversation working set and recent messages', () => {
   const { conversationStore, coordinator } = createCoordinator();
   const conversation = conversationStore.findOrCreateByExternal({
@@ -314,8 +356,8 @@ test('StateCoordinator records scheduled task lifecycle episodes', () => {
     kind: 'check_in',
     title: 'Daily check-in',
     schedule: {
-      type: 'once',
-      triggerAt: '2026-05-13T00:00:00.000Z'
+      recurrence: 'once',
+      delayMinutes: 5
     }
   });
   const running = coordinator.updateScheduledTaskState({

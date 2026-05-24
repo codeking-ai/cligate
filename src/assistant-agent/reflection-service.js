@@ -1,4 +1,5 @@
 import assistantReflectionStore from '../assistant-core/reflection-store.js';
+import { extractToolResultSession, normalizeAssistantToolResultEntry } from './tool-result.js';
 
 function normalizeText(value) {
   return String(value || '').trim();
@@ -30,11 +31,10 @@ export class AssistantReflectionService {
       return [];
     }
 
-    const sessionId = toolResult?.result?.session?.id
-      || toolResult?.result?.id
-      || toolResult?.result?.sessionId
-      || '';
-    const status = String(toolResult?.result?.session?.status || toolResult?.result?.status || '');
+    const session = extractToolResultSession(toolResult);
+    const normalized = normalizeAssistantToolResultEntry(toolResult);
+    const sessionId = session?.id || normalizeText(normalized.payload?.sessionId);
+    const status = String(session?.status || normalized.payload?.status || normalized.status);
     if (!sessionId || !status || ['starting', 'running'].includes(status)) {
       return [];
     }

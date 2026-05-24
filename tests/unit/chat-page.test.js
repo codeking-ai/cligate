@@ -345,7 +345,7 @@ test('new chat session normalizes legacy runtime mode to assistant mode', () => 
 
 test('chat page exposes direct-chat vs agent-task settings by mode', () => {
   const app = createHarness({
-    chatMode: 'agent-runtime',
+    chatMode: 'assistant',
     chatAssistantMode: false,
     chatSourceId: 'source-1'
   });
@@ -491,6 +491,79 @@ test('chat page settings sections follow assistant ownership instead of chatMode
   assert.equal(app.showAgentTaskSettings(), true);
 });
 
+test('loadAssistantMind includes relevant artifacts and recent chat turns from conversation context', async () => {
+  const apiCalls = [];
+  const app = createHarness({
+    activeChatSessionId: 'chat-1',
+    chatSessions: [{
+      id: 'chat-1',
+      mode: 'assistant',
+      messages: []
+    }],
+    api: async (endpoint) => {
+      apiCalls.push(endpoint);
+      if (endpoint === '/api/assistant/workspace-context') {
+        return {
+          ok: true,
+          data: {
+            knownCwds: [{ workspaceRef: 'D:\\repo' }]
+          }
+        };
+      }
+      if (endpoint === '/api/chat/sessions/chat-1') {
+        return {
+          ok: true,
+          data: {
+            session: {
+              conversationId: 'conv-1'
+            }
+          }
+        };
+      }
+      if (endpoint === '/api/assistant/conversations/conv-1') {
+        return {
+          ok: true,
+          data: {
+            relevantArtifacts: [{
+              id: 'artifact-1',
+              title: 'Patch preview',
+              summary: 'Preview of the patch'
+            }],
+            recentChatTurns: [{
+              role: 'user',
+              text: 'show me the patch'
+            }],
+            pendingQuestions: [],
+            pendingApprovals: []
+          }
+        };
+      }
+      if (endpoint === '/api/assistant/tasks?conversationId=conv-1&limit=8') {
+        return {
+          ok: true,
+          data: {
+            tasks: []
+          }
+        };
+      }
+      return { ok: false, data: null };
+    }
+  });
+
+  await app.loadAssistantMind();
+
+  assert.equal(app.assistantMind.relevantArtifacts.length, 1);
+  assert.equal(app.assistantMind.recentChatTurns.length, 1);
+  assert.equal(app.assistantMindArtifactPreview(app.assistantMind.relevantArtifacts[0]), 'Preview of the patch');
+  assert.equal(app.assistantMindRecentTurnPreview(app.assistantMind.recentChatTurns[0]), 'show me the patch');
+  assert.deepEqual(apiCalls, [
+    '/api/assistant/workspace-context',
+    '/api/chat/sessions/chat-1',
+    '/api/assistant/conversations/conv-1',
+    '/api/assistant/tasks?conversationId=conv-1&limit=8'
+  ]);
+});
+
 test('direct chat sends model stream request with assistant mode disabled', async () => {
   const originalFetch = globalThis.fetch;
   const fetchCalls = [];
@@ -629,8 +702,169 @@ test('assistant mode message does not send direct chat model override', async ()
     sessionId: 'chat-1',
     conversationId: '',
     input: 'continue in assistant',
+    inputParts: [{
+      type: 'text',
+      text: 'continue in assistant'
+    }],
     provider: 'claude-code'
   });
+});
+
+test('assistant mode message can send image-only inputParts', async () => {
+  const apiCalls = [];
+  const app = createHarness({
+    chatMode: 'assistant',
+    chatInput: '',
+    chatPendingImage: {
+      name: 'pixel.png',
+      mediaType: 'image/png',
+      imageUrl: 'data:image/png;base64,abc',
+      previewUrl: 'data:image/png;base64,abc'
+    },
+    chatRuntimeProvider: 'codex',
+    activeChatSessionId: 'chat-1',
+    chatSessions: [{
+      id: 'chat-1',
+      mode: 'assistant',
+      runtimeProvider: 'codex',
+      messages: [],
+      updatedAt: '2026-05-18T10:00:00.000Z'
+    }],
+    api: async (endpoint, options = {}) => {
+      apiCalls.push([endpoint, options]);
+      return {
+        ok: true,
+        data: {
+          result: {
+            type: 'assistant_run_accepted',
+            message: 'accepted',
+            assistantRun: {
+              id: 'run-2',
+              status: 'waiting_runtime'
+            },
+            conversation: {
+              id: 'conv-2'
+            }
+          }
+        }
+      };
+    },
+    pollAssistantRunUntilFinal() {}
+  });
+
+  await app.sendChatMessage();
+
+  const [endpoint, options] = apiCalls[0];
+  assert.equal(endpoint, '/api/chat/agent-message');
+  assert.deepEqual(JSON.parse(options.body), {
+    sessionId: 'chat-1',
+    conversationId: '',
+    input: '',
+    inputParts: [{
+      type: 'input_image',
+      image_url: 'data:image/png;base64,abc',
+      media_type: 'image/png'
+    }],
+    provider: 'codex'
+  });
+});
+
+test('legacy agent-runtime session without runtime binding normalizes to assistant mode on load', () => {
+  const storage = new Map([[
+    'cligate-chat-sessions-v1',
+    JSON.stringify([{
+      id: 'chat-1',
+      mode: 'agent-runtime',
+      messages: []
+    }])
+  ]]);
+  const app = createHarness({
+    localStorage: {
+      getItem(key) {
+        return storage.has(key) ? storage.get(key) : null;
+      },
+      setItem(key, value) {
+        storage.set(key, String(value));
+      },
+      removeItem(key) {
+        storage.delete(key);
+      }
+    },
+    openChatSession(sessionId) {
+      this.activeChatSessionId = sessionId;
+    },
+    loadChatChannelRecords() {
+      return Promise.resolve();
+    }
+  });
+
+  app.loadChatSessions();
+
+  assert.equal(app.chatSessions[0].mode, 'assistant');
+});
+
+test('runtime-bound agent session remains agent-runtime after normalization', () => {
+  const app = createHarness({
+    chatRuntimeProvider: 'codex'
+  });
+  const session = {
+    id: 'chat-1',
+    mode: 'agent-runtime',
+    runtimeSessionId: 'runtime-1',
+    messages: []
+  };
+
+  app.ensureAgentRuntimeSessionDefaults(session);
+
+  assert.equal(session.mode, 'agent-runtime');
+});
+
+test('new blank chat session preserves direct-chat mode when explicitly selected', () => {
+  const app = createHarness({
+    chatMode: 'direct-chat',
+    chatAssistantMode: false,
+    chatSourceId: 'source-1',
+    chatModel: 'gpt-5.2',
+    chatSources: [{ id: 'source-1', label: 'Source 1', meta: { models: ['gpt-5.2'] } }]
+  });
+
+  const session = app.buildBlankChatSession('direct-chat');
+
+  assert.equal(session.mode, 'direct-chat');
+  assert.equal(session.sourceId, 'source-1');
+  assert.equal(session.model, 'gpt-5.2');
+  assert.equal(session.runtimeProvider, '');
+});
+
+test('sendChatMessage uses direct chat path in direct-chat mode', async () => {
+  const calls = [];
+  const app = createHarness({
+    chatInput: 'hello',
+    chatMode: 'direct-chat',
+    activeChatSessionId: 'chat-1',
+    chatSessions: [{
+      id: 'chat-1',
+      mode: 'direct-chat',
+      sourceId: 'source-1',
+      model: 'gpt-5.2',
+      messages: [],
+      updatedAt: '2026-05-18T10:00:00.000Z'
+    }],
+    chatSourceId: 'source-1',
+    async sendDirectChatMessage() {
+      calls.push('direct');
+    },
+    async sendAssistantConversationMessage() {
+      calls.push('assistant');
+    },
+    async sendAgentRuntimeMessage() {
+      calls.push('runtime');
+    }
+  });
+
+  await app.sendChatMessage();
+
+  assert.deepEqual(calls, ['direct']);
 });
 
 test('runtime session config change ignores chat model differences', () => {

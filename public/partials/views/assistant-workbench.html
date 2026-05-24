@@ -104,6 +104,22 @@
                 </div>
             </div>
 
+            <div class="mt-4 rounded-xl border border-space-border/30 bg-space-950/40 p-4">
+                <div class="flex items-center justify-between gap-3 mb-3">
+                    <div class="text-[11px] font-mono text-gray-500 uppercase tracking-wider" x-text="t('assistantWorkbenchWorkingMemory')"></div>
+                    <span class="text-[10px] font-mono text-gray-500" x-text="assistantWorkbenchWorkingMemory()?.lastUpdatedAt || '-'"></span>
+                </div>
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-3" x-show="assistantWorkbenchWorkingMemoryItems().length > 0">
+                    <template x-for="item in assistantWorkbenchWorkingMemoryItems()" :key="item[0]">
+                        <div class="rounded-lg border border-space-border/20 bg-space-900/35 px-3 py-2">
+                            <div class="text-[10px] font-mono text-gray-500 uppercase tracking-wider mb-1" x-text="t(item[0])"></div>
+                            <div class="text-sm text-white whitespace-pre-wrap" x-text="item[1]"></div>
+                        </div>
+                    </template>
+                </div>
+                <div class="text-xs text-gray-500 font-mono" x-show="assistantWorkbenchWorkingMemoryItems().length === 0">-</div>
+            </div>
+
             <div class="grid grid-cols-1 lg:grid-cols-3 gap-4 mt-4">
                 <div class="rounded-xl border border-space-border/30 bg-space-950/40 p-4">
                     <div class="text-[11px] font-mono text-gray-500 uppercase tracking-wider mb-2" x-text="t('assistantWorkbenchTodos')"></div>
@@ -259,6 +275,54 @@
                     <div class="text-xs text-gray-300 whitespace-pre-wrap" x-text="assistantWorkbenchConversationContext?.memory?.preferredProvider || assistantWorkbenchConversationContext?.memory?.profile?.preferredProvider || '-'"></div>
                     <div class="text-[11px] font-mono text-gray-500 uppercase tracking-wider mt-4 mb-2">Policy</div>
                     <div class="text-xs text-gray-300 whitespace-pre-wrap" x-text="String((assistantWorkbenchConversationContext?.policy?.project || []).length + (assistantWorkbenchConversationContext?.policy?.task || []).length + (assistantWorkbenchConversationContext?.policy?.execution || []).length)"></div>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-1 xl:grid-cols-2 gap-4 mt-4">
+                <div class="rounded-xl border border-space-border/30 bg-space-950/40 p-4">
+                    <div class="flex items-center justify-between gap-3 mb-3">
+                        <div class="text-[11px] font-mono text-gray-500 uppercase tracking-wider" x-text="t('assistantWorkbenchRelevantArtifacts')"></div>
+                        <span class="text-[10px] font-mono text-gray-500" x-text="assistantWorkbenchRelevantArtifacts().length"></span>
+                    </div>
+                    <div class="space-y-3" x-show="assistantWorkbenchRelevantArtifacts().length > 0">
+                        <template x-for="artifact in assistantWorkbenchRelevantArtifacts()" :key="artifact.id">
+                            <div class="rounded-lg border border-space-border/20 bg-space-900/35 p-3">
+                                <div class="flex items-start justify-between gap-3">
+                                    <div class="min-w-0">
+                                        <div class="text-sm text-white truncate" x-text="artifact.title || artifact.kind || artifact.id"></div>
+                                        <div class="text-[10px] font-mono text-gray-500 mt-1" x-text="[artifact.kind, artifact.role, artifact.source].filter(Boolean).join(' · ') || '-'"></div>
+                                    </div>
+                                    <span class="text-[10px] font-mono text-gray-500 shrink-0" x-text="formatRelativeTime(artifact.updatedAt)"></span>
+                                </div>
+                                <div class="mt-2 text-xs text-gray-300 whitespace-pre-wrap break-words" x-text="assistantWorkbenchArtifactPreview(artifact)"></div>
+                            </div>
+                        </template>
+                    </div>
+                    <div class="text-xs text-gray-500 font-mono" x-show="assistantWorkbenchRelevantArtifacts().length === 0" x-text="t('assistantWorkbenchRelevantArtifactsEmpty')"></div>
+                </div>
+
+                <div class="rounded-xl border border-space-border/30 bg-space-950/40 p-4">
+                    <div class="flex items-center justify-between gap-3 mb-3">
+                        <div class="text-[11px] font-mono text-gray-500 uppercase tracking-wider" x-text="t('assistantWorkbenchRecentChatTurns')"></div>
+                        <span class="text-[10px] font-mono text-gray-500" x-text="assistantWorkbenchRecentChatTurns().length"></span>
+                    </div>
+                    <div class="space-y-3" x-show="assistantWorkbenchRecentChatTurns().length > 0">
+                        <template x-for="turn in assistantWorkbenchRecentChatTurns()" :key="turn.createdAt + ':' + turn.role + ':' + turn.text">
+                            <div class="rounded-lg border border-space-border/20 bg-space-900/35 p-3">
+                                <div class="flex items-center justify-between gap-3">
+                                    <span class="text-[10px] font-mono uppercase tracking-wider"
+                                        :class="turn.role === 'user' ? 'text-neon-cyan' : 'text-gray-400'"
+                                        x-text="turn.role"></span>
+                                    <span class="text-[10px] font-mono text-gray-500" x-text="formatRelativeTime(turn.createdAt)"></span>
+                                </div>
+                                <div class="mt-2 text-sm text-white whitespace-pre-wrap break-words" x-text="assistantWorkbenchChatTurnPreview(turn)"></div>
+                                <div class="mt-2 text-[10px] font-mono text-gray-500"
+                                    x-show="assistantWorkbenchList(turn.artifactRefs).length > 0"
+                                    x-text="t('assistantWorkbenchArtifactRefs') + ': ' + assistantWorkbenchList(turn.artifactRefs).join(', ')"></div>
+                            </div>
+                        </template>
+                    </div>
+                    <div class="text-xs text-gray-500 font-mono" x-show="assistantWorkbenchRecentChatTurns().length === 0" x-text="t('assistantWorkbenchRecentChatTurnsEmpty')"></div>
                 </div>
             </div>
         </div>

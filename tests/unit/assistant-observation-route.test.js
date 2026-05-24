@@ -154,6 +154,19 @@ test('AssistantObservationService returns summary-first workspace and drill-down
     externalMessageId: 'msg-1',
     payload: { text: 'inspect repo' }
   });
+  deliveryStore.saveOutbound({
+    channel: 'chat-ui',
+    conversationId: conversation.id,
+    sessionId: session.id,
+    externalMessageId: 'msg-2',
+    payload: {
+      text: 'done:inspect repo',
+      assistantRunId: 'assistant-run-1',
+      runStatus: 'completed',
+      kind: 'chat_ui_assistant_turn',
+      sourceType: 'chat-ui'
+    }
+  });
 
   const workspace = observationService.getWorkspaceContext();
   assert.equal(workspace.summary.runtimeCount, 1);
@@ -193,7 +206,14 @@ test('AssistantObservationService returns summary-first workspace and drill-down
   assert.ok('currentTask' in conversationDetail);
   assert.ok(conversationDetail.workspace);
   assert.ok(typeof conversationDetail.workspace.workspaceRef === 'string');
-  assert.equal(conversationDetail.deliveries.length, 1);
+  assert.equal(conversationDetail.deliveries.length, 2);
+  assert.ok(Array.isArray(conversationDetail.recentChatTurns));
+  assert.equal(conversationDetail.recentChatTurns.length, 2);
+  assert.equal(conversationDetail.recentChatTurns[0].role, 'user');
+  assert.equal(conversationDetail.recentChatTurns[0].text, 'inspect repo');
+  assert.equal(conversationDetail.recentChatTurns[1].role, 'assistant');
+  assert.equal(conversationDetail.recentChatTurns[1].assistantRunId, 'assistant-run-1');
+  assert.ok(Array.isArray(conversationDetail.recentToolArtifacts));
   assert.ok(conversationDetail.memory);
   assert.ok(conversationDetail.policy);
   assert.ok(Array.isArray(conversationDetail.policy.task));
@@ -203,6 +223,110 @@ test('AssistantObservationService returns summary-first workspace and drill-down
   const search = observationService.searchProjectMemory({ query: 'inspect', limit: 5 });
   assert.equal(search.tasks.length, 1);
   assert.equal(search.conversations.length, 0);
+});
+
+test('AssistantObservationService derives recent tool artifacts from recent assistant runs', async () => {
+  const {
+    conversationStore,
+    observationService
+  } = createObservationFixture();
+
+  const conversation = conversationStore.findOrCreateBySessionId('obs-chat-artifacts-1');
+  observationService.assistantRunStore.create({
+    assistantSessionId: 'assistant-session-artifacts-1',
+    conversationId: conversation.id,
+    triggerText: 'inspect and write',
+    status: 'completed',
+    metadata: {
+      toolResults: [{
+        toolName: 'read_file',
+        input: {
+          path: 'docs/spec.md',
+          startLine: 1,
+          endLine: 20
+        },
+        status: 'completed',
+        result: {
+          path: 'docs/spec.md',
+          text: 'first line\nsecond line\nthird line'
+        }
+      }, {
+        toolName: 'run_shell_command',
+        input: {
+          command: 'npm test'
+        },
+        status: 'completed',
+        result: {
+          success: true,
+          stdout: 'all tests passed',
+          stderr: '',
+          cwd: 'D:\\repo'
+        }
+      }, {
+        toolName: 'view_image',
+        input: {
+          path: 'pixel.png',
+          detail: 'high'
+        },
+        status: 'completed',
+        result: {
+          path: 'pixel.png',
+          media_type: 'image/png',
+          size: 128,
+          detail: 'high'
+        }
+      }]
+    }
+  });
+
+  const detail = observationService.getConversationContext(conversation.id);
+  assert.ok(Array.isArray(detail.recentToolArtifacts));
+  assert.ok(detail.recentToolArtifacts.some((entry) => entry.kind === 'read_file' && entry.path === 'docs/spec.md'));
+  assert.ok(detail.recentToolArtifacts.some((entry) => entry.kind === 'run_shell_command' && entry.command === 'npm test'));
+  assert.ok(detail.recentToolArtifacts.some((entry) => entry.kind === 'view_image' && entry.path === 'pixel.png'));
+});
+
+test('AssistantObservationService derives recent chat image artifacts from chat-ui deliveries', async () => {
+  const {
+    conversationStore,
+    deliveryStore,
+    observationService
+  } = createObservationFixture();
+
+  const conversation = conversationStore.findOrCreateBySessionId('obs-chat-images-1');
+  const artifact = observationService.artifactService.createArtifact({
+    kind: 'image',
+    source: 'chat_ui_upload',
+    conversationId: conversation.id,
+    role: 'user',
+    title: 'chat upload',
+    mediaType: 'image/png',
+    imageUrl: 'data:image/png;base64,abc'
+  });
+  deliveryStore.saveInbound({
+    channel: 'chat-ui',
+    conversationId: conversation.id,
+    sessionId: 'runtime-chat-images-1',
+    payload: {
+      text: '[image attachment]',
+      kind: 'chat_ui_assistant_turn',
+      sourceType: 'chat-ui',
+      artifactRefs: [artifact.id]
+    }
+  });
+
+  const detail = observationService.getConversationContext(conversation.id);
+  assert.ok(Array.isArray(detail.recentChatTurns));
+  assert.ok(detail.recentChatTurns[0].artifactRefs.includes(artifact.id));
+  assert.ok(Array.isArray(detail.recentToolArtifacts));
+  assert.ok(detail.recentToolArtifacts.some((entry) => (
+    entry.kind === 'chat_input_image'
+    && entry.role === 'user'
+    && entry.mediaType === 'image/png'
+    && entry.imageUrl === 'data:image/png;base64,abc'
+  )));
+  assert.ok(Array.isArray(detail.relevantArtifacts));
+  assert.ok(detail.relevantArtifacts.some((entry) => entry.id === artifact.id));
 });
 
 test('AssistantObservationService resolves pending approval and question from pending session hints instead of only active runtime', async () => {

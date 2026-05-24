@@ -1,9 +1,15 @@
 import { ASSISTANT_RUN_STATUS } from '../assistant-core/models.js';
+import { createAssistantRunCheckpoint } from '../assistant-core/models.js';
 import { buildAnthropicToolDefinitions } from './tool-schema.js';
 import { buildInitialAnthropicMessages } from './prompt-builder.js';
 import { deriveAssistantRunStopState } from './stop-policy.js';
 import { composeAssistantReply } from './response-composer.js';
 import assistantReflectionService, { AssistantReflectionService } from './reflection-service.js';
+import {
+  extractToolResultSession,
+  normalizeAssistantToolResultEntry,
+  stringifyAssistantToolResult
+} from './tool-result.js';
 import {
   skillManager,
   collectExplicitSkillMentions,
@@ -20,10 +26,6 @@ function nowIso() {
 
 function isChineseText(text) {
   return /[\u3400-\u9fff]/.test(String(text || ''));
-}
-
-function stringifyToolResult(result) {
-  return JSON.stringify(result?.result ?? result ?? null, null, 2);
 }
 
 function appendAssistantToolMessage(messages, completion) {
@@ -51,24 +53,32 @@ function appendAssistantToolMessage(messages, completion) {
 }
 
 function appendToolResultMessage(messages, toolCall, toolResult) {
+  const payload = normalizeAssistantToolResultEntry(toolResult, {
+    toolName: toolCall?.name || ''
+  }).payload;
+  let content = stringifyAssistantToolResult(toolResult);
+  if (Array.isArray(payload?.content) && payload.content.length > 0) {
+    content = payload.content;
+  }
   messages.push({
     role: 'user',
     content: [{
       type: 'tool_result',
       tool_use_id: toolCall.id,
-      content: stringifyToolResult(toolResult)
+      content
     }]
   });
 }
 
 function summarizeToolStep(toolName, result) {
+  const normalized = normalizeAssistantToolResultEntry(result, { toolName });
   return {
     kind: 'tool',
-    toolName,
-    status: result?.success === false ? 'failed' : 'completed',
-    summary: String(result?.summary || '').trim(),
-    startedAt: result?.startedAt || nowIso(),
-    completedAt: result?.completedAt || nowIso()
+    toolName: normalized.toolName || toolName,
+    status: normalized.success === false ? 'failed' : 'completed',
+    summary: normalized.summary,
+    startedAt: normalized.startedAt || nowIso(),
+    completedAt: normalized.completedAt || nowIso()
   };
 }
 
@@ -93,6 +103,7 @@ export class AssistantReactEngine {
     run,
     conversation,
     text,
+    inputParts = null,
     taskRecord = null,
     taskSpace = null,
     conversationContext = null,
@@ -135,6 +146,7 @@ export class AssistantReactEngine {
       language,
       conversation,
       text,
+      inputParts,
       taskRecord,
       taskSpace,
       conversationContext,
@@ -197,7 +209,23 @@ export class AssistantReactEngine {
           ...(workingRun.metadata?.agent || {}),
           iterations: iteration + 1,
           llmSource
-        }
+        },
+        toolResults: toolResults.map((entry) => ({
+          toolName: String(entry?.toolName || ''),
+          input: entry?.input || {},
+          status: entry?.status || '',
+          success: entry?.status === 'completed',
+          summary: String(entry?.content?.[0]?.text || ''),
+          result: entry?.structured ?? null,
+          metadata: entry?.metadata || {}
+        })),
+        checkpoint: createAssistantRunCheckpoint({
+          completedStepCount: workingRun.steps.length,
+          toolResults,
+          lastCompletedStep: workingRun.steps[workingRun.steps.length - 1] || null,
+          resumable: stopStateLikeWaitingUser(toolResults),
+          skills: workingRun?.metadata?.skills || null
+        })
       };
 
       if (!completion.toolCalls || completion.toolCalls.length === 0) {
@@ -214,14 +242,15 @@ export class AssistantReactEngine {
           input: toolCall.input || {}
         }, {
           run: workingRun,
-          conversation
+          conversation,
+          cwd
         });
         toolResults.push(result);
         workingRun.steps.push(summarizeToolStep(toolCall.name, result));
 
-        const sessionId = result?.result?.session?.id || result?.result?.id || '';
-        if (sessionId && (result?.result?.provider || result?.result?.session?.provider)) {
-          relatedRuntimeSessionIds.add(sessionId);
+        const session = extractToolResultSession(result);
+        if (session?.id && session?.provider) {
+          relatedRuntimeSessionIds.add(session.id);
         }
 
         appendToolResultMessage(transcript, toolCall, result);
@@ -232,7 +261,8 @@ export class AssistantReactEngine {
           toolExecutor: this.toolExecutor,
           context: {
             run: workingRun,
-            conversation
+            conversation,
+            cwd
           }
         });
         for (const extra of reflected) {
@@ -268,6 +298,22 @@ export class AssistantReactEngine {
       result: reply.message,
       metadata: {
         ...(workingRun.metadata || {}),
+        toolResults: toolResults.map((entry) => ({
+          toolName: String(entry?.toolName || ''),
+          input: entry?.input || {},
+          status: entry?.status || '',
+          success: entry?.status === 'completed',
+          summary: String(entry?.content?.[0]?.text || ''),
+          result: entry?.structured ?? null,
+          metadata: entry?.metadata || {}
+        })),
+        checkpoint: createAssistantRunCheckpoint({
+          completedStepCount: workingRun.steps.length,
+          toolResults,
+          lastCompletedStep: workingRun.steps[workingRun.steps.length - 1] || null,
+          resumable: finalStatus === ASSISTANT_RUN_STATUS.WAITING_USER,
+          skills: workingRun?.metadata?.skills || null
+        }),
         stopPolicy: stopState
       }
     };
@@ -282,3 +328,7 @@ export class AssistantReactEngine {
 }
 
 export default AssistantReactEngine;
+
+function stopStateLikeWaitingUser(toolResults = []) {
+  return Array.isArray(toolResults) && toolResults.some((entry) => entry?.status === 'requires_approval');
+}

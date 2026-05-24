@@ -284,6 +284,7 @@ export class AssistantRunner {
     run,
     conversation,
     text,
+    inputParts = null,
     defaultRuntimeProvider = 'codex',
     cwd = '',
     model = '',

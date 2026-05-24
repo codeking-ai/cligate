@@ -52,6 +52,7 @@ export class ChatUiConversationService {
   async routeMessage({
     sessionId,
     text,
+    inputParts = null,
     defaultRuntimeProvider = 'codex',
     cwd,
     model = '',
@@ -63,6 +64,7 @@ export class ChatUiConversationService {
     const assistantResult = await this.assistantModeService.maybeHandleMessage({
       conversation,
       text,
+      inputParts,
       defaultRuntimeProvider,
       cwd,
       model,

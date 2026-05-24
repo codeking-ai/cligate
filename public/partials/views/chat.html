@@ -10,12 +10,12 @@
                             <div class="chat-header-actions flex items-center gap-2">
                                 <div class="chat-side-tabs flex items-center gap-1 p-1 rounded-lg bg-space-900/60 border border-space-border/30">
                                     <button class="chat-side-tab px-3 py-1.5 rounded-md text-[11px] font-mono transition-all"
-                                        :class="chatMode === 'agent-runtime' ? 'chat-side-tab-active text-white' : 'text-gray-500 hover:text-white'"
-                                        @click="switchChatMode('agent-runtime')"
+                                        :class="chatMode !== 'direct-chat' ? 'chat-side-tab-active text-white' : 'text-gray-500 hover:text-white'"
+                                        @click="switchChatMode('assistant')"
                                         x-text="t('chatModeAgent')"></button>
                                     <button class="chat-side-tab px-3 py-1.5 rounded-md text-[11px] font-mono transition-all"
-                                        :class="chatMode === 'assistant' ? 'chat-side-tab-active text-white' : 'text-gray-500 hover:text-white'"
-                                        @click="switchChatMode('assistant')"
+                                        :class="chatMode === 'direct-chat' ? 'chat-side-tab-active text-white' : 'text-gray-500 hover:text-white'"
+                                        @click="switchChatMode('direct-chat')"
                                         x-text="t('chatModeAssistant')"></button>
                                 </div>
                                 <button class="chat-header-button btn btn-sm btn-surface"
@@ -27,14 +27,19 @@
                             </div>
                         </div>
 
-                        <div x-show="chatMode === 'agent-runtime'" class="chat-agent-hint chat-control-panel rounded-2xl border border-space-border/30 bg-space-900/40 mb-4 flex-shrink-0 flex items-center justify-between gap-4">
+                        <div x-show="chatMode !== 'direct-chat'" class="chat-agent-hint chat-control-panel rounded-2xl border border-space-border/30 bg-space-900/40 mb-4 flex-shrink-0 flex items-center justify-between gap-4">
                             <div class="text-sm text-gray-400" x-text="t('chatAgentHint')"></div>
-                            <button class="chat-control-button btn btn-sm btn-surface whitespace-nowrap" @click="setActiveTab('assistantAgent')">
-                                <span x-text="t('chatAgentConfigLink')"></span>
-                            </button>
+                            <div class="flex items-center gap-2">
+                                <button class="chat-control-button btn btn-sm btn-surface whitespace-nowrap" @click="setActiveTab('assistantAgent')">
+                                    <span x-text="t('chatAgentConfigLink')"></span>
+                                </button>
+                                <button class="chat-control-button btn btn-sm btn-surface whitespace-nowrap" @click="setActiveTab('assistantWorkbench')">
+                                    <span x-text="t('assistantWorkbench')"></span>
+                                </button>
+                            </div>
                         </div>
 
-                        <div x-show="chatMode === 'assistant'" class="chat-control-panel rounded-2xl border border-space-border/30 bg-space-900/40 p-3 mb-4 flex-shrink-0">
+                        <div x-show="chatMode === 'direct-chat'" class="chat-control-panel rounded-2xl border border-space-border/30 bg-space-900/40 p-3 mb-4 flex-shrink-0">
                             <div class="chat-control-grid flex flex-wrap items-end gap-3">
                                 <div class="chat-control-field min-w-0 chat-control-fixed" style="flex:0 0 200px;">
                                     <label class="chat-control-label text-[11px] font-mono text-gray-400 uppercase tracking-wider" x-text="t('chatSource')"></label>
@@ -75,7 +80,7 @@
 
                         <div class="chat-status-bar flex items-center justify-between gap-4 mb-4 flex-shrink-0">
                             <div class="chat-status-copy text-sm text-gray-400 min-w-0">
-                                <template x-if="chatMode === 'assistant'">
+                                <template x-if="chatMode === 'direct-chat'">
                                     <div class="chat-status-group flex items-center gap-2 flex-wrap">
                                         <span class="chat-status-label" x-text="t('chatUsing')"></span>
                                         <span class="chat-status-pill text-white font-mono truncate inline-block max-w-[340px] align-bottom" x-text="chatSourceLabel(chatSourceId)"></span>
@@ -96,7 +101,7 @@
                                         </template>
                                     </div>
                                 </template>
-                                <template x-if="chatMode === 'agent-runtime'">
+                                <template x-if="chatMode !== 'direct-chat'">
                                     <div class="chat-status-group flex items-center gap-2 flex-wrap">
                                         <template x-if="!getActiveChatSession()?.originChannel">
                                             <span class="chat-status-pill chat-status-pill-secondary text-[10px] font-mono text-gray-300" x-text="t('chatAgentStatusLabel')"></span>
@@ -129,6 +134,51 @@
                                 </template>
                             </div>
                             <div class="chat-status-count text-xs font-mono text-gray-500" x-text="chatMessages.length + ' ' + t('messagesLower')"></div>
+                        </div>
+
+                        <div x-show="chatMode !== 'direct-chat'" class="mb-4 grid grid-cols-1 xl:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)] gap-4 flex-shrink-0">
+                            <div class="rounded-2xl border border-space-border/30 bg-space-900/35 p-4">
+                                <div class="flex items-center justify-between gap-3 mb-3">
+                                    <div class="text-[11px] font-mono uppercase tracking-widest text-gray-500" x-text="t('assistantWorkbenchRelevantArtifacts')"></div>
+                                    <span class="text-[10px] font-mono text-gray-500" x-text="assistantMind.relevantArtifacts.length"></span>
+                                </div>
+                                <div class="space-y-3" x-show="assistantMind.relevantArtifacts.length > 0">
+                                    <template x-for="artifact in assistantMind.relevantArtifacts" :key="artifact.id">
+                                        <div class="rounded-xl border border-space-border/20 bg-space-950/40 p-3">
+                                            <div class="flex items-start justify-between gap-3">
+                                                <div class="min-w-0">
+                                                    <div class="text-sm text-white truncate" x-text="artifact.title || artifact.kind || artifact.id"></div>
+                                                    <div class="mt-1 text-[10px] font-mono text-gray-500" x-text="[artifact.kind, artifact.role, artifact.source].filter(Boolean).join(' · ') || '-'"></div>
+                                                </div>
+                                                <span class="text-[10px] font-mono text-gray-500 shrink-0" x-text="formatRelativeTime(artifact.updatedAt)"></span>
+                                            </div>
+                                            <div class="mt-2 text-xs text-gray-300 whitespace-pre-wrap break-words" x-text="assistantMindArtifactPreview(artifact)"></div>
+                                        </div>
+                                    </template>
+                                </div>
+                                <div class="text-xs font-mono text-gray-500" x-show="assistantMind.relevantArtifacts.length === 0" x-text="t('assistantWorkbenchRelevantArtifactsEmpty')"></div>
+                            </div>
+
+                            <div class="rounded-2xl border border-space-border/30 bg-space-900/35 p-4">
+                                <div class="flex items-center justify-between gap-3 mb-3">
+                                    <div class="text-[11px] font-mono uppercase tracking-widest text-gray-500" x-text="t('assistantWorkbenchRecentChatTurns')"></div>
+                                    <span class="text-[10px] font-mono text-gray-500" x-text="assistantMind.recentChatTurns.length"></span>
+                                </div>
+                                <div class="space-y-3" x-show="assistantMind.recentChatTurns.length > 0">
+                                    <template x-for="turn in assistantMind.recentChatTurns" :key="turn.createdAt + ':' + turn.role + ':' + turn.text">
+                                        <div class="rounded-xl border border-space-border/20 bg-space-950/40 p-3">
+                                            <div class="flex items-center justify-between gap-3">
+                                                <span class="text-[10px] font-mono uppercase tracking-widest"
+                                                    :class="turn.role === 'user' ? 'text-neon-cyan' : 'text-gray-400'"
+                                                    x-text="turn.role"></span>
+                                                <span class="text-[10px] font-mono text-gray-500" x-text="formatRelativeTime(turn.createdAt)"></span>
+                                            </div>
+                                            <div class="mt-2 text-xs text-gray-200 whitespace-pre-wrap break-words" x-text="assistantMindRecentTurnPreview(turn)"></div>
+                                        </div>
+                                    </template>
+                                </div>
+                                <div class="text-xs font-mono text-gray-500" x-show="assistantMind.recentChatTurns.length === 0" x-text="t('assistantWorkbenchRecentChatTurnsEmpty')"></div>
+                            </div>
                         </div>
 
                         <div x-ref="chatMessagesContainer" class="chat-message-stage flex-1 min-h-0 overflow-y-auto custom-scrollbar rounded-2xl border border-space-border/30 bg-space-950/40 p-4 space-y-4">
@@ -224,6 +274,17 @@
                                                 </template>
                                             </div>
                                         </div>
+                                        <div class="chat-message-attachments mt-3 flex flex-wrap gap-2"
+                                            x-show="Array.isArray(message.attachments) && message.attachments.length > 0">
+                                            <template x-for="attachment in message.attachments" :key="attachment.previewUrl || attachment.name">
+                                                <div class="rounded-xl border border-space-border/40 bg-space-900/70 p-2">
+                                                    <img class="block h-24 w-auto max-w-[180px] rounded-lg object-cover"
+                                                        :src="attachment.previewUrl"
+                                                        :alt="attachment.name || 'attachment'">
+                                                    <div class="mt-2 text-[10px] font-mono text-gray-400 truncate max-w-[180px]" x-text="attachment.name || attachment.mediaType || 'image'"></div>
+                                                </div>
+                                            </template>
+                                        </div>
                                         <div class="chat-message-callout chat-message-callout-approval mt-3 rounded-xl border border-amber-500/30 bg-amber-500/10 p-3" x-show="message.pendingAction">
                                             <div class="text-[10px] font-mono uppercase tracking-wider text-amber-300 mb-2" x-text="t('assistantPendingAction')"></div>
                                             <div class="chat-message-callout-title text-sm text-white" x-text="message.pendingAction?.title || ''"></div>
@@ -250,17 +311,45 @@
                         </div>
 
                         <div class="chat-composer mt-4 space-y-3 flex-shrink-0">
+                            <div x-show="chatMode === 'assistant' && chatPendingImage"
+                                class="flex items-center justify-between gap-3 rounded-xl border border-space-border/30 bg-space-900/60 px-3 py-2">
+                                <div class="flex items-center gap-3 min-w-0">
+                                    <img class="h-12 w-12 rounded-lg object-cover border border-space-border/30"
+                                        :src="chatPendingImage?.previewUrl || chatPendingImage?.imageUrl"
+                                        alt="pending image">
+                                    <div class="min-w-0">
+                                        <div class="text-xs font-mono text-gray-200 truncate" x-text="chatPendingImage?.name || 'image'"></div>
+                                        <div class="text-[10px] font-mono text-gray-500 truncate"
+                                            x-text="chatPendingImage?.mediaType || ''"></div>
+                                    </div>
+                                </div>
+                                <button class="btn btn-xs btn-surface shrink-0"
+                                    @click="clearAssistantPendingImage()" x-text="t('cancel')"></button>
+                            </div>
                             <textarea x-ref="chatComposerInput" x-model="chatInput" rows="4"
                                 class="chat-composer-input input bg-space-800 border-space-border text-white font-sans text-sm resize-y"
-                                :placeholder="chatMode === 'agent-runtime' ? t('agentRuntimeInputPlaceholder') : t('chatInputPlaceholder')"
+                                :placeholder="chatMode !== 'direct-chat' ? t('agentRuntimeInputPlaceholder') : t('chatInputPlaceholder')"
                                 @keydown.ctrl.enter.prevent="sendChatMessage()"
                                 @keydown.meta.enter.prevent="sendChatMessage()"></textarea>
                             <div class="chat-composer-footer flex items-center justify-between gap-4">
-                                <div class="chat-composer-hint text-xs text-gray-500" x-text="chatMode === 'agent-runtime' ? t('agentRuntimeShortcutHint') : t('chatShortcutHint')"></div>
-                                <button class="chat-composer-submit btn btn-accent-cyan"
-                                    @click="sendChatMessage()" :disabled="chatSendDisabled()">
-                                    <span x-text="chatLoading ? t('sending') : t('send')"></span>
-                                </button>
+                                <div class="flex items-center gap-3 min-w-0">
+                                    <div class="chat-composer-hint text-xs text-gray-500" x-text="chatMode !== 'direct-chat' ? t('agentRuntimeShortcutHint') : t('chatShortcutHint')"></div>
+                                    <template x-if="chatMode === 'assistant'">
+                                        <div class="shrink-0">
+                                            <input type="file" accept="image/*" class="hidden" x-ref="assistantImageInput"
+                                                @change="handleAssistantImagePicked($event)">
+                                            <button type="button" class="btn btn-xs btn-surface"
+                                                @click="$refs.assistantImageInput?.click()"
+                                                x-text="t('imageLabel')"></button>
+                                        </div>
+                                    </template>
+                                </div>
+                                <div class="flex items-center gap-2 shrink-0">
+                                    <button class="chat-composer-submit btn btn-accent-cyan"
+                                        @click="sendChatMessage()" :disabled="chatSendDisabled()">
+                                        <span x-text="chatLoading ? t('sending') : t('send')"></span>
+                                    </button>
+                                </div>
                             </div>
                         </div>
                     </div>

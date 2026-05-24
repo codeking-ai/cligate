@@ -7,6 +7,10 @@ import AssistantRunner from './runner.js';
 import agentOrchestratorMessageService from '../agent-orchestrator/message-service.js';
 import assistantTaskViewService from './task-view-service.js';
 import AssistantDialogueService from '../assistant-agent/dialogue-service.js';
+import {
+  isToolResultConfirmationRequired,
+  normalizeAssistantToolResultEntry
+} from '../assistant-agent/tool-result.js';
 import { buildAssistantCoreDeliveryState } from '../agent-channels/conversation-delivery-arbiter.js';
 import { getAssistantControlMode } from './assistant-state.js';
 import { buildSupervisorBrief } from '../agent-orchestrator/supervisor-brief.js';
@@ -21,6 +25,7 @@ import {
 import { buildPendingRuntimeMarkerPatch } from './pending-runtime-state.js';
 import { bindConversationToRuntimeStart } from './conversation-runtime-binding.js';
 import assistantPendingActionStore from './pending-action-store.js';
+import { ensurePendingAssistantAction } from './pending-action-resolver.js';
 
 // CliGate Assistant mainline entry.
 // /cligate, assistant runs, async closure, and observability should converge on assistant-core + assistant-agent.
@@ -59,33 +64,38 @@ function buildAssistantMetadata(current = {}, patch = {}) {
 }
 
 function buildAssistantPendingAction(executed = {}, conversation = null, persistedRun = null, runText = '') {
-  const block = (Array.isArray(executed?.toolResults) ? executed.toolResults : []).find((entry) => (
-    entry?.result?.kind === 'policy_block'
-    && entry?.result?.requiresConfirmation === true
-  )) || null;
-  if (!block?.toolName) {
+  const block = (Array.isArray(executed?.toolResults) ? executed.toolResults : [])
+    .find((entry) => isToolResultConfirmationRequired(entry)) || null;
+  if (!block) {
+    return null;
+  }
+
+  const normalized = normalizeAssistantToolResultEntry(block);
+  if (!normalized.toolName) {
     return null;
   }
 
   const requestedPath = normalizeText(
-    block?.input?.cwd
-      || block?.input?.workspaceRef
-      || block?.input?.workspaceId
+    normalized.input?.cwd
+      || normalized.input?.path
+      || normalized.input?.workspaceRef
+      || normalized.input?.workspaceId
+      || normalized.payload?.requestedPath
   );
-  const summary = normalizeText(block?.summary)
+  const summary = normalizeText(normalized.summary)
     || (requestedPath ? `Target scope: ${requestedPath}` : '');
 
   return assistantPendingActionStore.create({
     conversationId: conversation?.id || '',
     assistantRunId: persistedRun?.id || '',
-    toolName: block.toolName,
-    input: block.input || {},
+    toolName: normalized.toolName,
+    input: normalized.input || {},
     title: /[\u3400-\u9fff]/.test(String(runText || ''))
       ? '需要确认后继续执行'
       : 'Confirmation required before continuing',
     summary,
     metadata: {
-      reason: block?.result?.reason || '',
+      reason: normalized.payload?.reason || '',
       requestedPath
     }
   });
@@ -144,6 +154,13 @@ function buildAssistantRunObservability(run = null) {
         }
       : null
   };
+}
+
+function didResolveAssistantConfirmation(toolResults = []) {
+  return Array.isArray(toolResults) && toolResults.some((entry) => (
+    String(entry?.toolName || '').trim() === 'resolve_assistant_confirmation'
+    && entry?.success !== false
+  ));
 }
 
 function getDelegatedRuntimeResult(executed = {}) {
@@ -312,6 +329,7 @@ export class AssistantModeService {
       observationService: this.observationService,
       taskViewService: this.taskViewService,
       messageService: this.messageService,
+      enableBuiltinExecutionTools: true,
       fallbackRunner: this.runner
     });
   }
@@ -364,13 +382,29 @@ export class AssistantModeService {
 
     const delegatedRuntimes = getDelegatedRuntimeResults(executed);
     const delegatedRuntime = delegatedRuntimes[0] || null;
+    const resolvedAssistantConfirmation = didResolveAssistantConfirmation(executed?.toolResults);
+    const persistedPendingToken = normalizeText(conversation?.metadata?.assistantCore?.pendingActionConfirmToken);
+    if (resolvedAssistantConfirmation && persistedPendingToken) {
+      assistantPendingActionStore.dismiss(persistedPendingToken);
+    }
+    const previousPendingAction = resolvedAssistantConfirmation
+      ? null
+      : ensurePendingAssistantAction(conversation, {
+          runStore: this.assistantRunStore,
+          pendingActionStore: assistantPendingActionStore,
+          conversationStore: this.conversationStore
+        });
+    const nextPendingActionToken = pendingAction?.confirmToken
+      || (resolvedAssistantConfirmation
+        ? null
+        : (previousPendingAction?.confirmToken || null));
     const nextAssistantMetadata = {
       assistantCore: buildAssistantMetadata(this.getConversationAssistantState(conversation), {
         mode: assistantModeActive ? ASSISTANT_CONTROL_MODE.ASSISTANT : ASSISTANT_CONTROL_MODE.DIRECT_RUNTIME,
         assistantSessionId: assistantSession.id,
         lastRunId: persistedRun.id,
         lastRunSummary: executed.reply.summary,
-        pendingActionConfirmToken: pendingAction?.confirmToken || null
+        pendingActionConfirmToken: nextPendingActionToken
       })
     };
     let nextConversation = this.patchConversation(conversation, {
@@ -688,6 +722,7 @@ export class AssistantModeService {
   async maybeHandleMessage({
     conversation,
     text,
+    inputParts = null,
     defaultRuntimeProvider = 'codex',
     cwd = '',
     model = '',
@@ -764,6 +799,7 @@ export class AssistantModeService {
             run,
             conversation,
             text: runText,
+            inputParts,
             defaultRuntimeProvider,
             cwd,
             model
@@ -830,6 +866,7 @@ export class AssistantModeService {
         run,
         conversation,
         text: runText,
+        inputParts,
         defaultRuntimeProvider,
         cwd,
         model

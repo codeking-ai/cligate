@@ -1,3 +1,9 @@
+import {
+  getToolResultPendingCounts,
+  isToolResultConfirmationRequired,
+  normalizeAssistantToolResultEntry
+} from './tool-result.js';
+
 function truncate(value, limit = 220) {
   const text = String(value || '').trim();
   if (!text) return '';
@@ -13,23 +19,21 @@ function firstSentence(text) {
 
 function collectPendingContext(toolResults = []) {
   for (const entry of [...toolResults].reverse()) {
-    const result = entry?.result;
+    const normalized = normalizeAssistantToolResultEntry(entry);
+    const result = normalized.payload;
     if (!result || typeof result !== 'object') continue;
     const title = String(result?.title || result?.session?.title || '').trim();
-    const approvals = Array.isArray(result?.pendingApprovals)
-      ? result.pendingApprovals
-      : [];
-    const questions = Array.isArray(result?.pendingQuestions)
-      ? result.pendingQuestions
-      : [];
-    if (approvals.length > 0 || Number(result?.pendingApprovals || 0) > 0) {
+    const approvals = Array.isArray(result?.pendingApprovals) ? result.pendingApprovals : [];
+    const questions = Array.isArray(result?.pendingQuestions) ? result.pendingQuestions : [];
+    const pending = getToolResultPendingCounts(entry);
+    if (approvals.length > 0 || pending.approvals > 0) {
       return {
         kind: 'approval',
         title,
         detail: String(approvals[0]?.title || approvals[0]?.summary || '').trim()
       };
     }
-    if (questions.length > 0 || Number(result?.pendingQuestions || 0) > 0) {
+    if (questions.length > 0 || pending.questions > 0) {
       return {
         kind: 'question',
         title,
@@ -42,15 +46,16 @@ function collectPendingContext(toolResults = []) {
 
 function collectPolicyBlockContext(toolResults = []) {
   for (const entry of [...toolResults].reverse()) {
-    const result = entry?.result;
+    const normalized = normalizeAssistantToolResultEntry(entry);
+    const result = normalized.payload;
     if (!result || typeof result !== 'object') continue;
-    if (result.kind !== 'policy_block' || result.requiresConfirmation !== true) continue;
+    if (!isToolResultConfirmationRequired(entry)) continue;
     return {
-      toolName: String(entry?.toolName || '').trim(),
-      summary: String(entry?.summary || '').trim(),
+      toolName: normalized.toolName,
+      summary: normalized.summary,
       hint: String(result?.hint || '').trim(),
       reason: String(result?.reason || '').trim(),
-      requestedPath: String(entry?.input?.cwd || entry?.input?.workspaceRef || entry?.input?.workspaceId || '').trim()
+      requestedPath: String(normalized.input?.cwd || normalized.input?.workspaceRef || normalized.input?.workspaceId || '').trim()
     };
   }
   return null;
@@ -99,7 +104,7 @@ export function composeAssistantReply({
 
   const latestSummary = [...toolResults]
     .reverse()
-    .map((entry) => entry?.summary || entry?.result?.summary || '')
+    .map((entry) => normalizeAssistantToolResultEntry(entry).summary || '')
     .find(Boolean);
 
   if (latestSummary) {

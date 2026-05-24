@@ -141,6 +141,7 @@ export function createTask({
   postmortem = null,
   idleAutoArchiveDays = 180,
   assistantRationale = null,
+  workingMemory = null,
   createdAt = '',
   updatedAt = '',
   metadata = {}
@@ -173,6 +174,7 @@ export function createTask({
     postmortem: postmortem && typeof postmortem === 'object' ? postmortem : null,
     idleAutoArchiveDays: Number.isFinite(Number(idleAutoArchiveDays)) ? Math.max(1, Number(idleAutoArchiveDays)) : 180,
     assistantRationale: assistantRationale && typeof assistantRationale === 'object' ? assistantRationale : null,
+    workingMemory: normalizeTaskWorkingMemory(workingMemory),
     metadata: normalizeObject(metadata),
     createdAt: normalizeIso(createdAt, now),
     updatedAt: normalizeIso(updatedAt, now)
@@ -397,6 +399,51 @@ export function createEpisode({
   };
 }
 
+export function createArtifact({
+  id = '',
+  kind = '',
+  source = '',
+  conversationId = '',
+  personId = '',
+  projectId = '',
+  taskId = '',
+  executionId = '',
+  assistantRunId = '',
+  role = '',
+  title = '',
+  summary = '',
+  mediaType = '',
+  path = '',
+  imageUrl = '',
+  contentText = '',
+  metadata = {},
+  createdAt = '',
+  updatedAt = ''
+} = {}) {
+  const now = nowIso();
+  return {
+    id: toText(id) || crypto.randomUUID(),
+    kind: toText(kind) || 'unknown',
+    source: toText(source) || 'unknown',
+    conversationId: toText(conversationId),
+    personId: toText(personId),
+    projectId: toText(projectId),
+    taskId: toText(taskId),
+    executionId: toText(executionId),
+    assistantRunId: toText(assistantRunId),
+    role: toText(role),
+    title: toText(title),
+    summary: toText(summary),
+    mediaType: toText(mediaType),
+    path: toText(path),
+    imageUrl: toText(imageUrl),
+    contentText: toText(contentText),
+    metadata: normalizeObject(metadata),
+    createdAt: normalizeIso(createdAt, now),
+    updatedAt: normalizeIso(updatedAt, now)
+  };
+}
+
 export function normalizeConversationWorkingSet(value = {}) {
   const source = normalizeObject(value);
   return {
@@ -404,6 +451,18 @@ export function normalizeConversationWorkingSet(value = {}) {
     primaryTaskId: toText(source.primaryTaskId),
     recentTaskIds: normalizeStringList(source.recentTaskIds).slice(0, 10),
     mentionedProjectIds: normalizeStringList(source.mentionedProjectIds).slice(0, 5)
+  };
+}
+
+export function normalizeTaskWorkingMemory(value = null) {
+  const source = normalizeObject(value);
+  return {
+    objective: toText(source.objective),
+    currentPlan: toText(source.currentPlan),
+    lastMeaningfulProgress: toText(source.lastMeaningfulProgress),
+    nextAction: toText(source.nextAction),
+    artifactRefs: normalizeStringList(source.artifactRefs).slice(0, 20),
+    lastUpdatedAt: normalizeIso(source.lastUpdatedAt, '')
   };
 }
 

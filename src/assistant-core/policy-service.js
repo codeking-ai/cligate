@@ -283,6 +283,14 @@ export class AssistantPolicyService {
       });
     }
 
+    if (normalizedTool === 'resolve_assistant_confirmation') {
+      return buildPolicyDecision({
+        allowed: Boolean(conversation?.id),
+        reason: conversation?.id ? 'conversation_scope_available' : 'conversation_scope_required',
+        riskLevel: 'low'
+      });
+    }
+
     if (['ask_user', 'resolve_clarification', 'cancel_pending_clarification'].includes(normalizedTool)) {
       return buildPolicyDecision({
         allowed: Boolean(buildScopeRefs({ conversation, runtimeSession, cwd, metadata }).task),

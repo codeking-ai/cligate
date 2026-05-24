@@ -328,6 +328,16 @@ function summarizeAssistantDomainTask(task = null) {
     title: task.title || '',
     goal: task.goal || '',
     summary: task.summary || '',
+    workingMemory: task.workingMemory && typeof task.workingMemory === 'object'
+      ? {
+          objective: task.workingMemory.objective || '',
+          currentPlan: task.workingMemory.currentPlan || '',
+          lastMeaningfulProgress: task.workingMemory.lastMeaningfulProgress || '',
+          nextAction: task.workingMemory.nextAction || '',
+          artifactRefs: Array.isArray(task.workingMemory.artifactRefs) ? task.workingMemory.artifactRefs : [],
+          lastUpdatedAt: task.workingMemory.lastUpdatedAt || ''
+        }
+      : null,
     lifecycleState: task.lifecycleState || '',
     activeExecutionIds: Array.isArray(task.activeExecutionIds) ? task.activeExecutionIds : [],
     allExecutionIds: Array.isArray(task.allExecutionIds) ? task.allExecutionIds : [],

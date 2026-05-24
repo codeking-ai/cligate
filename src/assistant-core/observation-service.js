@@ -6,6 +6,8 @@ import assistantMemoryService from './memory-service.js';
 import assistantPolicyService from './policy-service.js';
 import assistantWorkspaceStore from './workspace-store.js';
 import assistantClarificationStore from './clarification-store.js';
+import assistantRunStore from './run-store.js';
+import artifactServiceSingleton from './artifact-service.js';
 import assistantDomainTaskStore from './domain/task-store.js';
 import assistantDomainExecutionStore from './domain/execution-store.js';
 import assistantDomainProjectStore from './domain/project-store.js';
@@ -15,6 +17,7 @@ import { buildTrackedSupervisorSessionIds, buildTrackedSupervisorTaskIds } from 
 import supervisorTaskStore from '../agent-orchestrator/supervisor-task-store.js';
 import { normalizeWorkspaceRef } from './workspace-store.js';
 import { getConversationPendingRuntimeState } from './pending-runtime-state.js';
+import { ensurePendingAssistantAction } from './pending-action-resolver.js';
 
 function providerLabel(providerId) {
   if (providerId === 'claude-code') return 'Claude Code';
@@ -104,6 +107,179 @@ function summarizeConversation(conversation = {}) {
   };
 }
 
+function summarizeRecentChatTurn(entry = {}) {
+  const payload = entry?.payload && typeof entry.payload === 'object' ? entry.payload : {};
+  const text = String(
+    payload.fullText
+    || payload.text
+    || payload.content
+    || ''
+  ).trim();
+  const rawParts = Array.isArray(payload.inputParts)
+    ? payload.inputParts
+    : (Array.isArray(payload.contentParts) ? payload.contentParts : []);
+  const parts = rawParts
+    .map((part) => summarizeRecentChatTurnPart(part))
+    .filter(Boolean);
+  if (!text && parts.length === 0) return null;
+  return {
+    role: entry.direction === 'inbound' ? 'user' : 'assistant',
+    text,
+    ...(parts.length > 0 ? { parts } : {}),
+    artifactRefs: Array.isArray(payload.artifactRefs)
+      ? payload.artifactRefs.map((item) => String(item || '').trim()).filter(Boolean).slice(0, 8)
+      : [],
+    kind: String(payload.kind || '').trim(),
+    sourceType: String(payload.sourceType || '').trim(),
+    assistantRunId: String(payload.assistantRunId || '').trim(),
+    runStatus: String(payload.runStatus || '').trim(),
+    sessionId: String(entry.sessionId || '').trim(),
+    createdAt: String(entry.createdAt || '').trim()
+  };
+}
+
+function summarizeRecentChatTurnPart(part = {}) {
+  if (!part || typeof part !== 'object') return null;
+  if (part.type === 'text') {
+    const text = String(part.text || '').trim();
+    if (!text) return null;
+    return {
+      type: 'text',
+      text: truncateArtifactText(text)
+    };
+  }
+  if (part.type === 'input_image') {
+    const imageUrl = String(part.image_url || part.url || '').trim();
+    if (!imageUrl) return null;
+    return {
+      type: 'input_image',
+      image_url: imageUrl,
+      media_type: String(part.media_type || '').trim()
+        || (imageUrl.match(/^data:([^;]+);base64,/i)?.[1] || '')
+    };
+  }
+  return null;
+}
+
+function truncateArtifactText(value, limit = 240) {
+  const text = String(value || '').trim();
+  if (!text) return '';
+  return text.length > limit ? `${text.slice(0, limit - 1)}…` : text;
+}
+
+function summarizeToolArtifactFromResult(entry = {}) {
+  const toolName = String(entry?.toolName || '').trim();
+  const input = entry?.input && typeof entry.input === 'object' ? entry.input : {};
+  const result = entry?.result && typeof entry.result === 'object'
+    ? entry.result
+    : (entry?.structured && typeof entry.structured === 'object' ? entry.structured : {});
+  const status = String(entry?.status || '').trim();
+  const metadata = entry?.metadata && typeof entry.metadata === 'object' ? entry.metadata : {};
+  const updatedAt = String(entry?.completedAt || metadata?.completedAt || '').trim();
+
+  if (!toolName || !result || status !== 'completed') {
+    return null;
+  }
+
+  if (toolName === 'read_file') {
+    return {
+      kind: 'read_file',
+      path: String(result.path || input.path || '').trim(),
+      preview: truncateArtifactText(result.text || ''),
+      startLine: Number.isFinite(Number(input.startLine)) ? Number(input.startLine) : null,
+      endLine: Number.isFinite(Number(input.endLine)) ? Number(input.endLine) : null,
+      updatedAt
+    };
+  }
+
+  if (toolName === 'write_file') {
+    return {
+      kind: 'write_file',
+      path: String(result.path || input.path || '').trim(),
+      preview: truncateArtifactText(input.content || ''),
+      mode: String(input.mode || 'overwrite').trim() || 'overwrite',
+      updatedAt
+    };
+  }
+
+  if (toolName === 'run_shell_command') {
+    return {
+      kind: 'run_shell_command',
+      command: String(input.command || '').trim(),
+      cwd: String(result.cwd || input.cwd || '').trim(),
+      stdoutPreview: truncateArtifactText(result.stdout || ''),
+      stderrPreview: truncateArtifactText(result.stderr || ''),
+      success: result.success === true,
+      updatedAt
+    };
+  }
+
+  if (toolName === 'view_image') {
+    return {
+      kind: 'view_image',
+      path: String(result.path || input.path || '').trim(),
+      mediaType: String(result.media_type || '').trim(),
+      size: Number.isFinite(Number(result.size)) ? Number(result.size) : null,
+      detail: String(result.detail || input.detail || '').trim(),
+      updatedAt
+    };
+  }
+
+  return null;
+}
+
+function buildRecentToolArtifactsFromRuns(runs = [], limit = 8) {
+  const artifacts = [];
+  for (const run of runs) {
+    const toolResults = Array.isArray(run?.metadata?.toolResults) ? run.metadata.toolResults : [];
+    for (const entry of toolResults) {
+      const artifact = summarizeToolArtifactFromResult(entry);
+      if (artifact) {
+        artifacts.push(artifact);
+      }
+    }
+  }
+  return artifacts
+    .filter(Boolean)
+    .sort((left, right) => String(right?.updatedAt || '').localeCompare(String(left?.updatedAt || '')))
+    .slice(0, Math.max(1, limit));
+}
+
+function buildRecentImageArtifactsFromDeliveries(deliveries = [], limit = 4, { artifactService = null } = {}) {
+  return deliveries
+    .flatMap((entry) => {
+      const turn = summarizeRecentChatTurn(entry);
+      const parts = Array.isArray(turn?.parts) ? turn.parts : [];
+      const embedded = parts
+        .filter((part) => part.type === 'input_image' && String(part.image_url || '').trim())
+        .map((part) => ({
+          kind: entry.direction === 'inbound' ? 'chat_input_image' : 'chat_output_image',
+          role: turn?.role || (entry.direction === 'inbound' ? 'user' : 'assistant'),
+          mediaType: String(part.media_type || '').trim(),
+          imageUrl: String(part.image_url || '').trim(),
+          preview: turn?.text || '',
+          updatedAt: String(entry?.createdAt || entry?.updatedAt || '').trim()
+        }));
+      const referenced = Array.isArray(turn?.artifactRefs)
+        ? turn.artifactRefs
+          .map((artifactId) => artifactService?.getArtifact?.(artifactId) || null)
+          .filter(Boolean)
+          .filter((artifact) => String(artifact?.imageUrl || '').trim())
+          .map((artifact) => ({
+            kind: entry.direction === 'inbound' ? 'chat_input_image' : 'chat_output_image',
+            role: turn?.role || (entry.direction === 'inbound' ? 'user' : 'assistant'),
+            mediaType: String(artifact.mediaType || '').trim(),
+            imageUrl: String(artifact.imageUrl || '').trim(),
+            preview: turn?.text || String(artifact.summary || '').trim(),
+            updatedAt: String(artifact?.updatedAt || entry?.createdAt || entry?.updatedAt || '').trim()
+          }))
+        : [];
+      return [...embedded, ...referenced];
+    })
+    .sort((left, right) => String(right?.updatedAt || '').localeCompare(String(left?.updatedAt || '')))
+    .slice(0, Math.max(1, limit));
+}
+
 function projectTaskRecord(task = null) {
   if (!task?.id) return null;
   return {
@@ -135,6 +311,16 @@ function summarizeAssistantDomainTask(task = null) {
     title: task.title || '',
     goal: task.goal || '',
     summary: task.summary || '',
+    workingMemory: task.workingMemory && typeof task.workingMemory === 'object'
+      ? {
+          objective: task.workingMemory.objective || '',
+          currentPlan: task.workingMemory.currentPlan || '',
+          lastMeaningfulProgress: task.workingMemory.lastMeaningfulProgress || '',
+          nextAction: task.workingMemory.nextAction || '',
+          artifactRefs: Array.isArray(task.workingMemory.artifactRefs) ? task.workingMemory.artifactRefs : [],
+          lastUpdatedAt: task.workingMemory.lastUpdatedAt || ''
+        }
+      : null,
     lifecycleState: task.lifecycleState || '',
     updatedAt: task.updatedAt || ''
   };
@@ -287,6 +473,8 @@ export class AssistantObservationService {
     memoryService = assistantMemoryService,
     policyService = assistantPolicyService,
     workspaceStore = assistantWorkspaceStore,
+    assistantRunStore: assistantRunStoreArg = assistantRunStore,
+    artifactService = artifactServiceSingleton,
     assistantTaskStore = assistantDomainTaskStore,
     assistantExecutionStore = assistantDomainExecutionStore,
     assistantProjectStore = assistantDomainProjectStore
@@ -299,6 +487,8 @@ export class AssistantObservationService {
     this.memoryService = memoryService;
     this.policyService = policyService;
     this.workspaceStore = workspaceStore;
+    this.assistantRunStore = assistantRunStoreArg;
+    this.artifactService = artifactService;
     this.clarificationStore = assistantClarificationStore;
     this.assistantTaskStore = assistantTaskStore;
     this.assistantExecutionStore = assistantExecutionStore;
@@ -552,6 +742,10 @@ export class AssistantObservationService {
     const deliveries = this.deliveryStore.listByConversation(conversation.id, {
       limit: Math.max(1, deliveryLimit)
     });
+    const pendingAssistantConfirmation = ensurePendingAssistantAction(conversation, {
+      runStore: this.assistantRunStore,
+      conversationStore: this.conversationStore
+    });
 
     const workspaceRef = resolveWorkspaceScopeRef({
       conversation,
@@ -610,6 +804,28 @@ export class AssistantObservationService {
     const runtimeSessionAuthorizations = runtimeSessionMemory
       .filter((entry) => entry.kind === 'authorization')
       .flatMap((entry) => Array.isArray(entry.value) ? entry.value : []);
+    const recentRuns = this.assistantRunStore.listByConversationId(conversation.id, { limit: 8 });
+    const recentChatTurns = deliveries
+      .filter((entry) => String(entry?.channel || '').trim() === 'chat-ui')
+      .map(summarizeRecentChatTurn)
+      .filter(Boolean)
+      .slice(-8);
+    const recentToolArtifacts = [
+      ...buildRecentImageArtifactsFromDeliveries(
+        deliveries.filter((entry) => String(entry?.channel || '').trim() === 'chat-ui'),
+        4,
+        { artifactService: this.artifactService }
+      ),
+      ...buildRecentToolArtifactsFromRuns(recentRuns, 8)
+    ]
+      .sort((left, right) => String(right?.updatedAt || '').localeCompare(String(left?.updatedAt || '')))
+      .slice(0, 8);
+    const relevantArtifacts = this.artifactService?.listRelevantArtifacts?.({
+      conversationId: conversation.id,
+      taskId: latestTask?.metadata?.assistantTaskId || latestTask?.id || '',
+      projectId: latestTask?.metadata?.assistantProjectId || '',
+      limit: 8
+    }) || [];
 
     return {
       conversation: summarizeConversation(conversation),
@@ -666,10 +882,26 @@ export class AssistantObservationService {
       supervisor: conversation?.metadata?.supervisor || null,
       currentTask: conversation?.metadata?.supervisor?.taskMemory?.currentTask || conversation?.metadata?.supervisor?.taskMemory?.current || null,
       assistantState: conversation?.metadata?.assistantCore || null,
+      pendingAssistantConfirmation: pendingAssistantConfirmation
+        ? {
+            confirmToken: pendingAssistantConfirmation.confirmToken,
+            assistantRunId: pendingAssistantConfirmation.assistantRunId || '',
+            toolName: pendingAssistantConfirmation.toolName || '',
+            title: pendingAssistantConfirmation.title || '',
+            summary: pendingAssistantConfirmation.summary || '',
+            input: pendingAssistantConfirmation.input || {},
+            metadata: pendingAssistantConfirmation.metadata || {},
+            createdAt: pendingAssistantConfirmation.createdAt || 0,
+            expiresAt: pendingAssistantConfirmation.expiresAt || 0
+          }
+        : null,
       workspace: buildWorkspaceMetadata({ workspace, workspaceRef }),
       memory,
       runtimeSessionMemory,
       runtimeSessionAuthorizations,
+      recentChatTurns,
+      recentToolArtifacts,
+      relevantArtifacts,
       policy
     };
   }

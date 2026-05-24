@@ -15,6 +15,55 @@ function formatOptionalBlock(value = '') {
   return text ? [text] : [];
 }
 
+function collectReplayImageParts({
+  inputParts = null,
+  conversationContext = null,
+  limit = 2
+} = {}) {
+  const currentTurnImages = Array.isArray(inputParts)
+    ? inputParts.filter((part) => part?.type === 'input_image' && String(part.image_url || part.url || '').trim())
+    : [];
+  if (currentTurnImages.length > 0) {
+    return [];
+  }
+  const artifacts = Array.isArray(conversationContext?.relevantArtifacts) && conversationContext.relevantArtifacts.length > 0
+    ? conversationContext.relevantArtifacts
+    : (Array.isArray(conversationContext?.recentToolArtifacts)
+      ? conversationContext.recentToolArtifacts
+      : [])
+  return artifacts
+    .filter((entry) => (
+      String(entry?.imageUrl || '').trim()
+    ))
+    .slice(0, Math.max(1, limit))
+    .map((entry) => ({
+      type: 'input_image',
+      image_url: String(entry.imageUrl || '').trim(),
+      ...(String(entry.mediaType || '').trim() ? { media_type: String(entry.mediaType || '').trim() } : {})
+    }));
+}
+
+function buildAnthropicImagePart(part = {}) {
+  const imageUrl = String(part.image_url || part.url || '').trim();
+  if (!imageUrl) return null;
+  return {
+    type: 'image',
+    source: imageUrl.startsWith('data:')
+      ? {
+          type: 'base64',
+          media_type: String(part.media_type || '').trim() || (imageUrl.match(/^data:([^;]+);base64,/i)?.[1] || 'image/jpeg'),
+          data: imageUrl.replace(/^data:[^;]+;base64,/i, '')
+        }
+      : {
+          type: 'url',
+          url: imageUrl,
+          ...(String(part.media_type || '').trim()
+            ? { media_type: String(part.media_type || '').trim() }
+            : {})
+        }
+  };
+}
+
 function getAssistantControlMode(conversation = null) {
   return String(
     conversation?.metadata?.assistantCore?.controlMode
@@ -79,6 +128,23 @@ function summarizePendingClarification(conversationContext = null) {
           ...(Number.isFinite(Number(entry?.confidence)) ? { confidence: Number(entry.confidence) } : {})
         }))
       : []
+  };
+}
+
+function summarizePendingAssistantConfirmation(conversationContext = null) {
+  const pending = conversationContext?.pendingAssistantConfirmation || null;
+  if (!pending || typeof pending !== 'object') {
+    return null;
+  }
+  return {
+    confirmToken: String(pending?.confirmToken || '').trim(),
+    assistantRunId: String(pending?.assistantRunId || '').trim(),
+    toolName: String(pending?.toolName || '').trim(),
+    title: String(pending?.title || '').trim(),
+    summary: String(pending?.summary || '').trim(),
+    input: pending?.input && typeof pending.input === 'object' ? pending.input : {},
+    metadata: pending?.metadata && typeof pending.metadata === 'object' ? pending.metadata : {},
+    expiresAt: Number(pending?.expiresAt || 0)
   };
 }
 
@@ -198,6 +264,117 @@ function summarizeRecentIntentTimeline(timeline = []) {
         referenceConfidence: String(entry?.referenceConfidence || '').trim(),
         resolutionAction: String(entry?.resolutionAction || '').trim(),
         shouldAskUser: entry?.shouldAskUser === true
+      }))
+    : [];
+}
+
+function summarizeTaskWorkingMemory(taskRecord = null) {
+  const workingMemory = taskRecord?.assistantDomain?.task?.workingMemory
+    || taskRecord?.task?.workingMemory
+    || null;
+  if (!workingMemory || typeof workingMemory !== 'object') {
+    return null;
+  }
+  return {
+    objective: String(workingMemory.objective || '').trim(),
+    currentPlan: truncate(workingMemory.currentPlan || '', 240),
+    lastMeaningfulProgress: truncate(workingMemory.lastMeaningfulProgress || '', 240),
+    nextAction: String(workingMemory.nextAction || '').trim(),
+    artifactRefs: Array.isArray(workingMemory.artifactRefs) ? workingMemory.artifactRefs.slice(0, 12) : [],
+    lastUpdatedAt: String(workingMemory.lastUpdatedAt || '').trim()
+  };
+}
+
+function summarizeRecentChatTurns(turns = []) {
+  return Array.isArray(turns)
+    ? turns.slice(-8).map((entry) => ({
+        role: String(entry?.role || '').trim(),
+        text: truncate(entry?.text || '', 240),
+        parts: Array.isArray(entry?.parts)
+          ? entry.parts.slice(0, 3).map((part) => summarizeRecentChatTurnPart(part)).filter(Boolean)
+          : [],
+        kind: String(entry?.kind || '').trim(),
+        sourceType: String(entry?.sourceType || '').trim(),
+        assistantRunId: String(entry?.assistantRunId || '').trim(),
+        runStatus: String(entry?.runStatus || '').trim(),
+        sessionId: String(entry?.sessionId || '').trim(),
+        createdAt: String(entry?.createdAt || '').trim()
+      }))
+    : [];
+}
+
+function summarizeRecentChatTurnPart(part = {}) {
+  if (!part || typeof part !== 'object') return null;
+  if (part.type === 'text') {
+    const text = String(part.text || '').trim();
+    if (!text) return null;
+    return {
+      type: 'text',
+      text: truncate(text, 120)
+    };
+  }
+  if (part.type === 'input_image') {
+    const imageUrl = String(part.image_url || '').trim();
+    if (!imageUrl) return null;
+    return {
+      type: 'input_image',
+      mediaType: String(part.media_type || '').trim()
+        || (imageUrl.match(/^data:([^;]+);base64,/i)?.[1] || ''),
+      imageUrlPreview: imageUrl.startsWith('data:')
+        ? `${imageUrl.slice(0, 48)}...`
+        : truncate(imageUrl, 120)
+    };
+  }
+  return null;
+}
+
+function summarizeRecentToolArtifacts(artifacts = []) {
+  return Array.isArray(artifacts)
+    ? artifacts.slice(0, 8).map((entry) => ({
+        kind: String(entry?.kind || '').trim(),
+        role: String(entry?.role || '').trim(),
+        path: String(entry?.path || '').trim(),
+        command: String(entry?.command || '').trim(),
+        cwd: String(entry?.cwd || '').trim(),
+        mediaType: String(entry?.mediaType || '').trim(),
+        imageUrlPreview: String(entry?.imageUrl || '').trim()
+          ? (String(entry.imageUrl).startsWith('data:')
+            ? `${String(entry.imageUrl).slice(0, 48)}...`
+            : truncate(String(entry.imageUrl), 120))
+          : '',
+        size: Number.isFinite(Number(entry?.size)) ? Number(entry.size) : null,
+        detail: String(entry?.detail || '').trim(),
+        mode: String(entry?.mode || '').trim(),
+        success: typeof entry?.success === 'boolean' ? entry.success : undefined,
+        preview: truncate(entry?.preview || '', 240),
+        stdoutPreview: truncate(entry?.stdoutPreview || '', 240),
+        stderrPreview: truncate(entry?.stderrPreview || '', 240),
+        startLine: Number.isFinite(Number(entry?.startLine)) ? Number(entry.startLine) : null,
+        endLine: Number.isFinite(Number(entry?.endLine)) ? Number(entry.endLine) : null,
+        updatedAt: String(entry?.updatedAt || '').trim()
+      }))
+    : [];
+}
+
+function summarizeRelevantArtifacts(artifacts = []) {
+  return Array.isArray(artifacts)
+    ? artifacts.slice(0, 8).map((entry) => ({
+        id: String(entry?.id || '').trim(),
+        kind: String(entry?.kind || '').trim(),
+        source: String(entry?.source || '').trim(),
+        role: String(entry?.role || '').trim(),
+        title: truncate(entry?.title || '', 120),
+        summary: truncate(entry?.summary || '', 200),
+        mediaType: String(entry?.mediaType || '').trim(),
+        path: String(entry?.path || '').trim(),
+        imageUrlPreview: String(entry?.imageUrl || '').trim()
+          ? (String(entry.imageUrl).startsWith('data:')
+            ? `${String(entry.imageUrl).slice(0, 48)}...`
+            : truncate(String(entry.imageUrl), 120))
+          : '',
+        taskId: String(entry?.taskId || '').trim(),
+        projectId: String(entry?.projectId || '').trim(),
+        updatedAt: String(entry?.updatedAt || '').trim()
       }))
     : [];
 }
@@ -329,6 +506,7 @@ function buildSystemPrompt(language = 'en') {
       'assistant mode 下没有任何 pre-LLM 的 pending 硬路由。即使存在 runtime approval 或 runtime question，也必须由你结合用户这条消息显式判断。',
       '如果上下文出现 pending_runtime_approval，并且用户是在批准或拒绝该请求，调用 resolve_runtime_approval；不要假设系统会自动批准。remember 参数的取值要严格按用户语义判定：(a) 用户只说"同意 / 可以 / 这次允许 / 这一次"——没有提到以后/本会话/记住——按一次性处理，remember 留空（默认 none）。(b) 用户说"本会话 / 本次会话 / 这次对话 / 这个聊天 / 整个项目 / 后续 / 以后都 / 一律 / 记住 / from now on / this conversation"——覆盖跨多文件多轮的措辞——使用 remember="conversation" 并附带 conversationId。**重点：用户说"本会话/本次会话"时务必用 "conversation"，不要误用 "session"**——"session" 在系统里只覆盖当前那一次 runtime 执行，下一次 codex/claude-code 启动就失效，颗粒度远比用户预期小。(c) 仅当用户明确说"只对这一次 codex 执行/this runtime session"时才用 remember="session"。系统会自动把策略的 path pattern 扩展到 file_path 所在的目录（例如 Write D:\\proj\\index.html → D:\\proj\\\\**），所以同目录下后续文件不会再打扰用户，不需要逐文件确认。',
       '如果上下文出现 pending_runtime_question，并且用户是在回答该问题，调用 answer_runtime_question；不要假设系统会自动转发。',
+      '如果上下文出现 pending_assistant_confirmation，并且用户是在同意、拒绝、继续、取消这次 assistant 自己挂起的待确认动作，调用 resolve_assistant_confirmation；不要假设系统会自动把自然语言“同意/继续”映射过去。',
       '如果上下文出现 pending_clarification，并且用户是在回答这个澄清问题，调用 resolve_clarification；如果澄清已无意义，则调用 cancel_pending_clarification。',
       '如果某个工具返回的结果里出现 kind="policy_block" 且 requiresConfirmation=true，说明这次操作超出了自动授权边界。此时不要继续尝试其他有副作用的工具调用，直接向用户明确请求确认。',
       '如果存在 pending runtime interaction，但用户显然是在切换任务、查询状态、或发起新需求，就按 task space 和 routing hints 决策，不要被 pending 状态绑死。',
@@ -371,6 +549,7 @@ function buildSystemPrompt(language = 'en') {
     'In assistant mode there is no pre-LLM hard routing for pending runtime interactions. Even if a runtime approval or question is pending, you must inspect the user message and decide explicitly.',
     'If the context includes pending_runtime_approval and the user is approving or denying that request, call resolve_runtime_approval. Do not assume the system will auto-route it. Pick the remember parameter strictly by the user\'s wording: (a) one-shot phrasings like "approve / ok / yes / just this one / 同意 / 可以 / 这次允许" → leave remember empty (default "none"). (b) Sticky phrasings that clearly span multiple files or turns — "本会话 / 本次会话 / 这次对话 / 这个聊天 / 整个项目 / 后续 / 以后都 / 一律 / 记住 / from now on / for this conversation / always / don\'t ask again" — use remember="conversation" plus conversationId. **Important: Chinese "本会话/本次会话" maps to "conversation", NOT "session" — "session" in this system only covers the current single runtime execution and expires when the next codex/claude-code session starts, which is far narrower than the user expects.** (c) Use remember="session" only when the user explicitly says "only for this runtime session / 只对这一次 codex". The system automatically broadens path patterns from a file to its containing directory (e.g. Write D:\\proj\\index.html → D:\\proj\\\\**), so sibling files in the same directory do not require a fresh approval.',
     'If the context includes pending_runtime_question and the user is answering that question, call answer_runtime_question. Do not assume the system will auto-forward it.',
+    'If the context includes pending_assistant_confirmation and the user is approving, denying, continuing, or cancelling that assistant-owned pending action, call resolve_assistant_confirmation. Do not assume the system will auto-map a natural-language "yes/continue" onto it.',
     'If the context includes pending_clarification and the user is answering that clarification, call resolve_clarification. If that clarification is no longer relevant, call cancel_pending_clarification.',
     'If any tool result contains kind="policy_block" with requiresConfirmation=true, the action has crossed the auto-approved boundary. Stop issuing further mutating tool calls and ask the user for explicit confirmation.',
     'If a runtime approval or question is pending but the user is clearly switching tasks, asking for status, or starting new work, follow task-space and routing hints instead of being trapped by the pending state.',
@@ -505,6 +684,9 @@ function buildContextBlock({
     '<current_task_record>',
     formatJson(taskRecord || null),
     '</current_task_record>',
+    '<task_working_memory>',
+    formatJson(summarizeTaskWorkingMemory(taskRecord)),
+    '</task_working_memory>',
     '<task_space>',
     formatJson({
       summary: taskSpace?.summary || {
@@ -552,6 +734,15 @@ function buildContextBlock({
     '<recent_intent_timeline>',
     formatJson(summarizeRecentIntentTimeline(recentIntentTimeline)),
     '</recent_intent_timeline>',
+    '<recent_chat_turns>',
+    formatJson(summarizeRecentChatTurns(conversationContext?.recentChatTurns)),
+    '</recent_chat_turns>',
+    '<recent_tool_artifacts>',
+    formatJson(summarizeRecentToolArtifacts(conversationContext?.recentToolArtifacts)),
+    '</recent_tool_artifacts>',
+    '<relevant_artifacts>',
+    formatJson(summarizeRelevantArtifacts(conversationContext?.relevantArtifacts)),
+    '</relevant_artifacts>',
     '<routing_hints>',
     formatJson(buildRoutingHints({
       text,
@@ -568,6 +759,9 @@ function buildContextBlock({
     '<pending_clarification>',
     formatJson(summarizePendingClarification(conversationContext)),
     '</pending_clarification>',
+    '<pending_assistant_confirmation>',
+    formatJson(summarizePendingAssistantConfirmation(conversationContext)),
+    '</pending_assistant_confirmation>',
     '<conversation_summary>',
     formatJson({
       conversation: conversationContext?.conversation || null,
@@ -580,6 +774,7 @@ function buildContextBlock({
         ? conversationContext.pendingQuestions.slice(0, 5)
         : [],
       pendingClarification: conversationContext?.pendingClarification || null,
+      pendingAssistantConfirmation: conversationContext?.pendingAssistantConfirmation || null,
       assistantState: conversationContext?.assistantState || null,
       memory: conversationContext?.memory || {},
       policy: conversationContext?.policy || {},
@@ -609,6 +804,7 @@ export function buildInitialAnthropicMessages({
   language = 'en',
   conversation,
   text,
+  inputParts = null,
   taskRecord,
   taskSpace,
   conversationContext,
@@ -627,6 +823,16 @@ export function buildInitialAnthropicMessages({
   const activeSkillsBlock = typeof renderActiveSkills === 'function'
     ? renderActiveSkills(runSkills?.active || [])
     : '';
+  const multimodalUserParts = [];
+  for (const part of [
+    ...(Array.isArray(inputParts) ? inputParts : []),
+    ...collectReplayImageParts({ inputParts, conversationContext, limit: 2 })
+  ]) {
+    if (!part || typeof part !== 'object') continue;
+    if (part.type !== 'input_image') continue;
+    const anthropicImagePart = buildAnthropicImagePart(part);
+    if (anthropicImagePart) multimodalUserParts.push(anthropicImagePart);
+  }
   return {
     system: buildSystemPrompt(language),
     messages: [{
@@ -656,7 +862,8 @@ export function buildInitialAnthropicMessages({
             String(text || '').trim(),
             '</user_request>'
           ].join('\n')
-        }
+        },
+        ...multimodalUserParts
       ]
     }]
   };

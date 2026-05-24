@@ -1,12 +1,17 @@
 import AssistantRunner from '../assistant-core/runner.js';
 import createDefaultAssistantToolRegistry from '../assistant-core/tool-registry.js';
 import AssistantToolExecutor from '../assistant-core/tool-executor.js';
+import createBuiltinAssistantToolRegistry, {
+  AssistantToolPolicyService,
+  AssistantToolsExecutor
+} from '../assistant-tools/index.js';
 import assistantTaskViewService from '../assistant-core/task-view-service.js';
 import assistantObservationService from '../assistant-core/observation-service.js';
 import assistantLlmClient, { AssistantLlmClient } from './llm-client.js';
 import AssistantReactEngine from './react-engine.js';
 import { resolveReferenceContext } from './reference-resolver.js';
 import { filterMainContextDeliveries } from './prompt-builder.js';
+import { createOptionalAssistantExecutionSurface } from './tool-surface.js';
 
 // CliGate Assistant mainline dialogue path.
 // When available, /cligate should prefer this agent path; runner fallback is only a safety rail.
@@ -18,6 +23,11 @@ export class AssistantDialogueService {
     taskViewService = assistantTaskViewService,
     toolRegistry = null,
     toolExecutor = null,
+    executionToolRegistry = null,
+    executionToolExecutor = null,
+    enableBuiltinExecutionTools = false,
+    executionWorkspaceRoot = process.cwd(),
+    executionMcpService = null,
     llmClient = assistantLlmClient,
     fallbackRunner = null,
     messageService = null
@@ -25,14 +35,47 @@ export class AssistantDialogueService {
     this.runStore = runStore;
     this.observationService = observationService;
     this.taskViewService = taskViewService;
-    this.toolRegistry = toolRegistry || createDefaultAssistantToolRegistry({
+    this.enableBuiltinExecutionTools = enableBuiltinExecutionTools === true;
+    this.executionWorkspaceRoot = executionWorkspaceRoot || process.cwd();
+    this.executionMcpService = executionMcpService || null;
+    this.supervisorToolRegistry = toolRegistry || createDefaultAssistantToolRegistry({
       observationService: this.observationService,
       messageService,
       taskViewService: this.taskViewService
     });
-    this.toolExecutor = toolExecutor || new AssistantToolExecutor({
-      toolRegistry: this.toolRegistry
+    this.supervisorToolExecutor = toolExecutor || new AssistantToolExecutor({
+      toolRegistry: this.supervisorToolRegistry
     });
+    this.usesBuiltinExecutionSurface = !executionToolRegistry
+      && !executionToolExecutor
+      && this.enableBuiltinExecutionTools;
+    const builtinExecutionSurface = this.usesBuiltinExecutionSurface
+      ? createBuiltinAssistantToolRegistry({
+          workspaceRoot: this.executionWorkspaceRoot,
+          mcpService: this.executionMcpService
+        })
+      : null;
+    this.executionToolRegistry = executionToolRegistry || builtinExecutionSurface?.registry || null;
+    this.executionToolExecutor = executionToolExecutor
+      || (this.executionToolRegistry
+        ? new AssistantToolsExecutor({
+            toolRegistry: this.executionToolRegistry,
+            policyService: builtinExecutionSurface?.workspaceGuard
+              ? new AssistantToolPolicyService({
+                  workspaceGuard: builtinExecutionSurface.workspaceGuard,
+                  allowMutatingTools: true
+                })
+              : undefined
+          })
+        : null);
+    const toolSurface = createOptionalAssistantExecutionSurface({
+      primaryRegistry: this.supervisorToolRegistry,
+      primaryExecutor: this.supervisorToolExecutor,
+      secondaryRegistry: this.executionToolRegistry,
+      secondaryExecutor: this.executionToolExecutor
+    });
+    this.toolRegistry = toolSurface.toolRegistry;
+    this.toolExecutor = toolSurface.toolExecutor;
     this.llmClient = llmClient instanceof AssistantLlmClient
       ? llmClient
       : llmClient;
@@ -47,6 +90,41 @@ export class AssistantDialogueService {
       messageService,
       taskViewService: this.taskViewService
     });
+  }
+
+  refreshExecutionSurfaceForCwd(cwd = '') {
+    if (!this.usesBuiltinExecutionSurface) {
+      return;
+    }
+
+    const nextWorkspaceRoot = String(cwd || this.executionWorkspaceRoot || process.cwd()).trim() || process.cwd();
+    if (this.executionToolRegistry && nextWorkspaceRoot === this.executionWorkspaceRoot) {
+      return;
+    }
+
+    const builtinExecutionSurface = createBuiltinAssistantToolRegistry({
+      workspaceRoot: nextWorkspaceRoot,
+      mcpService: this.executionMcpService
+    });
+    this.executionWorkspaceRoot = nextWorkspaceRoot;
+    this.executionToolRegistry = builtinExecutionSurface.registry;
+    this.executionToolExecutor = new AssistantToolsExecutor({
+      toolRegistry: this.executionToolRegistry,
+      policyService: new AssistantToolPolicyService({
+        workspaceGuard: builtinExecutionSurface.workspaceGuard,
+        allowMutatingTools: true
+      })
+    });
+    const toolSurface = createOptionalAssistantExecutionSurface({
+      primaryRegistry: this.supervisorToolRegistry,
+      primaryExecutor: this.supervisorToolExecutor,
+      secondaryRegistry: this.executionToolRegistry,
+      secondaryExecutor: this.executionToolExecutor
+    });
+    this.toolRegistry = toolSurface.toolRegistry;
+    this.toolExecutor = toolSurface.toolExecutor;
+    this.reactEngine.toolRegistry = this.toolRegistry;
+    this.reactEngine.toolExecutor = this.toolExecutor;
   }
 
   buildRecentIntentTimeline({ conversationContext = null, taskSpace = null } = {}) {
@@ -177,7 +255,16 @@ export class AssistantDialogueService {
     }
   }
 
-  async run({ run, conversation, text, defaultRuntimeProvider = 'codex', cwd = '', model = '' } = {}) {
+  async run({
+    run,
+    conversation,
+    text,
+    inputParts = null,
+    defaultRuntimeProvider = 'codex',
+    cwd = '',
+    model = ''
+  } = {}) {
+    this.refreshExecutionSurfaceForCwd(cwd);
     const hasSource = await this.llmClient?.hasAvailableSource?.();
     if (!hasSource) {
       const fallbackReason = this.llmClient?.getFallbackReason?.() || 'no_available_llm_source';
@@ -239,6 +326,7 @@ export class AssistantDialogueService {
         run,
         conversation,
         text,
+        inputParts,
         taskRecord,
         taskSpace,
         conversationContext,
@@ -268,6 +356,7 @@ export class AssistantDialogueService {
         run: fallbackRun,
         conversation,
         text,
+        inputParts,
         defaultRuntimeProvider,
         cwd,
         model

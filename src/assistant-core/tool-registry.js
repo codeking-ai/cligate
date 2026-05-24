@@ -13,6 +13,7 @@ import {
   normalizeDayOfWeekList
 } from './schedule-helpers.js';
 import { buildSkillAwareRuntimeInput } from '../skills/index.js';
+import { resolveAssistantConfirmation } from './assistant-confirmation-service.js';
 
 function normalizeText(value) {
   return String(value || '').trim();
@@ -917,6 +918,21 @@ export function createDefaultAssistantToolRegistry({
       questionId: input.questionId,
       answer: input.answer
     })
+  });
+
+  registry.register({
+    name: 'resolve_assistant_confirmation',
+    description: 'Resolve an assistant-owned pending confirmation action in the current conversation. Use this when the assistant itself paused on a confirmation-required action and the user gives a natural-language approval or denial.',
+    execute: async ({ input = {}, context = {} } = {}) => {
+      const conversation = requireConversation(context);
+      return resolveAssistantConfirmation({
+        conversation,
+        decision: input.decision,
+        conversationStore: conversationControlService.conversationStore,
+        assistantToolRegistry: registry,
+        assistantToolContext: context
+      });
+    }
   });
 
   registry.register({

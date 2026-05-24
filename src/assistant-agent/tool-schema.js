@@ -1,3 +1,5 @@
+import { sanitizeToolSchema } from '../translators/normalizers/schemas.js';
+
 const TOOL_SCHEMAS = Object.freeze({
   get_workspace_context: {
     type: 'object',
@@ -253,6 +255,13 @@ const TOOL_SCHEMAS = Object.freeze({
     },
     required: ['sessionId', 'questionId', 'answer']
   },
+  resolve_assistant_confirmation: {
+    type: 'object',
+    properties: {
+      decision: { type: 'string', enum: ['approve', 'deny'] }
+    },
+    required: ['decision']
+  },
   cancel_pending_question: {
     type: 'object',
     properties: {
@@ -453,14 +462,22 @@ const TOOL_SCHEMAS = Object.freeze({
   }
 });
 
+function resolveToolInputSchema(tool = {}) {
+  return sanitizeToolSchema(
+    tool.inputSchema
+    || TOOL_SCHEMAS[tool.name]
+    || {
+      type: 'object',
+      properties: {}
+    }
+  );
+}
+
 export function buildAnthropicToolDefinitions(toolRegistry) {
   return toolRegistry.list().map((tool) => ({
     name: tool.name,
     description: tool.description || tool.name,
-    input_schema: TOOL_SCHEMAS[tool.name] || {
-      type: 'object',
-      properties: {}
-    }
+    input_schema: resolveToolInputSchema(tool)
   }));
 }
 

@@ -43,19 +43,32 @@ function tokenize(text = '') {
 function scoreSkillMatch(text = '', skill = {}) {
   const textTokens = tokenize(text);
   if (textTokens.length === 0) return 0;
-  const skillTokens = new Set([
-    ...tokenize(skill?.name || ''),
+  const nameTokens = new Set(tokenize(skill?.name || ''));
+  const whenToUseTokens = new Set(tokenize(skill?.whenToUse || ''));
+  const tagTokens = new Set(Array.isArray(skill?.tags) ? skill.tags.flatMap((tag) => tokenize(tag)) : []);
+  const descriptionTokens = new Set([
     ...tokenize(skill?.description || ''),
-    ...tokenize(skill?.shortDescription || ''),
-    ...tokenize(skill?.whenToUse || ''),
-    ...(Array.isArray(skill?.tags) ? skill.tags.flatMap((tag) => tokenize(tag)) : [])
+    ...tokenize(skill?.shortDescription || '')
   ]);
-  if (skillTokens.size === 0) return 0;
-  const overlap = textTokens.filter((token) => skillTokens.has(token)).length;
+  if (
+    nameTokens.size === 0
+    && whenToUseTokens.size === 0
+    && tagTokens.size === 0
+    && descriptionTokens.size === 0
+  ) {
+    return 0;
+  }
+  const scoreFrom = (tokenSet, weight) => textTokens.filter((token) => tokenSet.has(token)).length * weight;
   const exactName = skill?.name && String(text || '').toLowerCase().includes(String(skill.name).toLowerCase());
   const exactDescription = skill?.description && String(text || '').toLowerCase().includes(String(skill.description).toLowerCase());
   const exactWhenToUse = skill?.whenToUse && String(text || '').toLowerCase().includes(String(skill.whenToUse).toLowerCase());
-  return overlap + (exactName ? 3 : 0) + (exactDescription ? 2 : 0) + (exactWhenToUse ? 2 : 0);
+  return scoreFrom(nameTokens, 2)
+    + scoreFrom(whenToUseTokens, 1.5)
+    + scoreFrom(tagTokens, 1.5)
+    + scoreFrom(descriptionTokens, 0.5)
+    + (exactName ? 3 : 0)
+    + (exactDescription ? 2 : 0)
+    + (exactWhenToUse ? 2 : 0);
 }
 
 export function collectSuggestedSkills(text = '', availableSkills = [], { maxCount = 2, minScore = 2 } = {}) {
@@ -174,10 +187,12 @@ export function buildSkillAwareRuntimeInput(task = '', activeSkills = []) {
 export function restoreActiveSkillsFromCheckpoint(run = null) {
   const metadataSkills = run?.metadata?.skills || {};
   const checkpointSkills = run?.metadata?.checkpoint?.skills || {};
-  const active = Array.isArray(metadataSkills.active) && metadataSkills.active.length > 0
+  const hasMetadataActive = Array.isArray(metadataSkills.active);
+  const hasMetadataHistory = Array.isArray(metadataSkills.history);
+  const active = hasMetadataActive
     ? metadataSkills.active
     : (Array.isArray(checkpointSkills.active) ? checkpointSkills.active : []);
-  const history = Array.isArray(metadataSkills.history) && metadataSkills.history.length > 0
+  const history = hasMetadataHistory
     ? metadataSkills.history
     : (Array.isArray(checkpointSkills.history) ? checkpointSkills.history : []);
 

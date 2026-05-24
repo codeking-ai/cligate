@@ -26,7 +26,7 @@ function createShellModule() {
     version: '1.2.1',
     connectionStatus: 'connecting',
     activeTab: 'dashboard',
-    taskSubTab: 'active',
+    taskSubTab: 'workbench',
     viewPartialPaths: {
       dashboard: '/partials/views/dashboard.html',
       accounts: '/partials/views/accounts.html',

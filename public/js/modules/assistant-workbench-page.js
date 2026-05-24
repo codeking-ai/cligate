@@ -226,6 +226,49 @@ export function createAssistantWorkbenchPageModule() {
     assistantWorkbenchFilteredEpisodes() {
       return this.assistantWorkbenchList(this.assistantWorkbenchEpisodes)
         .filter((episode) => this.assistantWorkbenchEpisodeMatchesFilter(episode));
+    },
+
+    assistantWorkbenchWorkingMemory() {
+      return this.assistantWorkbenchDashboard?.task?.workingMemory || null;
+    },
+
+    assistantWorkbenchWorkingMemoryItems() {
+      const workingMemory = this.assistantWorkbenchWorkingMemory();
+      if (!workingMemory || typeof workingMemory !== 'object') return [];
+      return [
+        ['assistantWorkbenchWorkingMemoryObjective', workingMemory.objective],
+        ['assistantWorkbenchWorkingMemoryCurrentPlan', workingMemory.currentPlan],
+        ['assistantWorkbenchWorkingMemoryProgress', workingMemory.lastMeaningfulProgress],
+        ['assistantWorkbenchWorkingMemoryNextAction', workingMemory.nextAction]
+      ].filter(([, value]) => String(value || '').trim());
+    },
+
+    assistantWorkbenchRelevantArtifacts() {
+      return this.assistantWorkbenchList(this.assistantWorkbenchConversationContext?.relevantArtifacts);
+    },
+
+    assistantWorkbenchRecentChatTurns() {
+      return this.assistantWorkbenchList(this.assistantWorkbenchConversationContext?.recentChatTurns);
+    },
+
+    assistantWorkbenchArtifactPreview(artifact) {
+      if (!artifact || typeof artifact !== 'object') return '-';
+      return artifact.summary
+        || artifact.title
+        || artifact.contentText
+        || artifact.path
+        || artifact.imageUrl
+        || '-';
+    },
+
+    assistantWorkbenchChatTurnPreview(turn) {
+      if (!turn || typeof turn !== 'object') return '-';
+      const text = String(turn.text || '').trim();
+      if (text) return text;
+      const parts = this.assistantWorkbenchList(turn.parts);
+      const imagePart = parts.find((part) => part?.type === 'input_image');
+      if (imagePart) return '[image]';
+      return '-';
     }
   };
 }

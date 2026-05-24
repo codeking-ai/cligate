@@ -12,6 +12,7 @@ import {
   buildStructuredRationale,
   createProject,
   createTask,
+  normalizeTaskWorkingMemory,
   nowIso,
   toText
 } from './models.js';
@@ -35,6 +36,17 @@ function mapRuntimeStatusToExecutionStatus(status = '') {
   if (normalized === 'cancelled') return 'cancelled';
   if (normalized === 'ready') return 'ready';
   return 'spawning';
+}
+
+function deriveNextActionFromStatus(status = '') {
+  const normalized = toText(status).toLowerCase();
+  if (normalized === 'waiting_approval') return 'await_user_approval';
+  if (normalized === 'waiting_user') return 'await_user_reply';
+  if (normalized === 'running' || normalized === 'ready' || normalized === 'spawning') return 'continue_execution';
+  if (normalized === 'failed') return 'inspect_failure';
+  if (normalized === 'cancelled') return 'decide_restart_or_close';
+  if (normalized === 'done') return 'report_or_close';
+  return '';
 }
 
 function createHandoffPacket({
@@ -290,9 +302,16 @@ export class StateCoordinator {
     if (!current?.id) {
       throw new Error('task not found');
     }
+    const nextWorkingMemory = patch.workingMemory === undefined
+      ? current.workingMemory
+      : normalizeTaskWorkingMemory({
+          ...(current.workingMemory || {}),
+          ...(patch.workingMemory || {})
+        });
     const next = this.taskStore.save({
       ...current,
       ...patch,
+      workingMemory: nextWorkingMemory,
       assistantRationale: patch.assistantRationale === undefined
         ? current.assistantRationale
         : buildStructuredRationale(patch.assistantRationale)
@@ -309,6 +328,28 @@ export class StateCoordinator {
       }
     });
     return next;
+  }
+
+  updateTaskWorkingMemory({
+    taskId = '',
+    patch = {},
+    reason = ''
+  } = {}) {
+    const current = this.taskStore.get(taskId);
+    if (!current?.id) {
+      throw new Error('task not found');
+    }
+    return this.updateTask({
+      id: current.id,
+      patch: {
+        workingMemory: {
+          ...(current.workingMemory || {}),
+          ...(patch || {}),
+          lastUpdatedAt: nowIso()
+        }
+      },
+      reason: reason || 'working_memory_updated'
+    });
   }
 
   moveTaskToProject({
@@ -547,6 +588,17 @@ export class StateCoordinator {
         }
       });
     }
+    assistantTask = this.updateTask({
+      id: assistantTask.id,
+      patch: {
+        workingMemory: {
+          objective: input || supervisorTask.goal || assistantTask.goal || '',
+          lastMeaningfulProgress: toText(session.summary || assistantTask.summary || ''),
+          nextAction: deriveNextActionFromStatus(session.status)
+        }
+      },
+      reason: 'sync_task_execution_bridge'
+    });
 
     let assistantExecution = reuseExecutionId
       ? this.executionStore.get(reuseExecutionId)

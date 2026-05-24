@@ -24,8 +24,16 @@ import { logger } from '../utils/logger.js';
 import { prepareAssistantRequest } from '../assistant/assistant-chat-service.js';
 import { createPendingAssistantAction, executePendingAssistantAction } from '../assistant/tool-executor.js';
 import assistantPendingActionStore from '../assistant-core/pending-action-store.js';
+import createBuiltinAssistantToolRegistry, {
+  AssistantToolPolicyService,
+  AssistantToolsExecutor
+} from '../assistant-tools/index.js';
+import agentChannelDeliveryStore from '../agent-channels/delivery-store.js';
 import chatUiConversationService from '../chat-ui/conversation-service.js';
 import chatUiConversationStore from '../chat-ui/conversation-store.js';
+import assistantRunStore from '../assistant-core/run-store.js';
+import artifactService from '../assistant-core/artifact-service.js';
+import { ensurePendingAssistantAction } from '../assistant-core/pending-action-resolver.js';
 
 function listPersistedUiChatMessages(conversation) {
   const messages = conversation?.metadata?.uiChatMessages;
@@ -58,6 +66,177 @@ function isAffirmativeConfirmation(text = '') {
     /^(确认|同意|可以|查吧|行|好|继续|批准)\s*[.!。！]*$/i,
     /^(confirm|approve|yes|ok|okay|go ahead|continue)\s*[.!]*$/i
   ].some((pattern) => pattern.test(normalized));
+}
+
+function isExecutionToolPendingAction(action = {}) {
+  return Boolean(
+    action?.toolName
+    && action?.input
+    && !action?.input?.task
+    && !action?.input?.message
+  );
+}
+
+async function executeConfirmedExecutionToolAction(action = {}) {
+  const workspaceRoot = String(
+    action?.input?.cwd
+      || action?.input?.path
+      || action?.metadata?.requestedPath
+      || process.cwd()
+  ).trim() || process.cwd();
+  const { registry, workspaceGuard } = createBuiltinAssistantToolRegistry({
+    workspaceRoot
+  });
+  const executor = new AssistantToolsExecutor({
+    toolRegistry: registry,
+    policyService: new AssistantToolPolicyService({
+      workspaceGuard,
+      allowMutatingTools: true
+    })
+  });
+  const toolResult = await executor.executeToolCall({
+    toolName: String(action.toolName || '').trim(),
+    input: action.input || {},
+    metadata: {
+      approved: true
+    }
+  }, {
+    cwd: workspaceRoot
+  });
+  return {
+    type: 'assistant_execution_tool_confirmed',
+    message: String(toolResult?.content?.[0]?.text || '').trim() || `Confirmed and executed ${action.toolName}.`,
+    toolResult,
+    assistantRun: {
+      id: String(action.assistantRunId || '').trim(),
+      status: toolResult?.status === 'completed' ? 'completed' : 'failed',
+      result: String(toolResult?.content?.[0]?.text || '').trim(),
+      summary: String(toolResult?.content?.[0]?.text || '').trim()
+    },
+    pendingAction: null
+  };
+}
+
+function resolveDefaultChatUiWorkspaceRoot() {
+  return String(process.env.CLIGATE_DEFAULT_CHAT_UI_WORKSPACE || 'D:\\').trim() || process.cwd();
+}
+
+function normalizeChatAgentInputParts(inputParts = []) {
+  if (!Array.isArray(inputParts)) return [];
+  const normalized = [];
+  for (const part of inputParts) {
+    if (!part || typeof part !== 'object') continue;
+    if (part.type === 'text') {
+      const text = String(part.text || '').trim();
+      if (!text) continue;
+      normalized.push({
+        type: 'text',
+        text
+      });
+      continue;
+    }
+    if (part.type === 'input_image') {
+      const imageUrl = String(part.image_url || part.url || '').trim();
+      if (!imageUrl) continue;
+      normalized.push({
+        type: 'input_image',
+        image_url: imageUrl,
+        ...(String(part.media_type || '').trim()
+          ? { media_type: String(part.media_type || '').trim() }
+          : {})
+      });
+    }
+  }
+  return normalized;
+}
+
+function coerceChatAgentTextInput(input, inputParts = []) {
+  const rawText = typeof input === 'string' ? input : '';
+  const normalizedText = rawText.trim();
+  if (normalizedText) return normalizedText;
+  const textParts = normalizeChatAgentInputParts(inputParts)
+    .filter((part) => part.type === 'text')
+    .map((part) => String(part.text || '').trim())
+    .filter(Boolean);
+  return textParts.join('\n').trim();
+}
+
+function rebuildPendingActionFromRun(conversation = null) {
+  return ensurePendingAssistantAction(conversation, {
+    runStore: assistantRunStore,
+    pendingActionStore: assistantPendingActionStore,
+    conversationStore: chatUiConversationStore
+  });
+}
+
+function buildDeliveryArtifactRefs(refs = []) {
+  return Array.isArray(refs)
+    ? refs
+      .map((entry) => String(entry || '').trim())
+      .filter(Boolean)
+      .slice(0, 8)
+    : [];
+}
+
+function saveChatUiInboundDelivery(conversation, {
+  sessionId = '',
+  text = '',
+  runtimeSessionId = '',
+  inputParts = null,
+  artifactRefs = []
+} = {}) {
+  const content = String(text || '').trim();
+  const normalizedInputParts = normalizeChatAgentInputParts(inputParts);
+  const normalizedArtifactRefs = buildDeliveryArtifactRefs(artifactRefs);
+  if (!conversation?.id || (!content && normalizedInputParts.length === 0)) return null;
+  return agentChannelDeliveryStore.saveInbound({
+    channel: 'chat-ui',
+    conversationId: conversation.id,
+    sessionId: String(runtimeSessionId || conversation.activeRuntimeSessionId || '').trim() || null,
+    externalMessageId: `chat-ui-inbound:${sessionId || conversation.id}:${Date.now()}`,
+    payload: {
+      text: content,
+      kind: 'chat_ui_assistant_turn',
+      sourceType: 'chat-ui',
+      ...(normalizedInputParts.length > 0 ? { inputParts: normalizedInputParts } : {}),
+      ...(normalizedArtifactRefs.length > 0 ? { artifactRefs: normalizedArtifactRefs } : {})
+    }
+  });
+}
+
+function saveChatUiOutboundDelivery(conversation, {
+  sessionId = '',
+  text = '',
+  runtimeSessionId = '',
+  assistantRunId = '',
+  runStatus = '',
+  pendingAction = null,
+  observability = null,
+  contentParts = null,
+  artifactRefs = []
+} = {}) {
+  const content = String(text || '').trim();
+  const normalizedContentParts = normalizeChatAgentInputParts(contentParts);
+  const normalizedArtifactRefs = buildDeliveryArtifactRefs(artifactRefs);
+  if (!conversation?.id || (!content && normalizedContentParts.length === 0)) return null;
+  return agentChannelDeliveryStore.saveOutbound({
+    channel: 'chat-ui',
+    conversationId: conversation.id,
+    sessionId: String(runtimeSessionId || conversation.activeRuntimeSessionId || '').trim() || null,
+    externalMessageId: `chat-ui-outbound:${sessionId || conversation.id}:${assistantRunId || 'direct'}:${Date.now()}`,
+    payload: {
+      text: content,
+      fullText: content,
+      kind: 'chat_ui_assistant_turn',
+      sourceType: 'chat-ui',
+      assistantRunId: String(assistantRunId || '').trim(),
+      runStatus: String(runStatus || '').trim(),
+      pendingAction,
+      observability,
+      ...(normalizedContentParts.length > 0 ? { contentParts: normalizedContentParts } : {}),
+      ...(normalizedArtifactRefs.length > 0 ? { artifactRefs: normalizedArtifactRefs } : {})
+    }
+  });
 }
 
 export async function handleListChatSources(_req, res) {
@@ -928,6 +1107,22 @@ export async function handleConfirmAssistantToolAction(req, res) {
   const normalizedToken = confirmToken.trim();
   const assistantPendingAction = assistantPendingActionStore.consume(normalizedToken);
   if (assistantPendingAction) {
+    if (isExecutionToolPendingAction(assistantPendingAction)) {
+      try {
+        const routeResult = await executeConfirmedExecutionToolAction(assistantPendingAction);
+        return res.json({
+          success: true,
+          result: routeResult?.message || `Confirmed and executed ${assistantPendingAction.toolName}.`,
+          routeResult
+        });
+      } catch (error) {
+        return res.status(500).json({
+          success: false,
+          error: error?.message || 'assistant execution-tool confirmation failed'
+        });
+      }
+    }
+
     const conversation = assistantPendingAction.conversationId
       ? chatUiConversationStore.get(assistantPendingAction.conversationId)
       : null;
@@ -999,6 +1194,7 @@ export async function handleRouteChatAgentMessage(req, res) {
     const {
       sessionId,
       input,
+      inputParts,
       provider,
       cwd,
       model
@@ -1008,15 +1204,44 @@ export async function handleRouteChatAgentMessage(req, res) {
       return res.status(400).json({ success: false, error: 'sessionId is required' });
     }
 
-    if (!input || typeof input !== 'string' || !input.trim()) {
-      return res.status(400).json({ success: false, error: 'input is required' });
+    const normalizedInputParts = normalizeChatAgentInputParts(inputParts);
+    const normalizedInputText = coerceChatAgentTextInput(input, normalizedInputParts);
+    if (!normalizedInputText && normalizedInputParts.length === 0) {
+      return res.status(400).json({ success: false, error: 'input or inputParts is required' });
     }
 
     const existingConversation = chatUiConversationStore.getBySessionId(sessionId);
-    const latestAssistantPendingAction = existingConversation?.id
+    const conversation = existingConversation || chatUiConversationStore.findOrCreateBySessionId(sessionId);
+    const createdArtifacts = normalizedInputParts
+      .filter((part) => part.type === 'input_image' && String(part.image_url || '').trim())
+      .map((part, index) => artifactService.createArtifact({
+        kind: 'image',
+        source: 'chat_ui_upload',
+        conversationId: conversation.id,
+        role: 'user',
+        title: normalizedInputText || `chat image ${index + 1}`,
+        summary: normalizedInputText || 'User attached an image in chat-ui.',
+        mediaType: String(part.media_type || '').trim()
+          || (String(part.image_url || '').match(/^data:([^;]+);base64,/i)?.[1] || ''),
+        imageUrl: String(part.image_url || '').trim(),
+        metadata: {
+          sourceType: 'chat-ui',
+          sessionId
+        }
+      }));
+    saveChatUiInboundDelivery(conversation, {
+      sessionId,
+      text: normalizedInputText || '[image attachment]',
+      inputParts: normalizedInputParts,
+      artifactRefs: createdArtifacts.map((entry) => entry.id)
+    });
+    let latestAssistantPendingAction = existingConversation?.id
       ? assistantPendingActionStore.findLatestByConversationId(existingConversation.id)
       : null;
-    if (latestAssistantPendingAction && isAffirmativeConfirmation(input)) {
+    if (!latestAssistantPendingAction && existingConversation?.id) {
+      latestAssistantPendingAction = rebuildPendingActionFromRun(existingConversation);
+    }
+    if (latestAssistantPendingAction && isAffirmativeConfirmation(normalizedInputText)) {
       const confirmed = await handleConfirmAssistantToolAction({
         body: {
           confirmToken: latestAssistantPendingAction.confirmToken
@@ -1047,9 +1272,10 @@ export async function handleRouteChatAgentMessage(req, res) {
 
     const result = await chatUiConversationService.routeMessage({
       sessionId,
-      text: input,
+      text: normalizedInputText,
+      inputParts: normalizedInputParts,
       defaultRuntimeProvider: String(provider || 'codex'),
-      cwd: String(cwd || ''),
+      cwd: String(cwd || '').trim() || resolveDefaultChatUiWorkspaceRoot(),
       model: String(model || ''),
       assistantExecutionMode: 'async',
       metadata: {
@@ -1083,6 +1309,15 @@ export async function handleRouteChatAgentMessage(req, res) {
         const nextPendingRunId = ['completed', 'failed', 'cancelled', 'waiting_user'].includes(runStatus)
           ? ''
           : backgroundRunId;
+        saveChatUiOutboundDelivery(conversation, {
+          sessionId,
+          text: messageContent,
+          runtimeSessionId: String(backgroundResult?.session?.id || conversation.activeRuntimeSessionId || '').trim(),
+          assistantRunId: backgroundRunId,
+          runStatus,
+          pendingAction: backgroundResult?.pendingAction || null,
+          observability: backgroundResult?.observability || null
+        });
         chatUiConversationStore.patch(conversation.id, {
           metadata: {
             ...(conversation.metadata || {}),
@@ -1104,6 +1339,21 @@ export async function handleRouteChatAgentMessage(req, res) {
         });
       }
     });
+
+    if (result?.type === 'assistant_response' && result?.message) {
+      const responseConversation = result?.conversation?.id
+        ? (chatUiConversationStore.get(result.conversation.id) || conversation)
+        : conversation;
+      saveChatUiOutboundDelivery(responseConversation, {
+        sessionId,
+        text: result.message,
+        runtimeSessionId: String(result?.session?.id || responseConversation?.activeRuntimeSessionId || '').trim(),
+        assistantRunId: String(result?.assistantRun?.id || '').trim(),
+        runStatus: String(result?.assistantRun?.status || '').trim(),
+        pendingAction: result?.pendingAction || null,
+        observability: result?.observability || null
+      });
+    }
 
     if (result?.type === 'assistant_run_accepted' && result?.assistantRun?.id) {
       const conversation = result?.conversation?.id

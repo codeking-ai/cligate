@@ -1,5 +1,6 @@
 import createDefaultAssistantToolRegistry, { AssistantToolRegistry } from './tool-registry.js';
 import assistantPolicyService, { AssistantPolicyService } from './policy-service.js';
+import artifactService from './artifact-service.js';
 
 function nowIso() {
   return new Date().toISOString();
@@ -29,6 +30,49 @@ function summarizeResult(result) {
     return `Returned object with keys: ${Object.keys(result).slice(0, 6).join(', ')}`;
   }
   return String(result).slice(0, 160);
+}
+
+function buildArtifactMetadataForToolResult(call = {}, result = {}, context = {}) {
+  const toolName = String(call?.toolName || '').trim();
+  if (toolName !== 'view_image' || !result || typeof result !== 'object') {
+    return null;
+  }
+  const imageUrl = String(result.imageUrl || '').trim()
+    || (Array.isArray(result.content)
+      ? String(result.content.find((entry) => entry?.type === 'input_image')?.image_url || '').trim()
+      : '');
+  const path = String(result.path || call?.input?.path || '').trim();
+  if (!imageUrl && !path) {
+    return null;
+  }
+  const conversationId = String(context?.conversation?.id || '').trim();
+  const metadata = context?.run?.metadata && typeof context.run.metadata === 'object'
+    ? context.run.metadata
+    : {};
+  const assistantTaskId = String(metadata?.assistantTaskId || '').trim();
+  const assistantProjectId = String(metadata?.assistantProjectId || '').trim();
+  const assistantExecutionId = String(metadata?.assistantExecutionId || '').trim();
+  const artifact = artifactService.createArtifact({
+    kind: 'image',
+    source: 'view_image',
+    conversationId,
+    taskId: assistantTaskId,
+    projectId: assistantProjectId,
+    executionId: assistantExecutionId,
+    assistantRunId: String(context?.run?.id || '').trim(),
+    role: 'assistant',
+    title: path || 'viewed image',
+    summary: path ? `Assistant viewed image: ${path}` : 'Assistant viewed an image.',
+    mediaType: String(result.media_type || '').trim(),
+    path,
+    imageUrl,
+    metadata: {
+      detail: String(result.detail || call?.input?.detail || '').trim()
+    }
+  });
+  return {
+    artifactId: artifact.id
+  };
 }
 
 export class AssistantToolExecutor {
@@ -149,6 +193,7 @@ export class AssistantToolExecutor {
       };
     }
     const completedAt = nowIso();
+    const artifactMetadata = buildArtifactMetadataForToolResult(call, result, context);
 
     return {
       toolName: tool.name,
@@ -158,7 +203,8 @@ export class AssistantToolExecutor {
       success: true,
       policy,
       summary: summarizeResult(result),
-      result
+      result,
+      metadata: artifactMetadata || {}
     };
   }
 }
