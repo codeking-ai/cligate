@@ -220,6 +220,32 @@ async function executeConfirmedExecutionToolAction(action = {}, { conversation =
   };
 }
 
+function clearConversationPendingActionState(conversation = null) {
+  if (!conversation?.id) {
+    return conversation;
+  }
+  const messages = Array.isArray(conversation?.metadata?.uiChatMessages)
+    ? conversation.metadata.uiChatMessages
+    : [];
+  const nextMessages = messages.map((message) => (
+    message?.pendingAction
+      ? { ...message, pendingAction: null }
+      : message
+  ));
+  return chatUiConversationStore.patch(conversation.id, {
+    metadata: {
+      ...(conversation.metadata || {}),
+      assistantCore: {
+        ...((conversation?.metadata?.assistantCore && typeof conversation.metadata.assistantCore === 'object')
+          ? conversation.metadata.assistantCore
+          : {}),
+        pendingActionConfirmToken: null
+      },
+      uiChatMessages: nextMessages
+    }
+  }) || conversation;
+}
+
 function resolveDefaultChatUiWorkspaceRoot() {
   return String(process.env.CLIGATE_DEFAULT_CHAT_UI_WORKSPACE || 'D:\\').trim() || process.cwd();
 }
@@ -1211,8 +1237,12 @@ export async function handleConfirmAssistantToolAction(req, res) {
   const assistantPendingAction = assistantPendingActionStore.consume(normalizedToken);
   if (assistantPendingAction) {
     if (isExecutionToolPendingAction(assistantPendingAction)) {
+      const conversation = assistantPendingAction.conversationId
+        ? chatUiConversationStore.get(assistantPendingAction.conversationId)
+        : null;
       try {
-        const routeResult = await executeConfirmedExecutionToolAction(assistantPendingAction);
+        const routeResult = await executeConfirmedExecutionToolAction(assistantPendingAction, { conversation });
+        clearConversationPendingActionState(conversation);
         return res.json({
           success: true,
           result: routeResult?.message || `Confirmed and executed ${assistantPendingAction.toolName}.`,

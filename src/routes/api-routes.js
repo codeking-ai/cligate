@@ -44,6 +44,13 @@ import {
 import { handleGetRuntimeCredentials, handleGetRoutingDecisions, handleGetRoutingPreview, handleGetLocalRoutingStatus } from './runtime-route.js';
 import { handleGetLocalRuntimeStatus, handleSetLocalRuntimeEnabled, handleUpdateLocalRuntime, handleCheckLocalRuntime, handleRefreshLocalRuntimeModels } from './local-runtimes-route.js';
 import {
+  handleGetDesktopAgentStatus,
+  handleStartDesktopAgent,
+  handleStopDesktopAgent,
+  handleGetDesktopAgentSettings,
+  handleSetDesktopAgentSettings
+} from './desktop-agent-route.js';
+import {
   handleListAgentRuntimeProviders,
   handleListAgentRuntimeSessions,
   handleGetAgentRuntimeSession,
@@ -489,6 +496,13 @@ export function registerApiRoutes(app, { port }) {
   app.post('/api/agent-channels/conversations/:id/reset', handleResetAgentChannelConversation);
   app.post('/api/agent-channels/pairing/:channel/:conversationId/approve', handleApproveAgentChannelPairing);
   app.post('/api/agent-channels/pairing/:channel/:conversationId/deny', handleDenyAgentChannelPairing);
+
+  // ─── Desktop Agent ──────────────────────────────────────────────────────
+  app.get('/api/desktop-agent/status', handleGetDesktopAgentStatus);
+  app.get('/api/desktop-agent/settings', handleGetDesktopAgentSettings);
+  app.post('/api/desktop-agent/settings', handleSetDesktopAgentSettings);
+  app.post('/api/desktop-agent/start', handleStartDesktopAgent);
+  app.post('/api/desktop-agent/stop', handleStopDesktopAgent);
 
   // ─── Tool Installer ────────────────────────────────────────────────────
   app.get('/api/tools/status', handleGetToolsStatus);

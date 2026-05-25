@@ -58,6 +58,7 @@
     "test:e2e:cli": "node tests/e2e/lib/cli-runner.js",
     "test:e2e:cli:isolated": "node tests/e2e/lib/run-isolated-cli.js",
     "test:e2e:isolated": "npm run test:e2e:protocol:isolated && npm run test:e2e:cli:isolated",
+    "desktop:mvp": "node scripts/desktop-agent/mvp-run.js",
     "prepublishOnly": "npm run release:check"
   },
   "dependencies": {
@@ -85,7 +86,8 @@
       "node_modules/**/*"
     ],
     "asarUnpack": [
-      "public/**/*"
+      "public/**/*",
+      "src/desktop-agent/runtime/**/*"
     ],
     "win": {
       "target": [

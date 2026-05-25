@@ -657,6 +657,72 @@ test('hasStickyApprovalPhrase matches the natural ways users grant blanket appro
   }
 });
 
+test('handleConfirmAssistantToolAction clears persisted conversation pending state for builtin execution-tool confirmations', async () => {
+  const workspaceRoot = process.cwd();
+  const command = process.platform === 'win32'
+    ? 'echo confirmed-tool-run'
+    : 'printf confirmed-tool-run';
+  const conversationId = 'conversation-exec-confirm-persisted-1';
+  const pendingAction = assistantPendingActionStore.create({
+    conversationId,
+    assistantRunId: 'run-exec-confirm-persisted-1',
+    toolName: 'run_shell_command',
+    input: {
+      command
+    },
+    title: 'Confirmation required before continuing',
+    summary: `Target scope: ${workspaceRoot}`,
+    metadata: {
+      requestedPath: workspaceRoot
+    }
+  });
+
+  const originalGet = chatUiConversationStore.get;
+  const originalPatch = chatUiConversationStore.patch;
+  const conversation = {
+    id: conversationId,
+    metadata: {
+      assistantCore: {
+        pendingActionConfirmToken: pendingAction.confirmToken
+      },
+      uiChatMessages: [{
+        role: 'assistant',
+        pendingAction: {
+          confirmToken: pendingAction.confirmToken
+        }
+      }]
+    }
+  };
+
+  chatUiConversationStore.get = (id) => (id === conversationId ? conversation : null);
+  chatUiConversationStore.patch = (id, patch) => {
+    if (id !== conversationId) return conversation;
+    conversation.metadata = {
+      ...(conversation.metadata || {}),
+      ...(patch.metadata || {})
+    };
+    return conversation;
+  };
+
+  try {
+    const res = mockRes();
+    await handleConfirmAssistantToolAction({
+      body: {
+        confirmToken: pendingAction.confirmToken
+      }
+    }, res);
+
+    assert.equal(res._status, 200);
+    assert.equal(res._body.success, true);
+    assert.equal(conversation.metadata.assistantCore.pendingActionConfirmToken, null);
+    assert.equal(conversation.metadata.uiChatMessages[0].pendingAction, null);
+  } finally {
+    chatUiConversationStore.get = originalGet;
+    chatUiConversationStore.patch = originalPatch;
+    assistantPendingActionStore.dismiss(pendingAction.confirmToken);
+  }
+});
+
 test('hasStickyApprovalPhrase does NOT trip on single-shot or unrelated phrasing', () => {
   // Single-word affirmations should stay one-shot.
   const shouldStayOneShot = ['同意', '继续', '确认', '可以', '好', '行', 'ok', 'yes'];

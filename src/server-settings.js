@@ -48,6 +48,15 @@ const DEFAULT_SETTINGS = {
         enabled: true,
         config: []
     },
+    desktopAgent: {
+        enabled: true,
+        autoStart: true,
+        baseUrl: 'http://127.0.0.1:8765',
+        token: '',
+        command: '',
+        args: [],
+        idleTimeoutMs: 1_800_000
+    },
     channels: {
         telegram: {
             enabled: false,
@@ -186,6 +195,43 @@ function normalizeSkillsConfig(config = {}) {
     };
 }
 
+function normalizeDesktopAgentConfig(config = {}) {
+    const current = config && typeof config === 'object' && !Array.isArray(config)
+        ? config
+        : {};
+    const baseUrl = typeof current.baseUrl === 'string' && current.baseUrl.trim()
+        ? current.baseUrl.trim()
+        : DEFAULT_SETTINGS.desktopAgent.baseUrl;
+    const token = typeof current.token === 'string'
+        ? current.token.trim()
+        : DEFAULT_SETTINGS.desktopAgent.token;
+    const command = typeof current.command === 'string'
+        ? current.command.trim()
+        : DEFAULT_SETTINGS.desktopAgent.command;
+    const args = Array.isArray(current.args)
+        ? current.args.filter((entry) => typeof entry === 'string')
+        : DEFAULT_SETTINGS.desktopAgent.args;
+    const idleTimeoutMs = clampNumber(
+        current.idleTimeoutMs,
+        DEFAULT_SETTINGS.desktopAgent.idleTimeoutMs,
+        60_000,
+        24 * 60 * 60 * 1000
+    );
+    return {
+        enabled: typeof current.enabled === 'boolean'
+            ? current.enabled
+            : DEFAULT_SETTINGS.desktopAgent.enabled,
+        autoStart: typeof current.autoStart === 'boolean'
+            ? current.autoStart
+            : DEFAULT_SETTINGS.desktopAgent.autoStart,
+        baseUrl,
+        token,
+        command,
+        args,
+        idleTimeoutMs
+    };
+}
+
 const ASSISTANT_CREDENTIAL_TYPES = new Set(['api-key', 'chatgpt-account', 'claude-account']);
 const ASSISTANT_FALLBACKS_MAX = 3;
 const ASSISTANT_BREAKER_DEFAULTS = Object.freeze({
@@ -284,6 +330,7 @@ export {
     normalizeBoundCredential,
     normalizeFallbacks,
     normalizeCircuitBreaker,
+    normalizeDesktopAgentConfig,
     normalizeSkillsConfig,
     ASSISTANT_CREDENTIAL_TYPES,
     ASSISTANT_FALLBACKS_MAX,
@@ -312,6 +359,7 @@ export function getServerSettings() {
             accountStrategy: normalizeStrategyName(data.accountStrategy),
             appRouting: normalizeAppRoutingConfig(data.appRouting),
             assistantAgent: normalizeAssistantAgentConfig(data.assistantAgent),
+            desktopAgent: normalizeDesktopAgentConfig(data.desktopAgent),
             skills: normalizeSkillsConfig(data.skills),
             channels: normalizeChannelsConfig(data.channels)
         };
@@ -329,6 +377,7 @@ export function setServerSettings(patch = {}) {
         accountStrategy: normalizeStrategyName(patch.accountStrategy ?? current.accountStrategy),
         appRouting: normalizeAppRoutingConfig(patch.appRouting || current.appRouting),
         assistantAgent: normalizeAssistantAgentConfig(patch.assistantAgent || current.assistantAgent),
+        desktopAgent: normalizeDesktopAgentConfig(patch.desktopAgent || current.desktopAgent),
         skills: normalizeSkillsConfig(patch.skills || current.skills),
         channels: normalizeChannelsConfig(patch.channels || current.channels)
     };
@@ -404,5 +453,6 @@ export default {
     removeCredentialReferences,
     SETTINGS_FILE,
     normalizeChannelsConfig,
-    normalizeSkillsConfig
+    normalizeSkillsConfig,
+    normalizeDesktopAgentConfig
 };

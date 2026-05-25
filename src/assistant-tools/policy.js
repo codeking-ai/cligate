@@ -14,6 +14,10 @@ function collectPathInputs(input = {}) {
   return values;
 }
 
+function isDesktopTool(tool = null) {
+  return String(tool?.name || '').startsWith('desktop_');
+}
+
 export class AssistantToolPolicyService {
   constructor({
     workspaceGuard = new WorkspaceGuard(),
@@ -116,7 +120,7 @@ export class AssistantToolPolicyService {
       };
     }
 
-    if ((tool.requiresApproval || tool.mutating) && !effectiveApproved) {
+    if ((tool.requiresApproval || tool.mutating) && !effectiveApproved && !isDesktopTool(tool)) {
       return {
         ...decision,
         requiresApproval: true,

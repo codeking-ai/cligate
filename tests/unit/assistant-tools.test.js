@@ -250,6 +250,24 @@ test('AssistantToolsExecutor autoApproveAll context skips per-tool confirmation 
   assert.equal(autoApproved.metadata?.policy?.autoApproved, true);
 });
 
+test('AssistantToolPolicyService allows desktop mutating tools without per-call approval', () => {
+  const workspaceRoot = path.resolve('D:/tmp/policy-desktop-tools');
+  const workspaceGuard = new WorkspaceGuard({ workspaceRoot });
+  const policy = new AssistantToolPolicyService({
+    workspaceGuard,
+    allowMutatingTools: true
+  });
+
+  const decision = policy.evaluateToolCall({
+    tool: { name: 'desktop_focus_window', mutating: true, requiresApproval: false },
+    invocation: { input: { windowHwnd: 123 } },
+    context: { cwd: workspaceRoot }
+  });
+
+  assert.equal(decision.allowed, true);
+  assert.equal(decision.requiresApproval, false);
+});
+
 test('AssistantToolsExecutor extraReadRoots context lets read_file reach files outside the workspace', async () => {
   const workspaceRoot = await mkdtemp(path.join(os.tmpdir(), 'assistant-tools-readroot-'));
   const skillRoot = await mkdtemp(path.join(os.tmpdir(), 'assistant-tools-skillroot-'));
@@ -586,4 +604,21 @@ test('AssistantToolsExecutor treats __truncated input as a recoverable failure',
   assert.equal(result.structured?.reason, 'tool_arguments_truncated');
   assert.equal(result.structured?.truncated, true);
   assert.equal(handlerInvoked, false);
+});
+
+test('createBuiltinAssistantToolRegistry includes desktop read-only tools', () => {
+  const { registry } = createBuiltinAssistantToolRegistry({ workspaceRoot: process.cwd() });
+  const toolNames = registry.list({ visibility: 'direct' }).map((tool) => tool.name);
+
+  assert.ok(toolNames.includes('desktop_health'));
+  assert.ok(toolNames.includes('desktop_list_windows'));
+  assert.ok(toolNames.includes('desktop_launch_app'));
+  assert.ok(toolNames.includes('desktop_focus_window'));
+  assert.ok(toolNames.includes('desktop_find_control'));
+  assert.ok(toolNames.includes('desktop_click_control'));
+  assert.ok(toolNames.includes('desktop_set_control_value'));
+  assert.ok(toolNames.includes('desktop_send_control_keys'));
+  assert.ok(toolNames.includes('desktop_get_control_text'));
+  assert.ok(toolNames.includes('desktop_wait_for_control'));
+  assert.ok(toolNames.includes('desktop_capture_window'));
 });

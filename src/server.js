@@ -18,6 +18,7 @@ import agentChannelManager from './agent-channels/manager.js';
 import chatUiRuntimeObserver from './chat-ui/runtime-observer.js';
 import assistantConsolidator from './assistant-core/consolidator.js';
 import localScheduler from './assistant-core/local-scheduler.js';
+import desktopAgentService from './desktop-agent/service.js';
 
 export function createServer({ port }) {
   ensureAccountsPersist();
@@ -96,6 +97,12 @@ export function createServer({ port }) {
   assistantConsolidator.start();
   localScheduler.start();
 
+  if (settings.desktopAgent?.enabled === true && settings.desktopAgent?.autoStart === true) {
+    desktopAgentService.start().catch((error) => {
+      console.error('[DesktopAgent] Failed to auto-start desktop agent:', error.message);
+    });
+  }
+
   // Global error handler — catches unhandled errors in route handlers
   app.use((err, req, res, _next) => {
     console.error(`[Server] Unhandled error on ${req.method} ${req.originalUrl}:`, err);
@@ -111,6 +118,7 @@ export function startServer({ port }) {
   const app = createServer({ port });
   const server = app.listen(port);
   server.on('close', () => {
+    desktopAgentService.stop().catch(() => {});
     agentChannelManager.stop().catch(() => {});
     chatUiRuntimeObserver.stop();
     assistantConsolidator.stop();
