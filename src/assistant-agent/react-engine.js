@@ -83,23 +83,26 @@ function summarizeToolStep(toolName, result) {
   };
 }
 
-// Default ReAct iteration budget. The old value of 6 was a relic from when the
-// supervisor was supposed to make a quick routing decision and then delegate to
-// codex/claude-code. After we shifted skill execution back into the supervisor
-// itself (so it can run shell commands, write files, generate scripts, etc.),
-// 6 turns is nowhere near enough — a real skill workflow like the pptx skill
-// can need 10-15 LLM→tool→LLM round-trips before producing the final reply.
-// At 6 turns the run silently truncates to "tool_phase_finished_without_assistant_summary",
-// and the user sees the previous tool's status text ("Tool run_shell_command completed")
-// instead of a real answer. Bump well above the natural pptx ceiling, allow the
-// operator to raise/lower via env, and clamp to a sane range so nothing can
-// burn unbounded tokens.
+// Default ReAct iteration budget. Why this is high:
+//   - Skills (pptx, markitdown) easily need 10-15 round-trips
+//   - Desktop control flows (open app → focus → find/scroll → fill many fields →
+//     save → verify) routinely need 40-60 tool calls — each click/type/scroll
+//     plus a screenshot to verify is one iteration
+//   - At the old cap of 30 a single WeChat MP article publish hit
+//     "tool_phase_finished_without_assistant_summary" mid-flow and the user
+//     had to manually type "继续" to spawn a fresh run
+// Reference: Codex/Claude Code don't cap on iteration count — they cap on
+// context tokens via in-place compaction. We still cap on iterations because we
+// don't yet have compaction, but the cap should be high enough that real tasks
+// finish in one run. Operator can override via CLIGATE_ASSISTANT_MAX_ITERATIONS
+// env var, clamped to [1, 200] to keep a runaway loop from burning unbounded
+// tokens.
 function resolveDefaultMaxIterations() {
   const raw = Number.parseInt(String(process.env.CLIGATE_ASSISTANT_MAX_ITERATIONS || '').trim(), 10);
   if (Number.isFinite(raw)) {
-    return Math.min(80, Math.max(1, raw));
+    return Math.min(200, Math.max(1, raw));
   }
-  return 30;
+  return 60;
 }
 
 // How many times we escalate max_tokens and retry the SAME turn when the model

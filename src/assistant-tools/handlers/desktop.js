@@ -186,7 +186,13 @@ export function createDesktopToolHandlers({
 
     desktopHotkey: wrapHandler(async ({ input = {} } = {}) => desktopClient.hotkey(input)),
 
-    desktopTypeText: wrapHandler(async ({ input = {} } = {}) => desktopClient.typeText(input))
+    desktopTypeText: wrapHandler(async ({ input = {} } = {}) => desktopClient.typeText(input)),
+
+    desktopClickAt: wrapHandler(async ({ input = {} } = {}) => desktopClient.clickAt(input)),
+
+    desktopMoveMouse: wrapHandler(async ({ input = {} } = {}) => desktopClient.moveMouse(input)),
+
+    desktopScroll: wrapHandler(async ({ input = {} } = {}) => desktopClient.scroll(input))
   };
 }
 

@@ -177,6 +177,21 @@ export class DesktopAgentService {
     return this.runExclusive(input, () => this.client.typeText(input));
   }
 
+  async clickAt(input = {}) {
+    await this.ensureReady();
+    return this.runExclusive(input, () => this.client.clickAt(input));
+  }
+
+  async moveMouse(input = {}) {
+    await this.ensureReady();
+    return this.runExclusive(input, () => this.client.moveMouse(input));
+  }
+
+  async scroll(input = {}) {
+    await this.ensureReady();
+    return this.runExclusive(input, () => this.client.scroll(input));
+  }
+
   getLeaseStatus() {
     return {
       activeLeaseId: this.activeLeaseId || '',

@@ -54,6 +54,18 @@ export class AssistantDesktopClient {
   async typeText(input = {}) {
     return this.service.typeText(input);
   }
+
+  async clickAt(input = {}) {
+    return this.service.clickAt(input);
+  }
+
+  async moveMouse(input = {}) {
+    return this.service.moveMouse(input);
+  }
+
+  async scroll(input = {}) {
+    return this.service.scroll(input);
+  }
 }
 
 const assistantDesktopClient = new AssistantDesktopClient();

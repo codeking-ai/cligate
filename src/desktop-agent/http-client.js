@@ -196,6 +196,52 @@ export class DesktopAgentHttpClient {
       }
     });
   }
+
+  // Raw mouse endpoints. Use when UIA cannot locate a control but the screen
+  // capture lets the model identify the target by pixel coordinates. The
+  // Python server's resolve_point() supports several coordinate spaces — see
+  // the `space` field on each call.
+  clickAt(input = {}) {
+    return this.request('/click', {
+      method: 'POST',
+      body: {
+        x: Number(input?.x) || 0,
+        y: Number(input?.y) || 0,
+        space: String(input?.space || 'screen'),
+        button: String(input?.button || 'left'),
+        clicks: Number(input?.clicks) || 1,
+        ...(input?.region ? { region: input.region } : {}),
+        ...(input?.previewWidth ? { preview_width: Number(input.previewWidth) } : {}),
+        ...(input?.previewHeight ? { preview_height: Number(input.previewHeight) } : {}),
+        ...withTransportMeta(input)
+      }
+    });
+  }
+
+  moveMouse(input = {}) {
+    return this.request('/move', {
+      method: 'POST',
+      body: {
+        x: Number(input?.x) || 0,
+        y: Number(input?.y) || 0,
+        space: String(input?.space || 'screen'),
+        ...(input?.region ? { region: input.region } : {}),
+        ...(input?.previewWidth ? { preview_width: Number(input.previewWidth) } : {}),
+        ...(input?.previewHeight ? { preview_height: Number(input.previewHeight) } : {}),
+        ...withTransportMeta(input)
+      }
+    });
+  }
+
+  scroll(input = {}) {
+    return this.request('/scroll', {
+      method: 'POST',
+      body: {
+        amount: Number(input?.amount) || 0,
+        ...withTransportMeta(input)
+      }
+    });
+  }
 }
 
 export default DesktopAgentHttpClient;

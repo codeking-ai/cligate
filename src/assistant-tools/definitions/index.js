@@ -22,6 +22,9 @@ import createDesktopCaptureWindowToolDefinition from './desktop-capture-window.j
 import createDesktopPressKeyToolDefinition from './desktop-press-key.js';
 import createDesktopHotkeyToolDefinition from './desktop-hotkey.js';
 import createDesktopTypeTextToolDefinition from './desktop-type-text.js';
+import createDesktopClickAtToolDefinition from './desktop-click-at.js';
+import createDesktopMoveMouseToolDefinition from './desktop-move-mouse.js';
+import createDesktopScrollToolDefinition from './desktop-scroll.js';
 import createListMcpServersToolDefinition from './list-mcp-servers.js';
 import createListMcpToolsToolDefinition from './list-mcp-tools.js';
 import createListMcpResourcesToolDefinition from './list-mcp-resources.js';
@@ -70,6 +73,9 @@ export function createBuiltinAssistantToolDefinitions({ workspaceGuard, mcpServi
     createDesktopPressKeyToolDefinition({ handlers }),
     createDesktopHotkeyToolDefinition({ handlers }),
     createDesktopTypeTextToolDefinition({ handlers }),
+    createDesktopClickAtToolDefinition({ handlers }),
+    createDesktopMoveMouseToolDefinition({ handlers }),
+    createDesktopScrollToolDefinition({ handlers }),
     createListMcpServersToolDefinition({ handlers }),
     createListMcpToolsToolDefinition({ handlers }),
     createListMcpResourcesToolDefinition({ handlers }),
