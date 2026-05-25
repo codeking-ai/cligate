@@ -102,6 +102,37 @@ export function composeAssistantReply({
     };
   }
 
+  // Iteration budget exhausted: the LLM kept making tool calls until the
+  // ReAct loop hit maxIterations and never produced a final natural-language
+  // reply. Tell the user that explicitly so they know to send "继续 / continue"
+  // — falling back to the last tool's summary (the old behavior) made the
+  // user think the work was done.
+  if (stopReason === 'tool_phase_finished_without_assistant_summary') {
+    const toolCount = toolResults.length;
+    const lastSummary = [...toolResults]
+      .reverse()
+      .map((entry) => normalizeAssistantToolResultEntry(entry).summary || '')
+      .find(Boolean) || '';
+    if (language === 'zh-CN') {
+      return {
+        message: [
+          `我已经连续调用了 ${toolCount} 次工具，但本轮的思考次数到上限了，还没来得及给你写一个总结回复。`,
+          lastSummary ? `最近一步：${truncate(lastSummary, 160)}` : '',
+          '请回复"继续"，我会接着把这一步推完。'
+        ].filter(Boolean).join('\n\n'),
+        summary: '迭代次数到达上限，等你继续'
+      };
+    }
+    return {
+      message: [
+        `I chained ${toolCount} tool call${toolCount === 1 ? '' : 's'} this turn and hit the per-turn iteration budget before I could compose a final reply.`,
+        lastSummary ? `Last step: ${truncate(lastSummary, 160)}` : '',
+        'Reply "continue" and I will keep going from where I stopped.'
+      ].filter(Boolean).join('\n\n'),
+      summary: 'Iteration budget exhausted; awaiting continue'
+    };
+  }
+
   const latestSummary = [...toolResults]
     .reverse()
     .map((entry) => normalizeAssistantToolResultEntry(entry).summary || '')

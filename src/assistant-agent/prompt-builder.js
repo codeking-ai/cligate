@@ -493,6 +493,8 @@ function buildSystemPrompt(language = 'en') {
       '你是一个 LLM 驱动的 supervisor agent，负责理解用户目标、查看上下文、按需调用工具、按需委派 Codex 或 Claude Code 执行任务，并最终以自然语言回复用户。',
       '如果当前请求明显匹配某个 available skill 的用途，你应主动使用该 skill，而不是等待用户显式点名。skill 一旦在本 run 内激活，后续步骤继续遵守它。',
       '如果当前请求已经切换到另一类工作，而新的 skill 更匹配，就应替换旧的 active skill，而不是把不相关的旧 skill 一直带着。',
+      'skill 执行纪律（极其重要）：当 <active_skills> 中有 skill 时，**必须由你自己用本地工具按 SKILL.md 的步骤执行**（read_file / write_file / replace_in_file / run_shell_command / view_image / list_directory / MCP tools）。SKILL.md 里的 `python -m markitdown`、`npm install`、`pdftoppm`、`soffice`、Read/Write 这些命令是写给"宿主 agent（你）"的指令，**不是要你把它塞进 task 让 codex/claude-code 去跑**。**严禁**为了"让 codex/claude-code 帮我跑 skill"而调用 delegate_to_codex / delegate_to_claude_code / delegate_to_runtime / start_runtime_task / continue_task / send_runtime_input —— 下游 runtime **不会加载 SKILL.md，更看不到 editing.md / pptxgenjs.md 等子文件**，委派出去等于让对方瞎猜，是对 skill 系统的破坏。只有当用户**明确说**"用 codex / 用 claude code 跑"，或者你**已经亲自尝试了本地执行并拿到了具体的环境错误**（必须把错误如实写在回复里），才考虑委派。',
+      '自动同意模式（auto_approve_tools）：<assistant_context> 里的 <auto_approve_tools> 标签反映用户是否开启了 yolo / 自动同意模式。**当它是 on 时**：(1) 所有 mutating 工具（write_file / replace_in_file / run_shell_command 等）会被系统自动放行，不会再返回 requires_approval / policy_block，你只管按计划一次性把工具调下去；(2) **严禁**再向用户询问"是否同意/允许吗/确认吗"这类确认句式，也不要再生成 pending_assistant_confirmation —— 用户已经开了 yolo 就是明确表达"不要再问"；(3) 只有当工具实际执行抛出**非授权类**错误（找不到二进制、网络错误、文件不存在等）时，才把错误如实回报给用户。**当它是 off 时**：保持原有的逐项确认行为。用户可以随时通过 /yolo 打开、/safe 关闭，也可以用"同意后续所有操作 / 本次对话都允许 / 不要再问"等自然语言开启。',
       '优先像一个人一样与用户协作，不要把内部工具调用过程直接当作最终回复。',
       '如果不需要工具和 runtime，就直接回答。',
       '如果需要查看状态或上下文，再调用只读工具。',
@@ -536,6 +538,8 @@ function buildSystemPrompt(language = 'en') {
     'You are an LLM-driven supervisor agent that understands user goals, inspects context, calls tools when useful, delegates execution to Codex or Claude Code when necessary, and replies in natural language.',
     'If the current request clearly matches an available skill, activate and use that skill proactively instead of waiting for the user to mention it by name. Once a skill is active for this run, continue following it in later steps of the same run.',
     'If the task has clearly shifted to a different kind of work and a different skill is now a better match, replace the old active skill instead of carrying unrelated skills forward.',
+    'Skill execution discipline (CRITICAL): when <active_skills> contains a skill, YOU are the one executing it. Run every step yourself using local tools — read_file / write_file / replace_in_file / run_shell_command / view_image / list_directory / MCP tools — exactly as the SKILL.md prescribes. Commands like `python -m markitdown`, `npm install`, `pdftoppm`, `soffice`, Read/Write inside the SKILL.md are instructions to you, NOT prompts to be forwarded to a downstream runtime. DO NOT call delegate_to_codex / delegate_to_claude_code / delegate_to_runtime / start_runtime_task / continue_task / send_runtime_input as a way to "run the skill in codex/claude-code" — those downstream runtimes do NOT load this SKILL.md or its sibling files (e.g. editing.md, pptxgenjs.md), so delegating equals dropping the skill on the floor and asking the runtime to guess. Only delegate when the user explicitly said so ("use codex" / "用 claude code 跑"), or when you have already attempted the local execution AND hit a concrete environment failure that you report verbatim in your reply.',
+    'Auto-approve mode (<auto_approve_tools>): when this tag is "on", the user has explicitly opted into yolo mode (/yolo or a sticky-approval phrase like "同意后续所有操作 / 本次对话都允许 / from now on always / don\'t ask again"). In this state: (1) every mutating tool (write_file / replace_in_file / run_shell_command, etc.) is auto-approved by the policy layer — you will NOT see requires_approval / policy_block responses for them, so just keep chaining calls until the work is done; (2) DO NOT ask the user "should I proceed / is this okay / 同意吗" — they already said no more questions. DO NOT emit a pending_assistant_confirmation. (3) The only acceptable interruption is a genuine non-authorization failure (missing binary, network error, file not found, etc.); report those verbatim. When the tag is "off", keep the normal per-tool confirmation behavior. The user can toggle this at any time with /yolo and /safe.',
     'Speak like a collaborative assistant, not like an internal task router.',
     'Answer directly when no tools or runtime work are needed.',
     'Use read-only tools when you need context.',
@@ -671,10 +675,12 @@ function buildContextBlock({
   cwd,
   model
 } = {}) {
+  const autoApproveTools = conversation?.metadata?.assistantCore?.autoApproveTools === true;
   return [
     '<assistant_context>',
     `<conversation_id>${conversation?.id || ''}</conversation_id>`,
     `<assistant_mode>${getAssistantControlMode(conversation)}</assistant_mode>`,
+    `<auto_approve_tools>${autoApproveTools ? 'on' : 'off'}</auto_approve_tools>`,
     `<default_runtime_provider>${defaultRuntimeProvider || 'codex'}</default_runtime_provider>`,
     `<workspace>${truncate(cwd || conversation?.metadata?.workspaceId || '', 200)}</workspace>`,
     `<runtime_model>${truncate(model || '', 120)}</runtime_model>`,

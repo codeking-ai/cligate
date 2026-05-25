@@ -1,3 +1,4 @@
+import path from 'node:path';
 import { ASSISTANT_RUN_STATUS } from '../assistant-core/models.js';
 import { createAssistantRunCheckpoint } from '../assistant-core/models.js';
 import { buildAnthropicToolDefinitions } from './tool-schema.js';
@@ -82,13 +83,32 @@ function summarizeToolStep(toolName, result) {
   };
 }
 
+// Default ReAct iteration budget. The old value of 6 was a relic from when the
+// supervisor was supposed to make a quick routing decision and then delegate to
+// codex/claude-code. After we shifted skill execution back into the supervisor
+// itself (so it can run shell commands, write files, generate scripts, etc.),
+// 6 turns is nowhere near enough — a real skill workflow like the pptx skill
+// can need 10-15 LLM→tool→LLM round-trips before producing the final reply.
+// At 6 turns the run silently truncates to "tool_phase_finished_without_assistant_summary",
+// and the user sees the previous tool's status text ("Tool run_shell_command completed")
+// instead of a real answer. Bump well above the natural pptx ceiling, allow the
+// operator to raise/lower via env, and clamp to a sane range so nothing can
+// burn unbounded tokens.
+function resolveDefaultMaxIterations() {
+  const raw = Number.parseInt(String(process.env.CLIGATE_ASSISTANT_MAX_ITERATIONS || '').trim(), 10);
+  if (Number.isFinite(raw)) {
+    return Math.min(80, Math.max(1, raw));
+  }
+  return 30;
+}
+
 export class AssistantReactEngine {
   constructor({
     llmClient,
     toolRegistry,
     toolExecutor,
     reflectionService = assistantReflectionService,
-    maxIterations = 6
+    maxIterations = resolveDefaultMaxIterations()
   } = {}) {
     this.llmClient = llmClient;
     this.toolRegistry = toolRegistry;
@@ -236,6 +256,22 @@ export class AssistantReactEngine {
 
       appendAssistantToolMessage(transcript, completion);
 
+      // Compute per-turn execution context shared by every tool call this turn:
+      //   - autoApproveAll: conversation-level "yolo" flag set by /yolo or by a
+      //     sticky-approval phrase in chat-ui-route. Skips the per-tool
+      //     confirmation prompt for mutating tools.
+      //   - extraReadRoots: directories of skills active in this run. Lets
+      //     read_file / list_directory / stat_path open SKILL.md siblings
+      //     (editing.md, pptxgenjs.md, scripts/) even when the workspace cwd
+      //     lives on a different drive than ~/.cligate/skills/<name>/.
+      const autoApproveAll = conversation?.metadata?.assistantCore?.autoApproveTools === true;
+      const extraReadRoots = (workingRun?.metadata?.skills?.active || [])
+        .map((skill) => {
+          const skillPath = String(skill?.pathToSkillMd || '').trim();
+          return skillPath ? path.dirname(skillPath) : '';
+        })
+        .filter(Boolean);
+
       for (const toolCall of completion.toolCalls) {
         const result = await this.toolExecutor.executeToolCall({
           toolName: toolCall.name,
@@ -243,7 +279,9 @@ export class AssistantReactEngine {
         }, {
           run: workingRun,
           conversation,
-          cwd
+          cwd,
+          autoApproveAll,
+          extraReadRoots
         });
         toolResults.push(result);
         workingRun.steps.push(summarizeToolStep(toolCall.name, result));

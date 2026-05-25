@@ -2,7 +2,7 @@ import '../test-env.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { handleConfirmAssistantToolAction, handleGetChatAgentSession, handleRouteChatAgentMessage } from '../../src/routes/chat-ui-route.js';
+import { handleConfirmAssistantToolAction, handleGetChatAgentSession, handleRouteChatAgentMessage, hasStickyApprovalPhrase, parseAssistantPermissionCommandForTest } from '../../src/routes/chat-ui-route.js';
 import chatUiConversationStore from '../../src/chat-ui/conversation-store.js';
 import assistantPendingActionStore from '../../src/assistant-core/pending-action-store.js';
 import chatUiConversationService from '../../src/chat-ui/conversation-service.js';
@@ -632,4 +632,173 @@ test('handleRouteChatAgentMessage ignores stale background results from an older
     chatUiConversationStore.findOrCreateBySessionId = originalFindOrCreateBySessionId;
     chatUiConversationStore.patch = originalPatch;
   }
+});
+
+test('hasStickyApprovalPhrase matches the natural ways users grant blanket approval', () => {
+  // Real phrases captured from conv 76fb84e0 — these MUST flip yolo on, otherwise
+  // the user gets stuck in an approval loop again.
+  const shouldEnable = [
+    '确认，继续进行，后续所有操作都完全同意，不用再问我了',
+    '确认，进行后续操作，任何操作都同意',
+    '开始执行吧，不要每一步都问我，直接执行',
+    '我完全同意，同意后续所有操作，不要再问我了，直接同意',
+    '本次对话都允许',
+    '本次对话都允许读取该 skill 文件',
+    '一律同意',
+    '后续都同意',
+    'yolo',
+    'auto-approve',
+    'approve all',
+    "don't ask me again",
+    'from now on always approve'
+  ];
+  for (const phrase of shouldEnable) {
+    assert.equal(hasStickyApprovalPhrase(phrase), true, `expected sticky-approval HIT for: ${phrase}`);
+  }
+});
+
+test('hasStickyApprovalPhrase does NOT trip on single-shot or unrelated phrasing', () => {
+  // Single-word affirmations should stay one-shot.
+  const shouldStayOneShot = ['同意', '继续', '确认', '可以', '好', '行', 'ok', 'yes'];
+  for (const phrase of shouldStayOneShot) {
+    assert.equal(hasStickyApprovalPhrase(phrase), false, `unexpected sticky-approval HIT for one-shot: ${phrase}`);
+  }
+  // Unrelated chatter.
+  const unrelated = [
+    '你在执行生成ppt的任务吗',
+    '帮我查看图片',
+    '开始执行', // "start" alone isn't a yolo signal
+    '现在还在执行吗'
+  ];
+  for (const phrase of unrelated) {
+    assert.equal(hasStickyApprovalPhrase(phrase), false, `unexpected sticky-approval HIT for unrelated: ${phrase}`);
+  }
+  // Explicit denials must NEVER flip yolo on even when sticky tokens leak through.
+  const denials = ['我不同意', '我不同意所有这些', '拒绝', '取消那个操作', 'do not approve', 'reject'];
+  for (const phrase of denials) {
+    assert.equal(hasStickyApprovalPhrase(phrase), false, `sticky-approval DENY guard failed on: ${phrase}`);
+  }
+});
+
+test('parseAssistantPermissionCommand recognizes /yolo and /safe slash commands', () => {
+  assert.deepEqual(parseAssistantPermissionCommandForTest('/yolo'), { command: 'yolo' });
+  assert.deepEqual(parseAssistantPermissionCommandForTest('/auto-approve'), { command: 'yolo' });
+  assert.deepEqual(parseAssistantPermissionCommandForTest('/dangerously-skip-permissions'), { command: 'yolo' });
+  assert.deepEqual(parseAssistantPermissionCommandForTest('/safe'), { command: 'safe' });
+  assert.deepEqual(parseAssistantPermissionCommandForTest('/stop-yolo'), { command: 'safe' });
+  assert.equal(parseAssistantPermissionCommandForTest('/cligate'), null);
+  assert.equal(parseAssistantPermissionCommandForTest(''), null);
+  assert.equal(parseAssistantPermissionCommandForTest('not a command'), null);
+});
+
+test('handleRouteChatAgentMessage does NOT throw on sticky-approval phrase (regression: const reassignment)', async () => {
+  // Regression for conv 618e00b5: a sticky-approval phrase made the route
+  // throw `TypeError: Assignment to constant variable.` because `conversation`
+  // was declared `const`. The user saw zero downstream runs and only a 500
+  // toast, even though autoApproveTools=true had silently been persisted.
+  const originalGetBySessionId = chatUiConversationStore.getBySessionId;
+  const originalGet = chatUiConversationStore.get;
+  const originalPatch = chatUiConversationStore.patch;
+  const originalRouteMessage = chatUiConversationService.routeMessage;
+  const originalFindOrCreateBySessionId = chatUiConversationStore.findOrCreateBySessionId;
+
+  let conversation = {
+    id: 'conversation-sticky-regression-1',
+    externalConversationId: 'chat-session-sticky-regression-1',
+    metadata: { assistantCore: {} }
+  };
+  const patches = [];
+
+  chatUiConversationStore.getBySessionId = () => conversation;
+  chatUiConversationStore.get = () => conversation;
+  chatUiConversationStore.findOrCreateBySessionId = () => conversation;
+  chatUiConversationStore.patch = (id, patch) => {
+    patches.push(patch);
+    conversation = {
+      ...conversation,
+      metadata: {
+        ...(conversation.metadata || {}),
+        ...(patch.metadata || {})
+      }
+    };
+    return conversation;
+  };
+
+  let routeMessageCalled = false;
+  let routeMessageInput = null;
+  chatUiConversationService.routeMessage = async (args) => {
+    routeMessageCalled = true;
+    routeMessageInput = args;
+    return {
+      type: 'assistant_run_accepted',
+      message: 'started',
+      assistantRun: { id: 'run-sticky-regression-1', status: 'queued' },
+      conversation: { id: conversation.id },
+      observability: null
+    };
+  };
+
+  try {
+    const res = mockRes();
+    await handleRouteChatAgentMessage({
+      body: {
+        sessionId: 'chat-session-sticky-regression-1',
+        input: '确认，后续所有操作都同意',
+        provider: 'codex',
+        cwd: '',
+        model: ''
+      }
+    }, res);
+
+    // Bug 1: must NOT crash. Before the fix, this returned 500 with
+    // "Assignment to constant variable." and routeMessage was never called.
+    assert.equal(res._status, 200, `expected 200, got ${res._status}: ${JSON.stringify(res._body)}`);
+    assert.equal(res._body.success, true);
+    assert.equal(routeMessageCalled, true, 'routeMessage must be invoked once the const regression is fixed');
+    assert.equal(routeMessageInput?.text, '确认，后续所有操作都同意');
+    assert.equal(conversation.metadata.assistantCore.autoApproveTools, true, 'sticky-approval phrase must persist autoApproveTools=true');
+  } finally {
+    chatUiConversationStore.getBySessionId = originalGetBySessionId;
+    chatUiConversationStore.get = originalGet;
+    chatUiConversationStore.patch = originalPatch;
+    chatUiConversationStore.findOrCreateBySessionId = originalFindOrCreateBySessionId;
+    chatUiConversationService.routeMessage = originalRouteMessage;
+  }
+});
+
+test('AgentChannelConversationStore.patch shallow-merges metadata so concurrent writers cannot lose sibling keys', async () => {
+  const { AgentChannelConversationStore } = await import('../../src/agent-channels/conversation-store.js');
+  const tmpDir = (await import('node:fs/promises')).mkdtemp;
+  const path = await import('node:path');
+  const os = await import('node:os');
+  const dir = await tmpDir(path.join(os.tmpdir(), 'cligate-conv-store-merge-'));
+
+  const store = new AgentChannelConversationStore({ configDir: dir });
+  const created = store.save({
+    id: 'conv-merge-1',
+    channel: 'chat-ui',
+    accountId: 'default',
+    externalConversationId: 'merge-1',
+    externalUserId: 'local-user',
+    metadata: {
+      assistantCore: { mode: 'assistant', lastRunId: 'A' },
+      uiChatPendingAssistantRunId: 'run-A',
+      ui: { origin: 'chat-ui' }
+    }
+  });
+  assert.equal(created.metadata.uiChatPendingAssistantRunId, 'run-A');
+
+  // Simulate a stale writer (mode-service finalizeRunSuccess) that only knows
+  // about assistantCore — it must NOT wipe uiChatPendingAssistantRunId from
+  // the freshly-set state.
+  const stalePatch = store.patch('conv-merge-1', {
+    metadata: {
+      // intentionally omitting uiChatPendingAssistantRunId
+      assistantCore: { mode: 'assistant', lastRunId: 'B' }
+    }
+  });
+
+  assert.equal(stalePatch.metadata.assistantCore.lastRunId, 'B');
+  assert.equal(stalePatch.metadata.uiChatPendingAssistantRunId, 'run-A', 'must NOT be clobbered by a stale concurrent patch');
+  assert.equal(stalePatch.metadata.ui?.origin, 'chat-ui', 'sibling keys must survive');
 });

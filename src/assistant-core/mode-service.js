@@ -779,6 +779,25 @@ export class AssistantModeService {
       };
     }
 
+    // Skill stickiness: each new assistant run starts with empty metadata, which
+    // means react-engine's `restoreActiveSkillsFromCheckpoint(run)` finds no
+    // active skill and falls back to scoring the CURRENT user message against
+    // available skill descriptions. That re-scoring drops the skill the moment
+    // the user sends a short follow-up like "继续生成" or "做完了吗" — the
+    // text no longer contains pptx/ppt/slides/deck keywords, so the skill goes
+    // inactive and the SKILL.md content disappears from the supervisor prompt
+    // mid-task. Inherit the previous run's active skills into the new run so
+    // the skill survives short follow-ups; `shouldReplaceActiveSkills` still
+    // kicks in when the user clearly switches topics.
+    const previousRunId = normalizeText(conversation?.metadata?.assistantCore?.lastRunId);
+    const previousRun = previousRunId ? this.assistantRunStore.get(previousRunId) : null;
+    const previousActiveSkills = Array.isArray(previousRun?.metadata?.skills?.active)
+      ? previousRun.metadata.skills.active
+      : [];
+    const previousSkillHistory = Array.isArray(previousRun?.metadata?.skills?.history)
+      ? previousRun.metadata.skills.history
+      : [];
+
     const run = this.assistantRunStore.create({
       assistantSessionId: assistantSession.id,
       conversationId: conversation.id,
@@ -788,7 +807,15 @@ export class AssistantModeService {
       metadata: {
         observationHint: {
           activeRuntimeSessionId: conversation?.activeRuntimeSessionId || null
-        }
+        },
+        ...(previousActiveSkills.length > 0 || previousSkillHistory.length > 0
+          ? {
+              skills: {
+                active: previousActiveSkills,
+                history: previousSkillHistory
+              }
+            }
+          : {})
       }
     });
 

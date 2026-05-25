@@ -68,6 +68,107 @@ function isAffirmativeConfirmation(text = '') {
   ].some((pattern) => pattern.test(normalized));
 }
 
+// "Yolo" / sticky-approval phrases. When the user says one of these the
+// supervisor's policy gate is flipped open for the rest of this conversation —
+// every mutating tool call this conversation makes auto-approves without
+// another confirmation roundtrip. The user can turn it back off with /safe.
+//
+// Patterns intentionally match intent rather than literal strings: users
+// phrase the same idea many ways ("后续所有操作都同意", "任何操作都同意",
+// "不用再问我了", "不要每一步都问", "直接执行"). The previous version of
+// this list was too literal and missed all of these in the real conv
+// 76fb84e0, leaving the user stuck in an endless confirmation loop.
+const STICKY_APPROVAL_PATTERNS = Object.freeze([
+  // (A) "Don't ask again" family — zh
+  //   不要/不用/不需要 (再/每一步/每次/每一次)? (问/确认/询问/打断)
+  /不\s*(要|用|需要|必)?\s*(再|每\s*[一]?\s*(次|步)|总是|一直)?\s*(问|确认|询问|打断|打扰)/,
+  /别\s*(再|总)?\s*(问|确认|打断)/,
+  /(后续|以后|今后|往后)\s*不\s*(要|用)?\s*再?\s*(问|确认|询问)/,
+  // (B) Approval verb + sticky scope — zh
+  //   "同意所有操作" / "批准所有" / "允许后续" / "放行全部"
+  /(同意|允许|批准|放行|确认)\s*[，,、]?\s*(所有|全部|任何|后续|以后|一律|始终|永远|全程|每\s*[一]?\s*(次|步)?|后面|接下来|往后)/,
+  // (C) Sticky scope ... approval verb — zh
+  //   "后续所有操作都完全同意" / "任何操作都同意" / "所有都允许"
+  /(所有|全部|任何|后续|以后|一律|始终|永远|全程|每\s*[一]?\s*(次|步)?|后面|接下来|往后)[^。.！!？?]{0,30}(同意|允许|批准|放行)/,
+  // (D) "Just do it" family — zh
+  /(直接|径直|径自|一路)\s*(执行|进行|做|跑|完成|继续|开始|同意|搞|干)/,
+  // (E) Session-wide scope — zh
+  /本\s*(次|会)?\s*(对话|会话|聊天|项目)[^。.！!？?]{0,15}(同意|允许|放行|批准|允许读取)/,
+  // (F) English yolo / auto-approve family
+  /\b(yolo|dangerously[\s-]?skip[\s-]?permissions?|auto[\s-]?approve|auto[\s-]?confirm|approve\s+(all|any|every|each|everything|anything)|always\s+(approve|allow)|allow\s+(all|any|every|everything)|don'?t\s+(keep\s+)?ask(ing)?\s+(me\s+)?(again|each|every|any)?|never\s+ask\s+(me\s+)?again|stop\s+asking|just\s+do\s+it|go\s+ahead\s+with\s+(all|everything)|from\s+now\s+on\s+(always|approve|allow|just\s+do\s+it))\b/i
+]);
+
+// Phrases that explicitly REVOKE / oppose sticky approval. If any of these
+// fire we never treat the message as a yolo opt-in, even when other tokens
+// leak through (e.g. "我不同意所有这些").
+const STICKY_APPROVAL_DENY_PATTERNS = Object.freeze([
+  /(不\s*同意|不\s*允许|不\s*批准|不\s*放行|拒绝|取消|别\s*同意|不要\s*同意|不要\s*允许)/,
+  /\b(do\s+not\s+approve|don'?t\s+approve|deny|reject|cancel)\b/i
+]);
+
+export function hasStickyApprovalPhrase(text = '') {
+  const normalized = String(text || '').trim();
+  if (!normalized) return false;
+  if (STICKY_APPROVAL_DENY_PATTERNS.some((pattern) => pattern.test(normalized))) {
+    return false;
+  }
+  return STICKY_APPROVAL_PATTERNS.some((pattern) => pattern.test(normalized));
+}
+
+export function parseAssistantPermissionCommandForTest(text = '') {
+  return parseAssistantPermissionCommand(text);
+}
+
+function parseAssistantPermissionCommand(text = '') {
+  const trimmed = String(text || '').trim();
+  if (!trimmed.startsWith('/')) return null;
+  if (/^\/(yolo|auto[-_]?approve|dangerously[-_]?skip[-_]?permissions?)\b/i.test(trimmed)) {
+    return { command: 'yolo' };
+  }
+  if (/^\/(safe|safe[-_]?mode|require[-_]?approval|stop[-_]?yolo)\b/i.test(trimmed)) {
+    return { command: 'safe' };
+  }
+  return null;
+}
+
+function getAutoApproveToolsState(conversation = null) {
+  return Boolean(conversation?.metadata?.assistantCore?.autoApproveTools);
+}
+
+function applyAutoApproveToolsPatch(conversation = null, value = false) {
+  if (!conversation?.id) return conversation;
+  const next = chatUiConversationStore.patch(conversation.id, {
+    metadata: {
+      ...(conversation.metadata || {}),
+      assistantCore: {
+        ...((conversation?.metadata?.assistantCore && typeof conversation.metadata.assistantCore === 'object')
+          ? conversation.metadata.assistantCore
+          : {}),
+        autoApproveTools: value === true,
+        autoApproveToolsUpdatedAt: new Date().toISOString()
+      }
+    }
+  });
+  return next || conversation;
+}
+
+function buildAutoApproveAcknowledgement({ enabled, reason }) {
+  const zh = /㐀-鿿/.test('确认') ? true : true; // always reply in zh-CN; user's UI is Chinese
+  if (enabled) {
+    if (reason === 'slash') {
+      return zh
+        ? '已开启自动同意模式（/yolo）。本会话内的所有后续工具调用都会自动放行，不会再向你确认。要恢复人工确认请发送 /safe。'
+        : 'Auto-approve mode is now ON (/yolo). Every subsequent tool call in this conversation will execute without asking you. Send /safe to turn it back off.';
+    }
+    return zh
+      ? '已开启自动同意模式。本会话内的所有后续工具调用都会自动放行，不会再向你确认。要恢复人工确认请发送 /safe。'
+      : 'Auto-approve mode is now ON. Every subsequent tool call in this conversation will execute without asking you. Send /safe to turn it back off.';
+  }
+  return zh
+    ? '已关闭自动同意模式（/safe）。后续敏感工具调用恢复为逐次确认。'
+    : 'Auto-approve mode is now OFF (/safe). Sensitive tool calls will ask for confirmation again.';
+}
+
 function isExecutionToolPendingAction(action = {}) {
   return Boolean(
     action?.toolName
@@ -77,7 +178,7 @@ function isExecutionToolPendingAction(action = {}) {
   );
 }
 
-async function executeConfirmedExecutionToolAction(action = {}) {
+async function executeConfirmedExecutionToolAction(action = {}, { conversation = null } = {}) {
   const workspaceRoot = String(
     action?.input?.cwd
       || action?.input?.path
@@ -101,7 +202,9 @@ async function executeConfirmedExecutionToolAction(action = {}) {
       approved: true
     }
   }, {
-    cwd: workspaceRoot
+    cwd: workspaceRoot,
+    autoApproveAll: getAutoApproveToolsState(conversation),
+    extraReadRoots: []
   });
   return {
     type: 'assistant_execution_tool_confirmed',
@@ -1211,7 +1314,16 @@ export async function handleRouteChatAgentMessage(req, res) {
     }
 
     const existingConversation = chatUiConversationStore.getBySessionId(sessionId);
-    const conversation = existingConversation || chatUiConversationStore.findOrCreateBySessionId(sessionId);
+    // `let` because the sticky-approval branch below reassigns it after
+    // `applyAutoApproveToolsPatch`. Declaring this `const` was a latent bug:
+    // the moment a user typed something like "本次对话都允许" or "同意后续所有
+    // 操作", the reassignment threw `TypeError: Assignment to constant variable`,
+    // the route returned 500, and no assistant run was ever created — the user
+    // saw no reply at all (only the toast). The autoApproveTools metadata
+    // patch DID land in the store because applyAutoApproveToolsPatch runs the
+    // patch BEFORE the assignment, which is also why we observed conversations
+    // with autoApproveTools=true yet zero downstream runs.
+    let conversation = existingConversation || chatUiConversationStore.findOrCreateBySessionId(sessionId);
     const createdArtifacts = normalizedInputParts
       .filter((part) => part.type === 'input_image' && String(part.image_url || '').trim())
       .map((part, index) => artifactService.createArtifact({
@@ -1235,6 +1347,47 @@ export async function handleRouteChatAgentMessage(req, res) {
       inputParts: normalizedInputParts,
       artifactRefs: createdArtifacts.map((entry) => entry.id)
     });
+
+    // Permission-mode slash commands: /yolo (auto-approve), /safe (revert).
+    // Handle these BEFORE any other routing so the user can toggle the flag
+    // mid-conversation without dragging the supervisor into it.
+    const permissionCommand = parseAssistantPermissionCommand(normalizedInputText);
+    if (permissionCommand) {
+      const enable = permissionCommand.command === 'yolo';
+      const patchedConversation = applyAutoApproveToolsPatch(conversation, enable);
+      const message = buildAutoApproveAcknowledgement({ enabled: enable, reason: 'slash' });
+      saveChatUiOutboundDelivery(patchedConversation, {
+        sessionId,
+        text: message,
+        assistantRunId: '',
+        runStatus: 'completed'
+      });
+      return res.json({
+        success: true,
+        result: {
+          type: 'assistant_response',
+          message,
+          assistantRun: null,
+          pendingAction: null,
+          observability: { autoApproveTools: enable }
+        }
+      });
+    }
+
+    // Natural-language sticky approval: phrases like "本次对话都允许 / 同意后续
+    // 所有操作, 不要再问我了 / from now on always / yolo" set the conversation
+    // flag and then let the original message continue into the supervisor LLM,
+    // so the user gets the work done AND no more confirmation prompts in this
+    // conversation.
+    let autoApproveJustEnabled = false;
+    if (
+      !getAutoApproveToolsState(conversation)
+      && hasStickyApprovalPhrase(normalizedInputText)
+    ) {
+      conversation = applyAutoApproveToolsPatch(conversation, true);
+      autoApproveJustEnabled = true;
+    }
+
     let latestAssistantPendingAction = existingConversation?.id
       ? assistantPendingActionStore.findLatestByConversationId(existingConversation.id)
       : null;

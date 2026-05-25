@@ -67,13 +67,26 @@ function buildPendingActionFromRun(run = null, conversation = null, {
   });
 }
 
-function findFallbackRun(conversation = null, {
-  runStore = assistantRunStore
-} = {}) {
+function clearStalePendingTokenInMetadata(conversation, conversationStore) {
   const conversationId = normalizeText(conversation?.id);
-  if (!conversationId) return null;
-  const runs = runStore.listByConversationId(conversationId, { limit: 20 });
-  return runs.find((entry) => isAssistantConfirmationRun(entry)) || null;
+  if (!conversationId || !conversationStore?.patch) {
+    return;
+  }
+  const persistedToken = normalizeText(conversation?.metadata?.assistantCore?.pendingActionConfirmToken);
+  if (!persistedToken) {
+    return;
+  }
+  conversationStore.patch(conversationId, {
+    metadata: {
+      ...(conversation?.metadata || {}),
+      assistantCore: {
+        ...((conversation?.metadata?.assistantCore && typeof conversation.metadata.assistantCore === 'object')
+          ? conversation.metadata.assistantCore
+          : {}),
+        pendingActionConfirmToken: null
+      }
+    }
+  });
 }
 
 export function ensurePendingAssistantAction(conversation = null, {
@@ -97,16 +110,32 @@ export function ensurePendingAssistantAction(conversation = null, {
     return latest;
   }
 
+  // ONLY rebuild from the most recent run. Previously this scanned the last 20
+  // runs looking for any waiting_user/assistant_confirmation_required entry,
+  // which meant: if the assistant ever paused on a confirmation hours ago, then
+  // moved on through several completed runs, then the server restarted, a user
+  // saying "继续 / 同意" would resurrect that long-dead pending action via
+  // chat-ui-route's `isAffirmativeConfirmation` → `handleConfirmAssistantToolAction`
+  // shortcut, executing a stale tool call AND skipping the supervisor LLM
+  // entirely (so the user gets no real reply to their current question).
+  //
+  // The supervisor metadata's `lastRunId` is the source of truth for "is there
+  // still a pending confirmation right now?". If the most recent run already
+  // completed, there is no pending — clear any stale persisted token so the
+  // next "继续" goes through the supervisor LLM normally.
   const preferredRunId = normalizeText(conversation?.metadata?.assistantCore?.lastRunId);
   const preferredRun = preferredRunId ? runStore.get(preferredRunId) : null;
-  const run = isAssistantConfirmationRun(preferredRun)
-    ? preferredRun
-    : findFallbackRun(conversation, { runStore });
-  const rebuilt = buildPendingActionFromRun(run, conversation, {
+  if (!isAssistantConfirmationRun(preferredRun)) {
+    clearStalePendingTokenInMetadata(conversation, conversationStore);
+    return null;
+  }
+
+  const rebuilt = buildPendingActionFromRun(preferredRun, conversation, {
     confirmToken: persistedToken,
     pendingActionStore
   });
   if (!rebuilt) {
+    clearStalePendingTokenInMetadata(conversation, conversationStore);
     return null;
   }
 

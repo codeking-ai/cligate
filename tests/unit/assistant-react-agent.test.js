@@ -2082,3 +2082,65 @@ test('Assistant async background fan-in waits for codex and claude-code before n
   assert.match(String(backgroundResult.message || ''), /Codex/);
   assert.match(String(backgroundResult.message || ''), /Claude Code/);
 });
+
+test('Assistant ReAct inherits active skills from the previous run in the same conversation (skill stickiness)', async () => {
+  const service = createAssistantService({
+    llmResponses: [
+      { text: 'first turn done' },
+      { text: 'second turn done' }
+    ]
+  });
+
+  const cwd = createTempDir('cligate-skill-sticky-');
+  const skillDir = join(cwd, '.cligate', 'skills', 'pptx');
+  mkdirSync(skillDir, { recursive: true });
+  writeFileSync(join(skillDir, 'SKILL.md'), `---
+name: pptx
+description: Use this skill any time a .pptx file is involved (slides, deck, presentation).
+---
+PPTX skill body.
+`, 'utf8');
+
+  // Turn 1: user names the skill explicitly so it activates.
+  const turn1 = await service.chatService.routeMessage({
+    sessionId: 'assistant-skill-sticky-1',
+    text: '/cligate use the pptx skill to build a slide deck',
+    cwd
+  });
+  assert.equal(turn1.type, 'assistant_response');
+  const run1Skills = turn1.assistantRun?.metadata?.skills?.active || [];
+  assert.equal(run1Skills.length, 1, 'pptx skill must be active for turn 1');
+  assert.equal(run1Skills[0].name, 'pptx');
+
+  // Turn 2: user sends a short follow-up that contains NO skill keywords.
+  // Without stickiness this would drop the skill on the floor mid-task.
+  const turn2 = await service.chatService.routeMessage({
+    sessionId: 'assistant-skill-sticky-1',
+    text: '继续生成',
+    cwd
+  });
+  assert.equal(turn2.type, 'assistant_response');
+  const run2Skills = turn2.assistantRun?.metadata?.skills?.active || [];
+  assert.equal(run2Skills.length, 1, 'pptx skill must STILL be active for turn 2 (inherited from previous run)');
+  assert.equal(run2Skills[0].name, 'pptx');
+});
+
+test('Response composer surfaces a clear "iteration budget exhausted" message instead of leaking the last tool summary', async () => {
+  // Direct unit test on the composer so we don't need an LLM that actually loops 30 times.
+  const { composeAssistantReply } = await import('../../src/assistant-agent/response-composer.js');
+  const reply = composeAssistantReply({
+    language: 'zh-CN',
+    assistantText: '',
+    toolResults: [
+      { toolName: 'run_shell_command', summary: 'Tool run_shell_command completed' },
+      { toolName: 'write_file', summary: 'Tool write_file completed' }
+    ],
+    finalStatus: 'completed',
+    stopReason: 'tool_phase_finished_without_assistant_summary'
+  });
+  assert.match(reply.message, /调用了\s*2\s*次工具/);
+  assert.match(reply.message, /(继续|interation)/i);
+  assert.match(reply.summary, /迭代/);
+  // It must NOT just echo the last tool's status string verbatim.
+  assert.doesNotMatch(reply.message, /^Tool run_shell_command completed$/);
+});

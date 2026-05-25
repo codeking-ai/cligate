@@ -120,10 +120,27 @@ export class AgentChannelConversationStore {
   patch(conversationId, patch = {}) {
     const current = this.get(conversationId);
     if (!current) return null;
-    return this.save({
-      ...current,
-      ...patch
-    });
+    // Shallow-merge `metadata` instead of letting the patch object replace it
+    // wholesale. Multiple writers concurrently patch the conversation (mode-
+    // service finalizes a run, chat-ui-route writes uiChatPendingAssistantRunId
+    // / uiChatMessages, the runtime observer writes runtime state, etc.) and
+    // each computes the metadata object from a stale snapshot they captured
+    // earlier. Without this merge, the last writer wins on the WHOLE metadata
+    // map — clobbering sibling keys the snapshot never saw — which is how
+    // `uiChatPendingAssistantRunId` was disappearing right after chat-ui-route
+    // set it, breaking the onBackgroundResult callback's identity check and
+    // silently dropping every outbound delivery + uiChatMessages persistence.
+    const merged = { ...current, ...patch };
+    if (patch && Object.prototype.hasOwnProperty.call(patch, 'metadata')) {
+      const incomingMetadata = patch.metadata && typeof patch.metadata === 'object'
+        ? patch.metadata
+        : {};
+      merged.metadata = {
+        ...(current.metadata && typeof current.metadata === 'object' ? current.metadata : {}),
+        ...incomingMetadata
+      };
+    }
+    return this.save(merged);
   }
 
   findByExternal(channel, accountId, externalConversationId, externalUserId, externalThreadId = '') {

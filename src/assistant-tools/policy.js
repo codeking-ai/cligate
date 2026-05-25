@@ -58,16 +58,36 @@ export class AssistantToolPolicyService {
 
     const input = invocation.input || {};
     const baseDir = context.cwd || this.workspaceGuard.workspaceRoot;
+    // Context-supplied per-call extras (e.g. dirs of active skills) — these
+    // permit reads outside the workspace without expanding write authority.
+    const extraReadRoots = Array.isArray(context.extraReadRoots) ? context.extraReadRoots : [];
+    // Conversation-level "yolo" flag set by the user via /yolo or a sticky
+    // approval phrase. When on, every tool call behaves as if approval was
+    // already granted — equivalent to invocation.metadata.approved === true.
+    const autoApproveAll = context.autoApproveAll === true;
+    const effectiveApproved = autoApproveAll || invocation.metadata?.approved === true;
+
     for (const rawPath of collectPathInputs(input)) {
       let resolved;
       try {
-        resolved = this.workspaceGuard.resolvePath(rawPath, { baseDir });
+        if (tool.mutating) {
+          resolved = this.workspaceGuard.resolvePath(rawPath, { baseDir });
+        } else {
+          // Reads honor extraReadRoots so the assistant can read files of an
+          // active skill (e.g. C:\Users\<user>\.cligate\skills\pptx\editing.md)
+          // even when the workspace cwd is a different drive.
+          resolved = this.workspaceGuard.resolvePath(rawPath, {
+            baseDir,
+            extraReadRoots,
+            readOnly: true
+          });
+        }
       } catch {
         if (tool.mutating) {
           return {
             ...decision,
             allowed: true,
-            requiresApproval: invocation.metadata?.approved !== true,
+            requiresApproval: !effectiveApproved,
             reason: 'path_outside_workspace_requires_confirmation',
             requestedPath: String(rawPath || '').trim(),
             grantedPermissions: { read: [], write: [] }
@@ -77,6 +97,7 @@ export class AssistantToolPolicyService {
           allowed: false,
           requiresApproval: false,
           reason: 'path_outside_workspace',
+          requestedPath: String(rawPath || '').trim(),
           grantedPermissions: { read: [], write: [] }
         };
       }
@@ -95,12 +116,19 @@ export class AssistantToolPolicyService {
       };
     }
 
-    if ((tool.requiresApproval || tool.mutating) && invocation.metadata?.approved !== true) {
+    if ((tool.requiresApproval || tool.mutating) && !effectiveApproved) {
       return {
         ...decision,
         requiresApproval: true,
         reason: tool.mutating ? 'mutating_tool_requires_confirmation' : 'tool_requires_confirmation'
       };
+    }
+
+    if ((tool.requiresApproval || tool.mutating) && autoApproveAll && invocation.metadata?.approved !== true) {
+      // Tell downstream callers the approval was synthesized by the
+      // conversation-level flag rather than an explicit user click — useful
+      // for audit logging.
+      decision.autoApproved = true;
     }
 
     return decision;

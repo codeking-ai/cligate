@@ -39,7 +39,9 @@ export function createFileToolHandlers({ workspaceGuard }) {
       const limit = clampInteger(input.limit, { fallback: 200, min: 1, max: 1000 });
       const recursive = input.recursive === true;
       const resolvedPath = workspaceGuard.resolvePath(input.path || '.', {
-        baseDir: context.cwd || workspaceGuard.workspaceRoot
+        baseDir: context.cwd || workspaceGuard.workspaceRoot,
+        extraReadRoots: Array.isArray(context.extraReadRoots) ? context.extraReadRoots : [],
+        readOnly: true
       });
       const entries = [];
       await walkDirectory(resolvedPath, {
@@ -57,8 +59,13 @@ export function createFileToolHandlers({ workspaceGuard }) {
 
     async readFile({ input = {}, context = {} } = {}) {
       const maxBytes = clampInteger(input.maxBytes, { fallback: 32768, min: 1, max: 262144 });
+      // read_file honors context.extraReadRoots (e.g. dirs of active skills) so
+      // the assistant can open SKILL.md siblings like editing.md / pptxgenjs.md
+      // even when the workspace cwd lives on a different drive.
       const resolvedPath = workspaceGuard.resolvePath(input.path, {
-        baseDir: context.cwd || workspaceGuard.workspaceRoot
+        baseDir: context.cwd || workspaceGuard.workspaceRoot,
+        extraReadRoots: Array.isArray(context.extraReadRoots) ? context.extraReadRoots : [],
+        readOnly: true
       });
       const raw = await readFile(resolvedPath, 'utf8');
       const lines = raw.split(/\r?\n/);
@@ -79,7 +86,9 @@ export function createFileToolHandlers({ workspaceGuard }) {
 
     async statPath({ input = {}, context = {} } = {}) {
       const resolvedPath = workspaceGuard.resolvePath(input.path, {
-        baseDir: context.cwd || workspaceGuard.workspaceRoot
+        baseDir: context.cwd || workspaceGuard.workspaceRoot,
+        extraReadRoots: Array.isArray(context.extraReadRoots) ? context.extraReadRoots : [],
+        readOnly: true
       });
       const itemStat = await stat(resolvedPath);
       return {

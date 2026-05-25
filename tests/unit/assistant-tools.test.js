@@ -225,6 +225,57 @@ test('AssistantToolsExecutor mutating tools require approval and then update fil
   assert.equal(await readFile(path.join(workspaceRoot, 'notes', 'todo.txt'), 'utf8'), 'hello team\n');
 });
 
+test('AssistantToolsExecutor autoApproveAll context skips per-tool confirmation for mutating tools', async () => {
+  const workspaceRoot = await mkdtemp(path.join(os.tmpdir(), 'assistant-tools-yolo-'));
+  const { registry, workspaceGuard } = createBuiltinAssistantToolRegistry({ workspaceRoot });
+  const executor = new AssistantToolsExecutor({
+    toolRegistry: registry,
+    policyService: new AssistantToolPolicyService({
+      workspaceGuard,
+      allowMutatingTools: true
+    })
+  });
+
+  const requiresApproval = await executor.executeToolCall({
+    toolName: 'write_file',
+    input: { path: 'notes.txt', content: 'hello' }
+  }, { cwd: workspaceRoot });
+  assert.equal(requiresApproval.status, 'requires_approval');
+
+  const autoApproved = await executor.executeToolCall({
+    toolName: 'write_file',
+    input: { path: 'notes.txt', content: 'hello' }
+  }, { cwd: workspaceRoot, autoApproveAll: true });
+  assert.equal(autoApproved.status, 'completed');
+  assert.equal(autoApproved.metadata?.policy?.autoApproved, true);
+});
+
+test('AssistantToolsExecutor extraReadRoots context lets read_file reach files outside the workspace', async () => {
+  const workspaceRoot = await mkdtemp(path.join(os.tmpdir(), 'assistant-tools-readroot-'));
+  const skillRoot = await mkdtemp(path.join(os.tmpdir(), 'assistant-tools-skillroot-'));
+  await writeFile(path.join(skillRoot, 'SKILL.md'), '# skill body', 'utf8');
+
+  const { registry, workspaceGuard } = createBuiltinAssistantToolRegistry({ workspaceRoot });
+  const executor = new AssistantToolsExecutor({
+    toolRegistry: registry,
+    policyService: new AssistantToolPolicyService({ workspaceGuard })
+  });
+
+  const denied = await executor.executeToolCall({
+    toolName: 'read_file',
+    input: { path: path.join(skillRoot, 'SKILL.md') }
+  }, { cwd: workspaceRoot });
+  assert.equal(denied.status, 'denied');
+  assert.equal(denied.structured?.reason, 'path_outside_workspace');
+
+  const allowed = await executor.executeToolCall({
+    toolName: 'read_file',
+    input: { path: path.join(skillRoot, 'SKILL.md') }
+  }, { cwd: workspaceRoot, extraReadRoots: [skillRoot] });
+  assert.equal(allowed.status, 'completed');
+  assert.match(allowed.structured?.text || '', /skill body/);
+});
+
 test('AssistantToolsExecutor runs shell commands inside the workspace when approved', async () => {
   const workspaceRoot = await mkdtemp(path.join(os.tmpdir(), 'assistant-tools-shell-'));
   const { registry, workspaceGuard } = createBuiltinAssistantToolRegistry({ workspaceRoot });
