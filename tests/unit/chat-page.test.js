@@ -721,7 +721,8 @@ test('chat page tracks assistant run trace events separately from chat content',
         role: 'assistant',
         kind: 'agent-status',
         content: 'accepted',
-        assistantRunId: 'run-1'
+        assistantRunId: 'run-1',
+        traceAnchor: true
       }]
     }]
   });
@@ -744,6 +745,32 @@ test('chat page tracks assistant run trace events separately from chat content',
   assert.equal(app.chatMessages[0].traceLatest.title, 'read_file');
   assert.equal(app.assistantRunTraceEvents('run-1').length, 1);
   assert.match(app.assistantRunTraceStatus('run-1'), /completed/);
+});
+
+test('chat page only shows assistant run trace on anchor messages', () => {
+  const app = createHarness();
+
+  assert.equal(app.chatMessageTraceId({
+    role: 'assistant',
+    kind: 'agent-status',
+    assistantRunId: 'run-1',
+    traceAnchor: true
+  }), 'run-1');
+
+  assert.equal(app.chatMessageTraceId({
+    role: 'assistant',
+    kind: 'agent-status',
+    assistantRunId: 'run-1',
+    traceAnchor: false
+  }), '');
+});
+
+test('chat partial does not expose the assistant workbench button', async () => {
+  const { readFileSync } = await import('node:fs');
+  const { join } = await import('node:path');
+  const html = readFileSync(join(process.cwd(), 'public', 'partials', 'views', 'chat.html'), 'utf8');
+
+  assert.equal(html.includes("setActiveTab('assistantWorkbench')"), false);
 });
 
 test('chat page routes runtime execution events into a trace message', () => {

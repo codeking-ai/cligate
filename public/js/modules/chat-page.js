@@ -830,7 +830,10 @@ export function createChatPageModule() {
     },
 
     chatMessageTraceId(message = {}) {
-      return String(message.assistantRunId || message.runtimeTraceId || '').trim();
+      if (message.traceAnchor === true) {
+        return String(message.assistantRunId || message.runtimeTraceId || '').trim();
+      }
+      return String(message.runtimeTraceId || '').trim();
     },
 
     assistantRunTraceEvents(runId) {
@@ -1084,6 +1087,7 @@ export function createChatPageModule() {
           content: String(message.content || ''),
           assistantRunId: String(message.assistantRunId || ''),
           runStatus: String(message.runStatus || ''),
+          traceAnchor: message.traceAnchor === true,
           pendingAction: message.pendingAction || null,
           observability: message.observability || null,
           createdAt: message.createdAt || ''
@@ -1743,6 +1747,7 @@ export function createChatPageModule() {
             content: result.message || '',
             isError: false,
             assistantRunId: result.assistantRun.id,
+            traceAnchor: true,
             runStatus: result.assistantRun.status || 'queued',
             observability: result.observability || null
           });
@@ -1894,6 +1899,7 @@ export function createChatPageModule() {
             content: result.message || '',
             isError: false,
             assistantRunId: result.assistantRun.id,
+            traceAnchor: true,
             runStatus: result.assistantRun.status || 'queued',
             observability: result.observability || null
           });
