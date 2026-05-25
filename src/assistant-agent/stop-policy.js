@@ -46,13 +46,25 @@ function hasConfirmationBlock(toolResults = []) {
 export function deriveAssistantRunStopState({
   toolResults = [],
   assistantText = '',
-  maxIterationsReached = false
+  maxIterationsReached = false,
+  llmFailure = null
 } = {}) {
   const sessions = collectSessionCandidates(toolResults);
   const statuses = sessions.map((entry) => normalizeStatus(entry?.status));
   const hasText = Boolean(String(assistantText || '').trim());
   const hasToolResults = toolResults.length > 0;
   const pendingFound = hasPendingContent(toolResults);
+
+  // Supervisor LLM hard-failed (all tiers errored, or turn timed out). Mark the
+  // run failed up-front so the UI shows the error rather than a stale
+  // "Tool X completed" status from the previous iteration's last tool result.
+  if (llmFailure && llmFailure.message) {
+    return {
+      status: ASSISTANT_RUN_STATUS.FAILED,
+      closure: ASSISTANT_RUN_CLOSURE_STATE.FAILED,
+      reason: `assistant_llm_failed: ${llmFailure.message}`
+    };
+  }
 
   if (statuses.some((status) => status === 'failed')) {
     return {

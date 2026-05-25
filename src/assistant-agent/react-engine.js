@@ -102,21 +102,59 @@ function resolveDefaultMaxIterations() {
   return 30;
 }
 
+// How many times we escalate max_tokens and retry the SAME turn when the model
+// hits the output budget mid tool_use arguments. Mirrors claude-code's
+// MAX_OUTPUT_TOKENS_RECOVERY_LIMIT. After this many attempts the engine falls
+// through with the truncated calls; the tool executor recognises the
+// __truncated marker and returns a recoverable failure result so the next
+// iteration's LLM can adapt instead of crashing on undefined fields.
+const MAX_TRUNCATION_RETRIES = 2;
+const TRUNCATION_BASE_TOKENS = 16384;
+
+function detectTruncation(completion) {
+  if (!completion) return false;
+  if (completion.stopReason === 'max_tokens') return true;
+  const calls = Array.isArray(completion.toolCalls) ? completion.toolCalls : [];
+  return calls.some((call) => (
+    call?.input?.__truncated === true
+    || call?.__truncated === true
+  ));
+}
+
+function escalatedMaxTokens(previousMaxTokens, attemptIndex) {
+  // Double on each retry, anchored at TRUNCATION_BASE_TOKENS so even providers
+  // that didn't report their effective cap get a meaningful bump. Clamp to a
+  // generous-but-finite ceiling so a stuck retry loop can't burn unbounded
+  // tokens against an upstream that lies about its real limit.
+  const base = Number.isFinite(previousMaxTokens) && previousMaxTokens > 0
+    ? previousMaxTokens
+    : TRUNCATION_BASE_TOKENS;
+  const grown = base * Math.pow(2, Math.max(1, attemptIndex));
+  return Math.min(65536, Math.max(base, grown));
+}
+
 export class AssistantReactEngine {
   constructor({
     llmClient,
     toolRegistry,
     toolExecutor,
     reflectionService = assistantReflectionService,
+    runEventStore = null,
     maxIterations = resolveDefaultMaxIterations()
   } = {}) {
     this.llmClient = llmClient;
     this.toolRegistry = toolRegistry;
     this.toolExecutor = toolExecutor;
+    this.runEventStore = runEventStore;
     this.reflectionService = reflectionService instanceof AssistantReflectionService
       ? reflectionService
       : reflectionService;
     this.maxIterations = maxIterations;
+  }
+
+  emitTrace(runId, event = {}) {
+    if (!this.runEventStore?.append || !runId) return null;
+    return this.runEventStore.append(runId, event);
   }
 
   async run({
@@ -205,14 +243,154 @@ export class AssistantReactEngine {
       }
     };
 
+    this.emitTrace(workingRun.id, {
+      type: 'assistant.run.started',
+      phase: 'start',
+      status: ASSISTANT_RUN_STATUS.RUNNING,
+      title: 'Assistant run started',
+      summary: text ? `Started: ${String(text).slice(0, 160)}` : 'Assistant run started',
+      payload: {
+        conversationId: conversation?.id || '',
+        mode: workingRun.mode || '',
+        defaultRuntimeProvider,
+        cwd,
+        model: model || ''
+      },
+      visibility: 'compact'
+    });
+
+    let llmFailure = null;
     for (let iteration = 0; iteration < this.maxIterations; iteration += 1) {
-      const completion = await this.llmClient.complete({
-        system: prompt.system,
-        messages: transcript,
-        tools: toolDefinitions,
-        model
-      });
+      const iterationNumber = iteration + 1;
+
+      // Truncation-recovery inner loop. The supervisor LLM can hit the model's
+      // max_output_tokens while still inside a tool_use's arguments JSON; the
+      // response translator marks the partial call with __truncated. Re-issue
+      // the *same* turn with an escalated max_tokens before falling through, so
+      // the bad partial call never reaches the tool executor when avoidable.
+      let completion = null;
+      let truncationAttempts = 0;
+      let truncationOverride = null;
+      let truncationError = null;
+      while (true) {
+        this.emitTrace(workingRun.id, {
+          type: 'assistant.llm.requested',
+          phase: 'llm',
+          status: 'running',
+          title: truncationAttempts > 0
+            ? `LLM turn ${iterationNumber} (retry ${truncationAttempts} after truncation)`
+            : `LLM turn ${iterationNumber}`,
+          summary: truncationAttempts > 0
+            ? `Retrying turn ${iterationNumber} with max_tokens=${truncationOverride} after the previous response hit the output budget.`
+            : `Calling assistant model for iteration ${iterationNumber}.`,
+          payload: {
+            iteration: iterationNumber,
+            attempt: truncationAttempts + 1,
+            messageCount: transcript.length,
+            toolCount: toolDefinitions.length,
+            model: model || '',
+            maxTokensOverride: truncationOverride
+          },
+          visibility: 'detail'
+        });
+
+        try {
+          completion = await this.llmClient.complete({
+            system: prompt.system,
+            messages: transcript,
+            tools: toolDefinitions,
+            model,
+            maxTokens: truncationOverride
+          });
+        } catch (error) {
+          truncationError = error;
+          break;
+        }
+
+        if (detectTruncation(completion) && truncationAttempts < MAX_TRUNCATION_RETRIES) {
+          truncationAttempts += 1;
+          const previousCap = completion?.source?.maxTokens;
+          truncationOverride = escalatedMaxTokens(previousCap, truncationAttempts);
+          this.emitTrace(workingRun.id, {
+            type: 'assistant.llm.truncated',
+            phase: 'llm',
+            status: 'retrying',
+            title: `Turn ${iterationNumber} truncated, escalating max_tokens to ${truncationOverride}`,
+            summary: `Model hit max_output_tokens (stopReason=${completion?.stopReason || 'unknown'}). Discarding partial tool_use and retrying.`,
+            payload: {
+              iteration: iterationNumber,
+              attempt: truncationAttempts,
+              previousMaxTokens: previousCap || null,
+              nextMaxTokens: truncationOverride,
+              stopReason: completion?.stopReason || '',
+              partialToolCalls: (completion?.toolCalls || []).map((call) => ({
+                id: call.id,
+                name: call.name,
+                truncated: call?.input?.__truncated === true || call?.__truncated === true
+              }))
+            },
+            visibility: 'detail'
+          });
+          continue;
+        }
+        break;
+      }
+
+      // LLM call threw (network/upstream timeout, all tiers failed). Emit a
+      // structured failure trace so the dashboard shows what happened instead
+      // of the previous "completed" status from an earlier tool, then end the
+      // run cleanly via the normal stop-policy path.
+      if (truncationError && !completion) {
+        const message = String(truncationError?.message || truncationError || 'assistant_llm_error');
+        llmFailure = {
+          message,
+          code: truncationError?.code || 'assistant_llm_error'
+        };
+        this.emitTrace(workingRun.id, {
+          type: 'assistant.llm.failed',
+          phase: 'llm',
+          status: 'failed',
+          title: `LLM turn ${iterationNumber} failed`,
+          summary: message.slice(0, 300),
+          payload: {
+            iteration: iterationNumber,
+            attempt: truncationAttempts + 1,
+            error: message,
+            code: llmFailure.code
+          },
+          visibility: 'compact'
+        });
+        finalText = '';
+        maxIterationsReached = false;
+        break;
+      }
+
       llmSource = completion.source;
+      this.emitTrace(workingRun.id, {
+        type: 'assistant.llm.completed',
+        phase: 'llm',
+        status: 'completed',
+        title: completion.toolCalls?.length
+          ? `Model requested ${completion.toolCalls.length} tool call(s)`
+          : 'Model produced a reply',
+        summary: completion.toolCalls?.length
+          ? `Requested tools: ${completion.toolCalls.map((call) => call.name).filter(Boolean).join(', ')}`
+          : String(completion.text || '').trim().slice(0, 300),
+        payload: {
+          iteration: iterationNumber,
+          source: completion.source || null,
+          truncationAttempts,
+          stopReason: completion.stopReason || '',
+          toolCalls: (completion.toolCalls || []).map((call) => ({
+            id: call.id,
+            name: call.name,
+            input: call.input || {},
+            truncated: call?.input?.__truncated === true || call?.__truncated === true
+          })),
+          hasText: Boolean(String(completion.text || '').trim())
+        },
+        visibility: 'detail'
+      });
       workingRun.steps.push({
         kind: 'assistant_turn',
         status: 'completed',
@@ -273,6 +451,21 @@ export class AssistantReactEngine {
         .filter(Boolean);
 
       for (const toolCall of completion.toolCalls) {
+        const toolStartedAt = Date.now();
+        this.emitTrace(workingRun.id, {
+          type: 'assistant.tool.started',
+          phase: 'tool',
+          status: 'running',
+          title: toolCall.name,
+          summary: `Running tool ${toolCall.name}.`,
+          payload: {
+            iteration: iterationNumber,
+            toolCallId: toolCall.id,
+            toolName: toolCall.name,
+            input: toolCall.input || {}
+          },
+          visibility: 'compact'
+        });
         const result = await this.toolExecutor.executeToolCall({
           toolName: toolCall.name,
           input: toolCall.input || {}
@@ -285,10 +478,44 @@ export class AssistantReactEngine {
         });
         toolResults.push(result);
         workingRun.steps.push(summarizeToolStep(toolCall.name, result));
+        const normalizedResult = normalizeAssistantToolResultEntry(result, {
+          toolName: toolCall.name
+        });
+        this.emitTrace(workingRun.id, {
+          type: normalizedResult.success === false ? 'assistant.tool.failed' : 'assistant.tool.completed',
+          phase: 'tool',
+          status: normalizedResult.success === false ? 'failed' : (normalizedResult.status || 'completed'),
+          title: normalizedResult.toolName || toolCall.name,
+          summary: normalizedResult.summary || `Tool ${toolCall.name} completed.`,
+          payload: {
+            iteration: iterationNumber,
+            toolCallId: toolCall.id,
+            toolName: normalizedResult.toolName || toolCall.name,
+            durationMs: Date.now() - toolStartedAt,
+            result: normalizedResult.payload || null,
+            structured: result?.structured ?? null,
+            metadata: result?.metadata || {}
+          },
+          visibility: 'detail'
+        });
 
         const session = extractToolResultSession(result);
         if (session?.id && session?.provider) {
           relatedRuntimeSessionIds.add(session.id);
+          this.emitTrace(workingRun.id, {
+            type: 'assistant.runtime.linked',
+            phase: 'runtime',
+            status: session.status || 'running',
+            title: `${session.provider} runtime`,
+            summary: `Linked runtime session ${String(session.id).slice(0, 8)}.`,
+            payload: {
+              runtimeSessionId: session.id,
+              provider: session.provider,
+              status: session.status || '',
+              title: session.title || ''
+            },
+            visibility: 'compact'
+          });
         }
 
         appendToolResultMessage(transcript, toolCall, result);
@@ -306,6 +533,24 @@ export class AssistantReactEngine {
         for (const extra of reflected) {
           toolResults.push(extra);
           workingRun.steps.push(summarizeToolStep(extra.toolName, extra));
+          const normalizedExtra = normalizeAssistantToolResultEntry(extra, {
+            toolName: extra.toolName
+          });
+          this.emitTrace(workingRun.id, {
+            type: normalizedExtra.success === false ? 'assistant.tool.failed' : 'assistant.tool.completed',
+            phase: 'reflection',
+            status: normalizedExtra.success === false ? 'failed' : (normalizedExtra.status || 'completed'),
+            title: normalizedExtra.toolName || extra.toolName,
+            summary: normalizedExtra.summary || `Reflected tool ${extra.toolName}.`,
+            payload: {
+              parentToolCallId: toolCall.id,
+              toolName: normalizedExtra.toolName || extra.toolName,
+              result: normalizedExtra.payload || null,
+              structured: extra?.structured ?? null,
+              metadata: extra?.metadata || {}
+            },
+            visibility: 'detail'
+          });
           appendToolResultMessage(transcript, {
             id: `${toolCall.id}:${extra.toolName}`,
             name: extra.toolName
@@ -317,7 +562,8 @@ export class AssistantReactEngine {
     const stopState = deriveAssistantRunStopState({
       toolResults,
       assistantText: finalText,
-      maxIterationsReached
+      maxIterationsReached,
+      llmFailure
     });
     const finalStatus = stopState.status;
     const reply = composeAssistantReply({
@@ -355,6 +601,22 @@ export class AssistantReactEngine {
         stopPolicy: stopState
       }
     };
+
+    this.emitTrace(workingRun.id, {
+      type: finalStatus === ASSISTANT_RUN_STATUS.FAILED ? 'assistant.run.failed' : 'assistant.run.completed',
+      phase: 'finish',
+      status: finalStatus,
+      title: reply.summary || 'Assistant run finished',
+      summary: reply.message || reply.summary || '',
+      payload: {
+        status: finalStatus,
+        stopPolicy: stopState,
+        relatedRuntimeSessionIds: [...relatedRuntimeSessionIds],
+        stepCount: workingRun.steps.length,
+        toolResultCount: toolResults.length
+      },
+      visibility: 'compact'
+    });
 
     return {
       run: workingRun,

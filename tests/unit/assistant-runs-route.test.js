@@ -6,9 +6,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { AssistantRunStore } from '../../src/assistant-core/run-store.js';
+import { AssistantRunEventStore } from '../../src/assistant-core/run-event-store.js';
 import {
   handleListAssistantRuns,
   handleGetAssistantRun,
+  handleListAssistantRunEvents,
   handleResumeAssistantRun
 } from '../../src/routes/assistant-runs-route.js';
 
@@ -68,6 +70,58 @@ test('assistant run routes list and fetch persisted runs', async () => {
     singleton.list = list;
     singleton.get = get;
     singleton.listByConversationId = listByConversationId;
+  }
+});
+
+test('assistant run routes list persisted trace events', async () => {
+  const configDir = createTempDir('cligate-assistant-runs-events-route-');
+  const store = new AssistantRunStore({ configDir });
+  const eventStore = new AssistantRunEventStore({ configDir });
+  const run = store.create({
+    assistantSessionId: 'assistant-session-events',
+    conversationId: 'conversation-events',
+    triggerText: 'trace',
+    status: 'running'
+  });
+  eventStore.append(run.id, {
+    type: 'assistant.run.accepted',
+    phase: 'queue',
+    status: 'queued',
+    title: 'accepted',
+    summary: 'accepted run'
+  });
+  eventStore.append(run.id, {
+    type: 'assistant.tool.completed',
+    phase: 'tool',
+    status: 'completed',
+    title: 'read_file',
+    summary: 'read file done'
+  });
+
+  const singleton = (await import('../../src/assistant-core/run-store.js')).default;
+  const eventSingleton = (await import('../../src/assistant-core/run-event-store.js')).default;
+  const { get } = singleton;
+  const { list } = eventSingleton;
+  singleton.get = store.get.bind(store);
+  eventSingleton.list = eventStore.list.bind(eventStore);
+
+  try {
+    const res = mockRes();
+    handleListAssistantRunEvents({
+      params: { id: run.id },
+      query: { afterSeq: '1' }
+    }, res);
+    assert.equal(res._status, 200);
+    assert.equal(res._body.success, true);
+    assert.equal(res._body.events.length, 1);
+    assert.equal(res._body.events[0].type, 'assistant.tool.completed');
+
+    const missingRes = mockRes();
+    handleListAssistantRunEvents({ params: { id: 'missing' }, query: {} }, missingRes);
+    assert.equal(missingRes._status, 404);
+  } finally {
+    singleton.get = get;
+    eventSingleton.list = list;
   }
 });
 

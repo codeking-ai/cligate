@@ -99,14 +99,27 @@ export function convertResponsesOutputToAnthropicContent(output) {
         }
 
         if (item?.type === 'function_call') {
+            // tool_use arguments are emitted by the upstream as either a raw JSON
+            // string (function-call API) or as a pre-parsed object. When the model
+            // hits max_output_tokens the string is cut mid-JSON; instead of silently
+            // returning {} (which then crashes downstream tools that expect their
+            // required fields) we mark the block as truncated and keep the partial
+            // text. The ReAct engine inspects __truncated to escalate maxTokens and
+            // retry the turn rather than executing the broken tool call.
             let input = {};
+            let truncated = false;
+            let rawArguments = null;
 
-            try {
-                input = typeof item.arguments === 'string'
-                    ? JSON.parse(item.arguments)
-                    : item.arguments || {};
-            } catch {
-                input = {};
+            if (typeof item.arguments === 'string') {
+                rawArguments = item.arguments;
+                try {
+                    input = item.arguments.length > 0 ? JSON.parse(item.arguments) : {};
+                } catch {
+                    input = {};
+                    truncated = true;
+                }
+            } else if (item.arguments && typeof item.arguments === 'object') {
+                input = item.arguments;
             }
 
             const toolId = toAnthropicToolId(item.call_id || item.id);
@@ -116,6 +129,10 @@ export function convertResponsesOutputToAnthropicContent(output) {
                 name: item.name,
                 input
             };
+            if (truncated) {
+                toolUseBlock.__truncated = true;
+                toolUseBlock.__rawArguments = rawArguments;
+            }
 
             if (item.signature && item.signature.length >= MIN_SIGNATURE_LENGTH) {
                 toolUseBlock.thoughtSignature = item.signature;

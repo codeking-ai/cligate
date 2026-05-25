@@ -710,6 +710,89 @@ test('assistant mode message does not send direct chat model override', async ()
   });
 });
 
+test('chat page tracks assistant run trace events separately from chat content', () => {
+  const app = createHarness({
+    activeChatSessionId: 'chat-1',
+    chatSessions: [{
+      id: 'chat-1',
+      mode: 'assistant',
+      pendingAssistantRunId: 'run-1',
+      messages: [{
+        role: 'assistant',
+        kind: 'agent-status',
+        content: 'accepted',
+        assistantRunId: 'run-1'
+      }]
+    }]
+  });
+  app.chatMessages = [...app.chatSessions[0].messages];
+
+  app.applyAssistantRunTraceEvent({
+    runId: 'run-1',
+    seq: 1,
+    ts: '2026-05-25T10:00:00.000Z',
+    type: 'assistant.tool.completed',
+    phase: 'tool',
+    status: 'completed',
+    title: 'read_file',
+    summary: 'Read file done'
+  });
+
+  assert.equal(app.chatMessages.length, 1);
+  assert.equal(app.chatMessages[0].content, 'accepted');
+  assert.equal(app.chatMessages[0].traceEventCount, 1);
+  assert.equal(app.chatMessages[0].traceLatest.title, 'read_file');
+  assert.equal(app.assistantRunTraceEvents('run-1').length, 1);
+  assert.match(app.assistantRunTraceStatus('run-1'), /completed/);
+});
+
+test('chat page routes runtime execution events into a trace message', () => {
+  const app = createHarness({
+    activeChatSessionId: 'chat-1',
+    chatSessions: [{
+      id: 'chat-1',
+      mode: 'agent-runtime',
+      runtimeSessionId: 'runtime-1',
+      messages: []
+    }]
+  });
+  app.chatMessages = [];
+
+  app.applyAgentRuntimeEvent('chat-1', {
+    sessionId: 'runtime-1',
+    turnId: 'turn-1',
+    seq: 1,
+    ts: '2026-05-25T10:00:00.000Z',
+    type: 'worker.command',
+    payload: {
+      turnId: 'turn-1',
+      command: 'npm test',
+      output: 'ok',
+      status: 'completed',
+      exitCode: 0
+    }
+  });
+  app.applyAgentRuntimeEvent('chat-1', {
+    sessionId: 'runtime-1',
+    turnId: 'turn-1',
+    seq: 2,
+    ts: '2026-05-25T10:00:01.000Z',
+    type: 'worker.file_change',
+    payload: {
+      turnId: 'turn-1',
+      changes: ['src/app.js'],
+      status: 'completed'
+    }
+  });
+
+  assert.equal(app.chatMessages.length, 1);
+  assert.equal(app.chatMessages[0].kind, 'agent-trace');
+  assert.equal(app.chatMessages[0].runtimeTraceId, 'runtime:runtime-1:turn-1');
+  assert.equal(app.assistantRunTraceEvents('runtime:runtime-1:turn-1').length, 2);
+  assert.equal(app.assistantRunTraceEvents('runtime:runtime-1:turn-1')[0].type, 'runtime.command');
+  assert.equal(app.assistantRunTraceEvents('runtime:runtime-1:turn-1')[1].type, 'runtime.file_change');
+});
+
 test('assistant mode message can send image-only inputParts', async () => {
   const apiCalls = [];
   const app = createHarness({

@@ -30,7 +30,8 @@ export class AssistantDialogueService {
     executionMcpService = null,
     llmClient = assistantLlmClient,
     fallbackRunner = null,
-    messageService = null
+    messageService = null,
+    runEventStore = null
   } = {}) {
     this.runStore = runStore;
     this.observationService = observationService;
@@ -79,10 +80,12 @@ export class AssistantDialogueService {
     this.llmClient = llmClient instanceof AssistantLlmClient
       ? llmClient
       : llmClient;
+    this.runEventStore = runEventStore;
     this.reactEngine = new AssistantReactEngine({
       llmClient: this.llmClient,
       toolRegistry: this.toolRegistry,
-      toolExecutor: this.toolExecutor
+      toolExecutor: this.toolExecutor,
+      runEventStore: this.runEventStore
     });
     this.fallbackRunner = fallbackRunner || new AssistantRunner({
       runStore,
@@ -246,7 +249,7 @@ export class AssistantDialogueService {
         ],
         tools: [],
         model,
-        maxTokens: 1500
+        maxTokens: 4096
       });
       const text = String(completion?.text || '').trim();
       return text || null;

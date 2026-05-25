@@ -79,6 +79,8 @@ import {
 import {
   handleListAssistantRuns,
   handleGetAssistantRun,
+  handleListAssistantRunEvents,
+  handleStreamAssistantRunEvents,
   handleResumeAssistantRun
 } from './assistant-runs-route.js';
 import {
@@ -429,6 +431,8 @@ export function registerApiRoutes(app, { port }) {
   app.post('/api/assistant/clarifications/:id/cancel', handleCancelAssistantClarification);
   app.post('/api/assistant/workspaces/aliases', handleAddAssistantWorkspaceAlias);
   app.get('/api/assistant/runs', handleListAssistantRuns);
+  app.get('/api/assistant/runs/:id/events', handleListAssistantRunEvents);
+  app.get('/api/assistant/runs/:id/stream', handleStreamAssistantRunEvents);
   app.get('/api/assistant/runs/:id', handleGetAssistantRun);
   app.post('/api/assistant/runs/:id/resume', handleResumeAssistantRun);
   app.get('/api/assistant/persons/:id/dashboard', handleGetAssistantPersonDashboard);

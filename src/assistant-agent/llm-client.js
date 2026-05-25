@@ -108,6 +108,76 @@ function migrateLegacySourcesIfNeeded(config) {
   }
 }
 
+// Per-model max_tokens ceiling for supervisor turns. Picked to match each
+// model's published output cap; keeping these in sync with openclaw-config's
+// MODEL_METADATA is enough — supervisor only needs a sane upper bound so
+// long tool_use arguments (e.g. write_file with multi-KB script bodies)
+// don't get truncated mid-JSON. Anything not listed falls back to MAX_TOKENS_DEFAULT.
+const MAX_TOKENS_BY_MODEL = {
+  // Anthropic
+  'claude-opus-4-7': 32768,
+  'claude-opus-4-6': 32768,
+  'claude-opus-4-6-1m': 32768,
+  'claude-opus-4-5': 32768,
+  'claude-sonnet-4-6': 16384,
+  'claude-sonnet-4-6-1m': 16384,
+  'claude-sonnet-4-5': 16384,
+  'claude-haiku-4-5': 8192,
+  // OpenAI / Azure
+  'gpt-5.4': 16384,
+  'gpt-5.3-codex': 32768,
+  'gpt-5.2': 16384,
+  'gpt-5.2-codex': 32768,
+  'gpt-5.1-codex': 32768,
+  // Google
+  'gemini-2.5-pro': 8192,
+  'gemini-2.5-flash': 8192
+};
+const MAX_TOKENS_DEFAULT = 8192;
+const MAX_TOKENS_FLOOR = 4096;
+const MAX_TOKENS_HARD_CEIL = 65536;
+const LLM_TURN_TIMEOUT_MS = Number.parseInt(process.env.CLIGATE_ASSISTANT_TURN_TIMEOUT_MS, 10) || 180_000;
+
+export function resolveMaxTokensForModel(model = '', { override = null } = {}) {
+  // Caller-supplied override wins, then env, then per-model table, then default.
+  // All values are clamped into [MAX_TOKENS_FLOOR, MAX_TOKENS_HARD_CEIL].
+  const candidates = [];
+  if (Number.isFinite(override) && override > 0) {
+    candidates.push(override);
+  }
+  const envRaw = Number.parseInt(process.env.CLIGATE_ASSISTANT_MAX_TOKENS, 10);
+  if (Number.isFinite(envRaw) && envRaw > 0) {
+    candidates.push(envRaw);
+  }
+  const tableValue = MAX_TOKENS_BY_MODEL[String(model || '').trim()];
+  if (Number.isFinite(tableValue) && tableValue > 0) {
+    candidates.push(tableValue);
+  }
+  candidates.push(MAX_TOKENS_DEFAULT);
+  const picked = candidates.find((value) => Number.isFinite(value) && value > 0) || MAX_TOKENS_DEFAULT;
+  return Math.min(MAX_TOKENS_HARD_CEIL, Math.max(MAX_TOKENS_FLOOR, picked));
+}
+
+async function withTurnTimeout(promise, timeoutMs, label = 'assistant_llm_turn') {
+  // Wrap upstream provider call so a hung connection (e.g. Azure stalled mid-stream)
+  // can't freeze the whole ReAct loop. Throws a labeled error the caller can match
+  // on to emit a structured trace.
+  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) return promise;
+  let timer = null;
+  const timeout = new Promise((_resolve, reject) => {
+    timer = setTimeout(() => {
+      const err = new Error(`${label}_timeout_after_${timeoutMs}ms`);
+      err.code = 'ASSISTANT_LLM_TURN_TIMEOUT';
+      reject(err);
+    }, timeoutMs);
+  });
+  try {
+    return await Promise.race([promise, timeout]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 export class AssistantLlmClient {
   constructor({
     defaultChatGptModel = DEFAULT_CHATGPT_MODEL,
@@ -323,7 +393,13 @@ export class AssistantLlmClient {
     messages,
     tools = [],
     model = '',
-    maxTokens = 1200
+    // Pre-fix this was hard-coded to 1200, which silently truncated any
+    // tool_use whose arguments JSON was longer than ~1200 tokens (most write_file
+    // calls during a real skill workflow). Default is now undefined: resolve via
+    // resolveMaxTokensForModel(source.model) so the limit matches the model's
+    // own published cap. Callers can still pass an explicit number.
+    maxTokens = null,
+    turnTimeoutMs = LLM_TURN_TIMEOUT_MS
   } = {}) {
     const candidates = await this.listCandidateSources();
     if (candidates.length === 0) {
@@ -333,20 +409,28 @@ export class AssistantLlmClient {
 
     const failures = [];
     for (const source of candidates) {
+      const effectiveModel = source.model || model;
+      const effectiveMaxTokens = resolveMaxTokensForModel(effectiveModel, {
+        override: Number.isFinite(maxTokens) && maxTokens > 0 ? maxTokens : null
+      });
       try {
-        const response = await source.send({
-          system,
-          messages,
-          tools,
-          max_tokens: maxTokens,
-          model: source.model || model
-        });
+        const response = await withTurnTimeout(
+          source.send({
+            system,
+            messages,
+            tools,
+            max_tokens: effectiveMaxTokens,
+            model: effectiveModel
+          }),
+          turnTimeoutMs,
+          `assistant_llm_turn[${source.label || source.kind || 'unknown'}]`
+        );
         this._breaker.recordSuccess(source.tierKey);
         this._lastUsed = {
           descriptor: source.descriptor,
           kind: source.kind,
           label: source.label,
-          model: source.model || model,
+          model: effectiveModel,
           at: Date.now()
         };
         this._lastFallbackReason = '';
@@ -355,8 +439,9 @@ export class AssistantLlmClient {
           source: {
             kind: source.kind,
             label: source.label,
-            model: source.model || model,
-            descriptor: source.descriptor
+            model: effectiveModel,
+            descriptor: source.descriptor,
+            maxTokens: effectiveMaxTokens
           }
         };
       } catch (error) {

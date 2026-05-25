@@ -26,6 +26,7 @@ import { buildPendingRuntimeMarkerPatch } from './pending-runtime-state.js';
 import { bindConversationToRuntimeStart } from './conversation-runtime-binding.js';
 import assistantPendingActionStore from './pending-action-store.js';
 import { ensurePendingAssistantAction } from './pending-action-resolver.js';
+import assistantRunEventStore from './run-event-store.js';
 
 // CliGate Assistant mainline entry.
 // /cligate, assistant runs, async closure, and observability should converge on assistant-core + assistant-agent.
@@ -299,7 +300,8 @@ export class AssistantModeService {
     taskStore = null,
     supervisorTaskStore: supervisorTaskStoreArg = supervisorTaskStore,
     runner = null,
-    dialogueService = null
+    dialogueService = null,
+    runEventStore = assistantRunEventStore
   } = {}) {
     this.conversationStore = conversationStore;
     this.assistantSessionStore = assistantSessionStoreArg instanceof AssistantSessionStore
@@ -318,6 +320,7 @@ export class AssistantModeService {
       || this.observationService?.taskStore
       || agentTaskStore;
     this.supervisorTaskStore = supervisorTaskStoreArg;
+    this.runEventStore = runEventStore;
     this.runner = runner || new AssistantRunner({
       runStore: this.assistantRunStore,
       observationService: this.observationService,
@@ -330,7 +333,8 @@ export class AssistantModeService {
       taskViewService: this.taskViewService,
       messageService: this.messageService,
       enableBuiltinExecutionTools: true,
-      fallbackRunner: this.runner
+      fallbackRunner: this.runner,
+      runEventStore: this.runEventStore
     });
   }
 
@@ -684,6 +688,21 @@ export class AssistantModeService {
       }
     });
 
+    this.runEventStore?.append?.(failedRun.id, {
+      type: 'assistant.run.failed',
+      phase: 'finish',
+      status: ASSISTANT_RUN_STATUS.FAILED,
+      title: 'Assistant run failed',
+      summary: error?.message || 'Assistant run failed',
+      payload: {
+        conversationId: conversation?.id || failedRun.conversationId || '',
+        assistantSessionId: assistantSession?.id || failedRun.assistantSessionId || '',
+        triggerText: runText,
+        error: error?.message || 'Assistant run failed'
+      },
+      visibility: 'compact'
+    });
+
     this.assistantSessionStore.save({
       ...assistantSession,
       lastRunId: failedRun.id,
@@ -817,6 +836,21 @@ export class AssistantModeService {
             }
           : {})
       }
+    });
+
+    this.runEventStore?.append?.(run.id, {
+      type: 'assistant.run.accepted',
+      phase: 'queue',
+      status: ASSISTANT_RUN_STATUS.QUEUED,
+      title: 'Assistant run accepted',
+      summary: this.runAcceptedMessage(runText),
+      payload: {
+        conversationId: conversation.id,
+        assistantSessionId: assistantSession.id,
+        executionMode,
+        triggerText: runText
+      },
+      visibility: 'compact'
     });
 
     if (executionMode === 'async') {

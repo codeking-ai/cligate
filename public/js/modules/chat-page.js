@@ -37,6 +37,10 @@ export function createChatPageModule() {
     assistantAliasInput: '',
     chatRuntimeProvider: 'codex',
     chatRuntimeEventSource: null,
+    chatAssistantRunEventSource: null,
+    chatAssistantRunEvents: {},
+    chatAssistantRunLastSeq: {},
+    chatAssistantRunTraceOpen: {},
     chatLoading: false,
     chatSourceLoading: false,
     chatStreamController: null,
@@ -663,6 +667,9 @@ export function createChatPageModule() {
       if (session.mode === 'agent-runtime' && session.runtimeSessionId) {
         this.connectAgentRuntimeStream(session);
       }
+      if (session.pendingAssistantRunId) {
+        this.connectAssistantRunTraceStream(session.pendingAssistantRunId);
+      }
     },
 
     shouldStickChatToBottom(threshold = 96) {
@@ -689,6 +696,13 @@ export function createChatPageModule() {
       if (this.chatRuntimeEventSource) {
         this.chatRuntimeEventSource.close();
         this.chatRuntimeEventSource = null;
+      }
+    },
+
+    closeAssistantRunTraceStream() {
+      if (this.chatAssistantRunEventSource) {
+        this.chatAssistantRunEventSource.close();
+        this.chatAssistantRunEventSource = null;
       }
     },
 
@@ -726,6 +740,222 @@ export function createChatPageModule() {
           this.closeAgentRuntimeStream();
         }
       };
+    },
+
+    connectAssistantRunTraceStream(runId) {
+      const normalizedRunId = String(runId || '').trim();
+      if (!normalizedRunId) return;
+      this.closeAssistantRunTraceStream();
+      const afterSeq = Number(this.chatAssistantRunLastSeq?.[normalizedRunId] || 0);
+      const source = new EventSource(`/api/assistant/runs/${encodeURIComponent(normalizedRunId)}/stream?history=true&afterSeq=${afterSeq}`);
+      this.chatAssistantRunEventSource = source;
+
+      source.onmessage = (event) => {
+        let payload = null;
+        try {
+          payload = JSON.parse(event.data);
+        } catch {
+          return;
+        }
+        this.applyAssistantRunTraceEvent(payload);
+      };
+
+      source.onerror = () => {
+        const activeRunId = this.getActiveChatSession()?.pendingAssistantRunId || '';
+        if (!activeRunId || activeRunId !== normalizedRunId) {
+          this.closeAssistantRunTraceStream();
+        }
+      };
+    },
+
+    applyAssistantRunTraceEvent(event) {
+      const runId = String(event?.runId || '').trim();
+      if (!runId) return;
+      this.applyChatTraceEvent(runId, event);
+    },
+
+    applyChatTraceEvent(traceId, event) {
+      const runId = String(traceId || event?.runId || '').trim();
+      if (!runId) return;
+      const seq = Number(event.seq || 0);
+      const lastSeq = Number(this.chatAssistantRunLastSeq?.[runId] || 0);
+      if (seq && seq <= lastSeq) return;
+      this.chatAssistantRunLastSeq = {
+        ...(this.chatAssistantRunLastSeq || {}),
+        [runId]: seq || lastSeq
+      };
+      const existing = Array.isArray(this.chatAssistantRunEvents?.[runId])
+        ? this.chatAssistantRunEvents[runId]
+        : [];
+      this.chatAssistantRunEvents = {
+        ...(this.chatAssistantRunEvents || {}),
+        [runId]: [...existing, { ...event, runId }].slice(-300)
+      };
+      this.syncTraceToAssistantRunMessages(runId);
+    },
+
+    syncTraceToAssistantRunMessages(runId) {
+      const normalizedRunId = String(runId || '').trim();
+      if (!normalizedRunId) return;
+      const events = this.assistantRunTraceEvents(normalizedRunId);
+      const latest = events[events.length - 1] || null;
+      for (const session of this.chatSessions || []) {
+        let changed = false;
+        session.messages = (session.messages || []).map((message) => {
+          const messageTraceId = this.chatMessageTraceId(message);
+          if (messageTraceId !== normalizedRunId) {
+            return message;
+          }
+          changed = true;
+          return {
+            ...message,
+            traceEventCount: events.length,
+            traceLatest: latest,
+            traceOpen: this.isAssistantRunTraceOpen(normalizedRunId)
+          };
+        });
+        if (changed && session.id === this.activeChatSessionId) {
+          this.chatMessages = [...session.messages];
+        }
+      }
+    },
+
+    activeAssistantRunId() {
+      const session = this.getActiveChatSession ? this.getActiveChatSession() : null;
+      const pendingRunId = String(session?.pendingAssistantRunId || '').trim();
+      if (pendingRunId) return pendingRunId;
+      const messages = Array.isArray(session?.messages) ? session.messages : [];
+      const latest = [...messages].reverse().find((message) => String(message?.assistantRunId || '').trim());
+      return String(latest?.assistantRunId || '').trim();
+    },
+
+    chatMessageTraceId(message = {}) {
+      return String(message.assistantRunId || message.runtimeTraceId || '').trim();
+    },
+
+    assistantRunTraceEvents(runId) {
+      const normalizedRunId = String(runId || '').trim();
+      return Array.isArray(this.chatAssistantRunEvents?.[normalizedRunId])
+        ? this.chatAssistantRunEvents[normalizedRunId]
+        : [];
+    },
+
+    assistantRunTracePreview(runId) {
+      return this.assistantRunTraceEvents(runId)
+        .filter((event) => event?.visibility !== 'hidden')
+        .slice(-8);
+    },
+
+    isAssistantRunTraceOpen(runId) {
+      const normalizedRunId = String(runId || '').trim();
+      return this.chatAssistantRunTraceOpen?.[normalizedRunId] === true;
+    },
+
+    toggleAssistantRunTrace(runId) {
+      const normalizedRunId = String(runId || '').trim();
+      if (!normalizedRunId) return;
+      this.chatAssistantRunTraceOpen = {
+        ...(this.chatAssistantRunTraceOpen || {}),
+        [normalizedRunId]: !this.isAssistantRunTraceOpen(normalizedRunId)
+      };
+      this.syncTraceToAssistantRunMessages(normalizedRunId);
+      if (this.isAssistantRunTraceOpen(normalizedRunId) && !normalizedRunId.startsWith('runtime:')) {
+        this.connectAssistantRunTraceStream(normalizedRunId);
+      }
+    },
+
+    assistantRunTraceStatus(runId) {
+      const events = this.assistantRunTraceEvents(runId);
+      const latest = events[events.length - 1] || null;
+      if (!latest) return this.t('assistantTraceWaiting');
+      const title = latest.title || latest.summary || latest.type || '';
+      const status = latest.status || latest.phase || '';
+      return [status, title].filter(Boolean).join(' · ');
+    },
+
+    assistantRunTraceEventTitle(event) {
+      if (!event) return '';
+      return event.title || event.summary || event.type || '';
+    },
+
+    assistantRunTraceEventSummary(event) {
+      if (!event) return '';
+      const summary = String(event.summary || '').trim();
+      if (summary) return this.truncateTraceText(summary);
+      const payloadSummary = event.payload?.summary || event.payload?.text || '';
+      return this.truncateTraceText(String(payloadSummary || '').trim());
+    },
+
+    truncateTraceText(text, limit = 4000) {
+      const value = String(text || '');
+      if (value.length <= limit) return value;
+      const head = Math.floor(limit / 2);
+      const tail = limit - head;
+      return `${value.slice(0, head)}\n...[truncated ${value.length - limit} chars]...\n${value.slice(-tail)}`;
+    },
+
+    assistantRunTraceEventClass(event) {
+      const type = String(event?.type || '');
+      const status = String(event?.status || '');
+      if (type.includes('failed') || status === 'failed') return 'border-red-500/30 bg-red-500/5';
+      if (type.includes('command')) return 'border-amber-500/25 bg-amber-500/5';
+      if (type.includes('file')) return 'border-emerald-500/25 bg-emerald-500/5';
+      if (type.includes('tool')) return 'border-cyan-500/25 bg-cyan-500/5';
+      if (type.includes('runtime')) return 'border-violet-500/25 bg-violet-500/5';
+      if (type.includes('completed')) return 'border-emerald-500/25 bg-emerald-500/5';
+      return 'border-space-border/30 bg-space-950/40';
+    },
+
+    runtimeTraceId(session, event = {}) {
+      const sessionId = String(session?.runtimeSessionId || event?.sessionId || '').trim();
+      if (!sessionId) return '';
+      const turnId = String(event?.turnId || event?.payload?.turnId || '').trim();
+      return ['runtime', sessionId, turnId || 'active'].join(':');
+    },
+
+    ensureRuntimeTraceMessage(chatSessionId, traceId, event = {}) {
+      const session = this.chatSessions.find((item) => item.id === chatSessionId);
+      if (!session || !traceId) return;
+      const existing = (session.messages || []).some((message) => message.runtimeTraceId === traceId);
+      if (existing) return;
+      const payload = event.payload || {};
+      this.appendAgentRuntimeMessage(chatSessionId, {
+        kind: 'agent-trace',
+        content: this.t('agentRuntimeTraceStarted'),
+        runtimeTraceId: traceId,
+        runtimeSessionId: String(session.runtimeSessionId || event.sessionId || ''),
+        turnId: String(event.turnId || payload.turnId || ''),
+        traceEventCount: 0
+      });
+    },
+
+    appendRuntimeTraceEvent(chatSessionId, event, {
+      type = '',
+      phase = '',
+      status = '',
+      title = '',
+      summary = '',
+      payload = {},
+      visibility = 'detail'
+    } = {}) {
+      const session = this.chatSessions.find((item) => item.id === chatSessionId);
+      if (!session) return '';
+      const traceId = this.runtimeTraceId(session, event);
+      if (!traceId) return '';
+      this.ensureRuntimeTraceMessage(chatSessionId, traceId, event);
+      this.applyChatTraceEvent(traceId, {
+        runId: traceId,
+        seq: Number(event.seq || 0),
+        ts: event.ts || new Date().toISOString(),
+        type,
+        phase,
+        status,
+        title,
+        summary,
+        payload,
+        visibility
+      });
+      return traceId;
     },
 
     ensureAgentRuntimeSessionDefaults(session) {
@@ -775,6 +1005,9 @@ export function createChatPageModule() {
 
       if (run && terminal.includes(String(run.status || ''))) {
         session.pendingAssistantRunId = '';
+        if (this.chatAssistantRunEventSource) {
+          this.closeAssistantRunTraceStream();
+        }
         await this.refreshChatSessionFromServer(session.id);
         const mergedPersisted = Array.isArray(session.messages)
           && session.messages.some((message) => (
@@ -880,6 +1113,12 @@ export function createChatPageModule() {
       if (session.id === this.activeChatSessionId) {
         this.chatMessages = [...session.messages];
         this.scrollChatToBottom(true);
+      }
+      for (const message of sorted) {
+        if (message.assistantRunId) {
+          this.connectAssistantRunTraceStream(message.assistantRunId);
+          break;
+        }
       }
       return true;
     },
@@ -1059,29 +1298,84 @@ export function createChatPageModule() {
       const isForegroundSession = isActiveSession && this.activeTab === 'chat';
       if (event.type === 'worker.started') {
         session.runtimeStatus = 'running';
+        this.appendRuntimeTraceEvent(chatSessionId, event, {
+          type: 'runtime.started',
+          phase: 'runtime',
+          status: 'running',
+          title: this.t('agentRuntimeTraceStarted'),
+          summary: payload.provider ? `${payload.provider} runtime started.` : this.t('agentRuntimeTraceStarted'),
+          payload,
+          visibility: 'compact'
+        });
       } else if (event.type === 'worker.input') {
-        this.appendAgentRuntimeMessage(chatSessionId, { kind: 'agent-input', content: payload.text || '', turnNumber: payload.turnNumber || 0 });
+        this.appendRuntimeTraceEvent(chatSessionId, event, {
+          type: 'runtime.input',
+          phase: 'input',
+          status: 'completed',
+          title: this.t('agentRuntimeDispatch'),
+          summary: payload.text || '',
+          payload,
+          visibility: 'detail'
+        });
       } else if (event.type === 'worker.message') {
         this.appendAgentRuntimeMessage(chatSessionId, { content: payload.text || '', itemType: payload.itemType || 'assistant' });
       } else if (event.type === 'worker.command') {
-        this.appendAgentRuntimeMessage(chatSessionId, {
-          kind: 'agent-command',
-          content: payload.command || '',
-          commandOutput: payload.output || '',
-          commandStatus: payload.status || '',
-          exitCode: payload.exitCode,
-          commandOutputCollapsed: true
+        this.appendRuntimeTraceEvent(chatSessionId, event, {
+          type: 'runtime.command',
+          phase: 'command',
+          status: payload.status || '',
+          title: payload.command || this.t('agentRuntimeCommand'),
+          summary: payload.output || payload.command || '',
+          payload: {
+            command: payload.command || '',
+            output: payload.output || '',
+            exitCode: payload.exitCode,
+            status: payload.status || ''
+          },
+          visibility: 'detail'
         });
       } else if (event.type === 'worker.file_change') {
         const changes = Array.isArray(payload.changes) ? payload.changes : [];
-        this.appendAgentRuntimeMessage(chatSessionId, {
-          kind: 'agent-file-change',
-          content: changes.join('\n') || this.t('agentRuntimeFilesChanged'),
-          fileChangeStatus: payload.status || ''
+        this.appendRuntimeTraceEvent(chatSessionId, event, {
+          type: 'runtime.file_change',
+          phase: 'file',
+          status: payload.status || '',
+          title: this.t('agentRuntimeFilesChanged'),
+          summary: changes.join('\n') || this.t('agentRuntimeFilesChanged'),
+          payload: {
+            changes,
+            status: payload.status || ''
+          },
+          visibility: 'detail'
+        });
+      } else if (event.type === 'worker.progress') {
+        const title = payload.phase === 'todo_list'
+          ? this.t('agentRuntimeTraceTodo')
+          : (payload.phase || this.t('agentRuntimeTraceProgress'));
+        const summary = Array.isArray(payload.items)
+          ? payload.items.map((item) => item?.text || item?.title || String(item || '')).filter(Boolean).join('\n')
+          : (payload.text || payload.summary || '');
+        this.appendRuntimeTraceEvent(chatSessionId, event, {
+          type: 'runtime.progress',
+          phase: payload.phase || 'progress',
+          status: payload.status || 'running',
+          title,
+          summary,
+          payload,
+          visibility: payload.phase === 'reasoning' ? 'debug' : 'detail'
         });
       } else if (event.type === 'worker.question') {
         session.runtimeStatus = 'waiting_user';
         session.runtimePendingQuestion = payload;
+        this.appendRuntimeTraceEvent(chatSessionId, event, {
+          type: 'runtime.question',
+          phase: 'question',
+          status: 'waiting_user',
+          title: this.t('agentRuntimeQuestion'),
+          summary: payload.text || this.t('agentRuntimeQuestion'),
+          payload,
+          visibility: 'compact'
+        });
         if (!isForegroundSession) {
           session.runtimeUnread = true;
           this.showToast(this.t('agentRuntimeQuestionToast', this.chatSessionTitle(session)), 'warning');
@@ -1095,6 +1389,15 @@ export function createChatPageModule() {
       } else if (event.type === 'worker.approval_request') {
         session.runtimeStatus = 'waiting_approval';
         session.runtimePendingApprovals = [...session.runtimePendingApprovals, payload];
+        this.appendRuntimeTraceEvent(chatSessionId, event, {
+          type: 'runtime.approval_request',
+          phase: 'approval',
+          status: 'waiting_approval',
+          title: payload.title || this.t('agentRuntimeApproval'),
+          summary: payload.summary || '',
+          payload,
+          visibility: 'compact'
+        });
         if (!isForegroundSession) {
           session.runtimeUnread = true;
           this.showToast(this.t('agentRuntimeApprovalToast', this.chatSessionTitle(session)), 'warning');
@@ -1112,6 +1415,15 @@ export function createChatPageModule() {
         session.runtimeStatus = session.runtimePendingApprovals.length > 0
           ? 'waiting_approval'
           : (session.runtimePendingQuestion ? 'waiting_user' : 'running');
+        this.appendRuntimeTraceEvent(chatSessionId, event, {
+          type: 'runtime.approval_resolved',
+          phase: 'approval',
+          status: 'completed',
+          title: this.t('agentRuntimeApproval'),
+          summary: payload.decision || 'resolved',
+          payload,
+          visibility: 'detail'
+        });
         this.updateAgentRuntimeMessage(
           chatSessionId,
           (message) => message.kind === 'agent-approval' && message.approvalId === approvalId,
@@ -1124,6 +1436,15 @@ export function createChatPageModule() {
         session.runtimeStatus = 'ready';
         session.runtimePendingQuestion = null;
         session.runtimePendingApprovals = [];
+        this.appendRuntimeTraceEvent(chatSessionId, event, {
+          type: 'runtime.completed',
+          phase: 'finish',
+          status: 'completed',
+          title: this.t('agentRuntimeCompleted'),
+          summary: payload.summary || payload.result || this.t('agentRuntimeCompleted'),
+          payload,
+          visibility: 'compact'
+        });
         if (!isForegroundSession) {
           session.runtimeUnread = true;
           this.showToast(this.t('agentRuntimeCompletedToast', this.chatSessionTitle(session)), 'success');
@@ -1131,9 +1452,17 @@ export function createChatPageModule() {
         if (isActiveSession) {
           this.closeAgentRuntimeStream();
         }
-        this.appendAgentRuntimeMessage(chatSessionId, { kind: 'agent-status', content: this.t('agentRuntimeCompleted') });
       } else if (event.type === 'worker.failed') {
         session.runtimeStatus = 'failed';
+        this.appendRuntimeTraceEvent(chatSessionId, event, {
+          type: 'runtime.failed',
+          phase: 'finish',
+          status: 'failed',
+          title: this.t('requestFailed'),
+          summary: payload.message || this.t('requestFailed'),
+          payload,
+          visibility: 'compact'
+        });
         if (!isForegroundSession) {
           session.runtimeUnread = true;
           this.showToast(this.t('agentRuntimeFailedToast', this.chatSessionTitle(session)), 'error');
@@ -1204,6 +1533,7 @@ export function createChatPageModule() {
       if (index < 0) return;
       if (this.activeChatSessionId === sessionId) {
         this.closeAgentRuntimeStream();
+        this.closeAssistantRunTraceStream();
       }
       this.chatSessions.splice(index, 1);
       if (this.activeChatSessionId === sessionId) {
@@ -1407,6 +1737,7 @@ export function createChatPageModule() {
 
         if (result.type === 'assistant_run_accepted' && result.assistantRun?.id) {
           session.pendingAssistantRunId = result.assistantRun.id;
+          this.connectAssistantRunTraceStream(result.assistantRun.id);
           this.appendAgentRuntimeMessage(session.id, {
             kind: 'agent-status',
             content: result.message || '',
@@ -1557,6 +1888,7 @@ export function createChatPageModule() {
 
         if (result.type === 'assistant_run_accepted' && result.assistantRun?.id) {
           session.pendingAssistantRunId = result.assistantRun.id;
+          this.connectAssistantRunTraceStream(result.assistantRun.id);
           this.appendAgentRuntimeMessage(session.id, {
             kind: 'agent-status',
             content: result.message || '',

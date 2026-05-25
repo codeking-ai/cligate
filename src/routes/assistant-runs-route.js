@@ -1,4 +1,5 @@
 import assistantRunStore from '../assistant-core/run-store.js';
+import assistantRunEventStore from '../assistant-core/run-event-store.js';
 import AssistantRunner from '../assistant-core/runner.js';
 
 function parseLimit(value, fallback = 20, max = 200) {
@@ -34,6 +35,68 @@ export function handleGetAssistantRun(req, res) {
   return res.json({
     success: true,
     run
+  });
+}
+
+function prepareSse(res) {
+  res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+  res.setHeader('Cache-Control', 'no-cache, no-transform');
+  res.setHeader('Connection', 'keep-alive');
+  res.flushHeaders?.();
+}
+
+function writeSse(res, payload) {
+  res.write(`data: ${JSON.stringify(payload)}\n\n`);
+}
+
+export function handleListAssistantRunEvents(req, res) {
+  const runId = String(req.params.id || '');
+  const run = assistantRunStore.get(runId);
+  if (!run) {
+    return res.status(404).json({
+      success: false,
+      error: 'assistant run not found'
+    });
+  }
+
+  return res.json({
+    success: true,
+    events: assistantRunEventStore.list(runId, {
+      afterSeq: Number.parseInt(String(req.query.afterSeq || '0'), 10) || 0,
+      limit: parseLimit(req.query.limit, 200, 1000)
+    })
+  });
+}
+
+export function handleStreamAssistantRunEvents(req, res) {
+  const runId = String(req.params.id || '');
+  const run = assistantRunStore.get(runId);
+  if (!run) {
+    return res.status(404).json({
+      success: false,
+      error: 'assistant run not found'
+    });
+  }
+
+  prepareSse(res);
+
+  if (req.query.history !== 'false') {
+    const events = assistantRunEventStore.list(runId, {
+      afterSeq: Number.parseInt(String(req.query.afterSeq || '0'), 10) || 0,
+      limit: parseLimit(req.query.limit, 200, 1000)
+    });
+    for (const event of events) {
+      writeSse(res, event);
+    }
+  }
+
+  const unsubscribe = assistantRunEventStore.subscribe(runId, (event) => {
+    writeSse(res, event);
+  });
+
+  req.on('close', () => {
+    unsubscribe();
+    res.end();
   });
 }
 
@@ -83,5 +146,7 @@ export async function handleResumeAssistantRun(req, res) {
 export default {
   handleListAssistantRuns,
   handleGetAssistantRun,
+  handleListAssistantRunEvents,
+  handleStreamAssistantRunEvents,
   handleResumeAssistantRun
 };

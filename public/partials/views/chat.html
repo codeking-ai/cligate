@@ -218,6 +218,7 @@
                                             </template>
                                             <span class="text-[10px] font-mono text-gray-500" x-show="message.mappedModel" x-text="message.mappedModel"></span>
                                             <span class="text-[10px] font-mono text-violet-300" x-show="message.kind === 'agent-input'" x-text="t('agentRuntimeDispatch')"></span>
+                                            <span class="text-[10px] font-mono text-violet-300" x-show="message.kind === 'agent-trace'" x-text="t('assistantTraceTitle')"></span>
                                             <span class="text-[10px] font-mono text-gray-500" x-show="message.kind === 'agent-command'" x-text="t('agentRuntimeCommand')"></span>
                                             <span class="text-[10px] font-mono text-gray-500" x-show="message.kind === 'agent-file-change'" x-text="t('agentRuntimeFilesChanged')"></span>
                                         </div>
@@ -245,6 +246,44 @@
                                             <pre class="chat-command-output-body whitespace-pre-wrap break-words text-xs font-mono text-gray-300 mt-2"
                                                 x-show="!message.commandOutputCollapsed"
                                                 x-text="message.commandOutput"></pre>
+                                        </div>
+                                        <div class="chat-message-detail mt-3 rounded-xl border border-space-border/30 bg-space-950/50 p-3"
+                                            x-show="chatMessageTraceId(message)">
+                                            <button type="button"
+                                                class="w-full flex items-center justify-between gap-3 text-left"
+                                                @click="toggleAssistantRunTrace(chatMessageTraceId(message))">
+                                                <div class="min-w-0">
+                                                    <div class="text-[10px] font-mono uppercase tracking-wider text-gray-500" x-text="t('assistantTraceTitle')"></div>
+                                                    <div class="mt-1 text-xs text-gray-300 truncate" x-text="assistantRunTraceStatus(chatMessageTraceId(message))"></div>
+                                                </div>
+                                                <div class="flex items-center gap-2 shrink-0">
+                                                    <span class="text-[10px] font-mono text-gray-500"
+                                                        x-text="assistantRunTraceEvents(chatMessageTraceId(message)).length + ' ' + t('assistantTraceSteps')"></span>
+                                                    <span class="text-[11px] font-mono text-gray-400"
+                                                        x-text="isAssistantRunTraceOpen(chatMessageTraceId(message)) ? '▼' : '▶'"></span>
+                                                </div>
+                                            </button>
+                                            <div class="mt-3 space-y-2" x-show="isAssistantRunTraceOpen(chatMessageTraceId(message))" x-transition>
+                                                <template x-if="assistantRunTraceEvents(chatMessageTraceId(message)).length === 0">
+                                                    <div class="text-xs font-mono text-gray-500" x-text="t('assistantTraceEmpty')"></div>
+                                                </template>
+                                                <template x-for="event in assistantRunTracePreview(chatMessageTraceId(message))" :key="event.runId + ':' + event.seq">
+                                                    <div class="rounded-lg border px-3 py-2"
+                                                        :class="assistantRunTraceEventClass(event)">
+                                                        <div class="flex items-start justify-between gap-3">
+                                                            <div class="min-w-0">
+                                                                <div class="text-xs text-gray-100 truncate" x-text="assistantRunTraceEventTitle(event)"></div>
+                                                                <div class="mt-1 text-[10px] font-mono text-gray-500 truncate"
+                                                                    x-text="[event.phase, event.status, event.type].filter(Boolean).join(' · ')"></div>
+                                                            </div>
+                                                            <span class="text-[10px] font-mono text-gray-500 shrink-0" x-text="formatRelativeTime(event.ts)"></span>
+                                                        </div>
+                                                        <div class="mt-2 text-xs text-gray-300 whitespace-pre-wrap break-words"
+                                                            x-show="assistantRunTraceEventSummary(event)"
+                                                            x-text="assistantRunTraceEventSummary(event)"></div>
+                                                    </div>
+                                                </template>
+                                            </div>
                                         </div>
                                         <div class="chat-message-callout chat-message-callout-question mt-3 rounded-xl border border-cyan-500/30 bg-cyan-500/10 p-3" x-show="message.kind === 'agent-question'">
                                             <div class="text-[10px] font-mono uppercase tracking-wider text-cyan-300 mb-2" x-text="t('agentRuntimeQuestion')"></div>

@@ -493,3 +493,97 @@ test('runAssistantToolLoop stops on denial when requested', async () => {
   assert.equal(loopResult.results.length, 2);
   assert.equal(loopResult.results[1].result.status, 'denied');
 });
+
+test('AssistantToolsExecutor refuses tool_use with missing required fields and never reaches the handler', async () => {
+  // Regression guard for the pptx-skill run where the supervisor's write_file
+  // tool_use arrived with input={} because Azure GPT-5.4 truncated the
+  // arguments JSON. The handler then tried mkdir('D:\\') and the LLM concluded
+  // it was a permissions bug. The executor must catch this before the handler
+  // ever runs.
+  const registry = new AssistantToolsRegistry();
+  let handlerInvoked = false;
+  registry.register({
+    name: 'write_file',
+    description: 'write file',
+    mutating: true,
+    requiresApproval: false,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        path: { type: 'string' },
+        content: { type: 'string' }
+      },
+      required: ['path', 'content']
+    },
+    execute: async () => {
+      handlerInvoked = true;
+      return { ok: true };
+    }
+  });
+
+  const executor = new AssistantToolsExecutor({
+    toolRegistry: registry,
+    policyService: {
+      evaluateToolCall: () => ({
+        allowed: true,
+        requiresApproval: false,
+        reason: null,
+        grantedPermissions: { read: [], write: [] },
+        autoApproved: true
+      })
+    }
+  });
+
+  const result = await executor.executeToolCall({
+    toolName: 'write_file',
+    input: {}
+  }, { cwd: 'D:/' });
+
+  assert.equal(result.status, 'failed');
+  assert.equal(result.structured?.kind, 'invalid_input');
+  assert.equal(result.structured?.reason, 'tool_arguments_missing_required');
+  assert.deepEqual(result.structured?.missing, ['path', 'content']);
+  assert.equal(handlerInvoked, false, 'handler must not run when required fields are missing');
+});
+
+test('AssistantToolsExecutor treats __truncated input as a recoverable failure', async () => {
+  const registry = new AssistantToolsRegistry();
+  let handlerInvoked = false;
+  registry.register({
+    name: 'write_file',
+    description: 'write file',
+    mutating: true,
+    inputSchema: {
+      type: 'object',
+      properties: { path: { type: 'string' }, content: { type: 'string' } },
+      required: ['path', 'content']
+    },
+    execute: async () => {
+      handlerInvoked = true;
+      return { ok: true };
+    }
+  });
+
+  const executor = new AssistantToolsExecutor({
+    toolRegistry: registry,
+    policyService: {
+      evaluateToolCall: () => ({
+        allowed: true,
+        requiresApproval: false,
+        reason: null,
+        grantedPermissions: { read: [], write: [] }
+      })
+    }
+  });
+
+  const result = await executor.executeToolCall({
+    toolName: 'write_file',
+    input: { __truncated: true, path: 'a.txt' }
+  }, { cwd: 'D:/' });
+
+  assert.equal(result.status, 'failed');
+  assert.equal(result.structured?.kind, 'invalid_input');
+  assert.equal(result.structured?.reason, 'tool_arguments_truncated');
+  assert.equal(result.structured?.truncated, true);
+  assert.equal(handlerInvoked, false);
+});

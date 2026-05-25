@@ -61,6 +61,17 @@ function collectPolicyBlockContext(toolResults = []) {
   return null;
 }
 
+function extractLlmFailureMessage(stopReason = '') {
+  // Stop policy formats LLM failures as `assistant_llm_failed: <message>`. Pull
+  // the message back out so the user-facing reply can show what actually broke
+  // (timeout, no available supervisor tier, upstream 4xx) instead of a generic
+  // "request handled" fallback.
+  const text = String(stopReason || '');
+  if (!text.startsWith('assistant_llm_failed')) return '';
+  const idx = text.indexOf(':');
+  return idx >= 0 ? text.slice(idx + 1).trim() : '';
+}
+
 export function composeAssistantReply({
   language = 'en',
   assistantText = '',
@@ -70,6 +81,32 @@ export function composeAssistantReply({
 } = {}) {
   const text = String(assistantText || '').trim();
   const policyBlock = collectPolicyBlockContext(toolResults);
+
+  // Supervisor LLM hard-failed (all tiers errored / turn timed out). Surface
+  // the concrete reason so the user can act, rather than letting the composer
+  // fall through to "I have handled this request" — that silent-success path
+  // was the original misleading symptom of the pptx-skill stall.
+  if (finalStatus === 'failed' && extractLlmFailureMessage(stopReason)) {
+    const detail = extractLlmFailureMessage(stopReason);
+    if (language === 'zh-CN') {
+      return {
+        message: [
+          '助手 LLM 这一轮失败了，没有进入工具执行阶段。',
+          detail ? `失败原因：${truncate(detail, 240)}` : '',
+          '你可以让我再试一次，或者把任务拆得更小一点。'
+        ].filter(Boolean).join('\n\n'),
+        summary: 'LLM 调用失败'
+      };
+    }
+    return {
+      message: [
+        'The assistant LLM call failed before any tool ran.',
+        detail ? `Reason: ${truncate(detail, 240)}` : '',
+        'Ask me to retry or break the task into smaller steps.'
+      ].filter(Boolean).join('\n\n'),
+      summary: 'Assistant LLM call failed'
+    };
+  }
   if (stopReason === 'assistant_confirmation_required' && policyBlock) {
     if (language === 'zh-CN') {
       const detail = policyBlock.requestedPath
