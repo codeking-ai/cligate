@@ -35,6 +35,10 @@ export class AssistantDesktopClient {
     return this.service.findAllControls(input);
   }
 
+  async inspectWindow(input = {}) {
+    return this.service.inspectWindow(input);
+  }
+
   async actOnControl(input = {}) {
     return this.service.actOnControl(input);
   }
@@ -57,6 +61,14 @@ export class AssistantDesktopClient {
 
   async clickAt(input = {}) {
     return this.service.clickAt(input);
+  }
+
+  async clickText(input = {}) {
+    return this.service.clickText(input);
+  }
+
+  async fillTextField(input = {}) {
+    return this.service.fillTextField(input);
   }
 
   async moveMouse(input = {}) {

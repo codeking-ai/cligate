@@ -13,7 +13,10 @@ import createDesktopLaunchAppToolDefinition from './desktop-launch-app.js';
 import createDesktopFocusWindowToolDefinition from './desktop-focus-window.js';
 import createDesktopFindControlToolDefinition from './desktop-find-control.js';
 import createDesktopFindAllControlsToolDefinition from './desktop-find-all-controls.js';
+import createDesktopInspectWindowToolDefinition from './desktop-inspect-window.js';
 import createDesktopClickControlToolDefinition from './desktop-click-control.js';
+import createDesktopClickTextToolDefinition from './desktop-click-text.js';
+import createDesktopFillTextFieldToolDefinition from './desktop-fill-text-field.js';
 import createDesktopSetControlValueToolDefinition from './desktop-set-control-value.js';
 import createDesktopSendControlKeysToolDefinition from './desktop-send-control-keys.js';
 import createDesktopGetControlTextToolDefinition from './desktop-get-control-text.js';
@@ -113,7 +116,10 @@ export function createBuiltinAssistantToolDefinitions({ workspaceGuard, mcpServi
     createDesktopFocusWindowToolDefinition({ handlers }),
     createDesktopFindControlToolDefinition({ handlers }),
     createDesktopFindAllControlsToolDefinition({ handlers }),
+    createDesktopInspectWindowToolDefinition({ handlers }),
     createDesktopClickControlToolDefinition({ handlers }),
+    createDesktopClickTextToolDefinition({ handlers }),
+    createDesktopFillTextFieldToolDefinition({ handlers }),
     createDesktopSetControlValueToolDefinition({ handlers }),
     createDesktopSendControlKeysToolDefinition({ handlers }),
     createDesktopGetControlTextToolDefinition({ handlers }),

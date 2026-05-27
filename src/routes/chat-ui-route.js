@@ -248,8 +248,146 @@ function clearConversationPendingActionState(conversation = null) {
   }) || conversation;
 }
 
+// After the user approves a pending assistant confirmation and we have actually
+// executed the underlying tool, the originating assistant run is still stored
+// as status="waiting_user" with stopPolicy.reason="assistant_confirmation_required".
+// pending-action-resolver.js uses that status as the source of truth for "is
+// there still a pending confirmation?", so on the next routeMessage call it
+// rebuilds a fresh pending action from the same run and the user gets a SECOND
+// "等待确认 / awaiting your confirmation" message even though they just approved.
+// Mark the run resolved here so isAssistantConfirmationRun() returns false and
+// the loop breaks. Also surface a more accurate lastRunSummary so the UI does
+// not keep echoing "等待确认" after the user already acted on it.
+function markAssistantRunConfirmationResolved(conversation = null, action = {}, toolResult = null) {
+  const runId = String(action?.assistantRunId || '').trim();
+  if (runId) {
+    const run = assistantRunStore.get(runId);
+    if (run
+      && String(run?.status || '') === 'waiting_user'
+      && String(run?.metadata?.stopPolicy?.reason || '') === 'assistant_confirmation_required'
+    ) {
+      const toolText = String(
+        toolResult?.message
+          || toolResult?.toolResult?.content?.[0]?.text
+          || toolResult?.assistantRun?.summary
+          || ''
+      ).trim();
+      assistantRunStore.save({
+        ...run,
+        status: 'completed',
+        metadata: {
+          ...(run.metadata || {}),
+          stopPolicy: {
+            ...((run?.metadata?.stopPolicy && typeof run.metadata.stopPolicy === 'object')
+              ? run.metadata.stopPolicy
+              : {}),
+            status: 'completed',
+            closure: 'assistant_confirmation_resolved',
+            reason: 'assistant_confirmation_resolved'
+          },
+          confirmationResolution: {
+            resolvedAt: new Date().toISOString(),
+            decision: 'approve',
+            toolName: String(action?.toolName || '').trim(),
+            toolResultPreview: toolText.slice(0, 800)
+          }
+        }
+      });
+    }
+  }
+
+  if (conversation?.id) {
+    const ac = (conversation?.metadata?.assistantCore && typeof conversation.metadata.assistantCore === 'object')
+      ? conversation.metadata.assistantCore
+      : {};
+    const summary = String(toolResult?.message || '').trim()
+      || `已批准并执行 ${String(action?.toolName || '').trim() || '操作'}`;
+    chatUiConversationStore.patch(conversation.id, {
+      metadata: {
+        ...(conversation.metadata || {}),
+        assistantCore: {
+          ...ac,
+          lastRunSummary: summary,
+          lastRunResolvedAt: new Date().toISOString()
+        }
+      }
+    });
+  }
+}
+
 function resolveDefaultChatUiWorkspaceRoot() {
   return String(process.env.CLIGATE_DEFAULT_CHAT_UI_WORKSPACE || 'D:\\').trim() || process.cwd();
+}
+
+// Build the supervisor-facing continuation prompt that we feed back to the
+// assistant after a pending tool call has been approved and actually run.
+// The supervisor model already sees the conversation history (including the
+// original user request and the prior tool turns), so this prompt is short and
+// focused on three things: (a) tell the model that THIS specific tool call is
+// done and what really happened (so it doesn't keep treating it as pending),
+// (b) re-anchor on the user's original multi-step goal, (c) suppress the
+// reflex to ask for the same approval again.
+function buildAssistantContinuationPrompt(action, routeResult) {
+  const toolName = String(action?.toolName || '').trim() || 'tool';
+  const structured = routeResult?.toolResult?.structured || {};
+  const exitCode = structured?.exitCode;
+  const stdout = String(structured?.stdout || '').trim().slice(0, 800);
+  const stderr = String(structured?.stderr || '').trim().slice(0, 800);
+  const success = structured?.success !== false
+    && (typeof exitCode !== 'number' || exitCode === 0);
+  const target = String(
+    action?.metadata?.requestedPath
+      || action?.input?.cwd
+      || action?.input?.path
+      || ''
+  ).trim();
+
+  const lines = [
+    '[Assistant continuation — system auto-message, not from the user]',
+    `Your previous tool call \`${toolName}\` was approved by the user and has just been executed for real. Use this real result and continue the user's ORIGINAL multi-step task. Do not request approval for the same step again.`,
+    '',
+    'Real execution result:',
+    `  - outcome: ${success ? 'success' : 'failure'}`
+  ];
+  if (typeof exitCode === 'number') lines.push(`  - exitCode: ${exitCode}`);
+  if (stdout) lines.push(`  - stdout: ${stdout}`);
+  if (stderr) lines.push(`  - stderr: ${stderr}`);
+  if (target) lines.push(`  - target: ${target}`);
+  lines.push(
+    '',
+    'Re-read the conversation history to recover the user\'s original goal, pick the next concrete step, and call the appropriate tool (desktop_*, run_shell_command, write_file, etc.). If the original goal is already satisfied, send a brief final reply summarising what was done. Do not stop and ask the user again unless a genuinely new approval is required.'
+  );
+  return lines.join('\n');
+}
+
+// After a user-approved execution tool has actually run, fire off a fresh
+// supervisor turn in async mode so the assistant continues the user's
+// multi-step task instead of stalling on "Tool completed". This is the
+// difference between approving step 1 of "open browser → search → download
+// → install" and the assistant stopping vs. it keeping going through steps
+// 2-4 automatically. Returns immediately; the new run produces its replies
+// through the standard onBackgroundResult → uiChatMessages pipeline that
+// handleRouteChatAgentMessage already wires up.
+function spawnAssistantContinuationAfterConfirmation({ conversation, action, routeResult }) {
+  const sessionId = String(conversation?.externalConversationId || '').trim();
+  if (!sessionId) return null;
+  const text = buildAssistantContinuationPrompt(action, routeResult);
+  const subReq = {
+    body: {
+      sessionId,
+      input: text,
+      provider: 'codex',
+      cwd: String(action?.input?.cwd || action?.metadata?.requestedPath || '').trim(),
+      model: ''
+    }
+  };
+  const subRes = {
+    _status: 200,
+    _body: null,
+    status(code) { this._status = code; return this; },
+    json(payload) { this._body = payload; return this; }
+  };
+  return handleRouteChatAgentMessage(subReq, subRes).catch(() => null);
 }
 
 function normalizeChatAgentInputParts(inputParts = []) {
@@ -1245,6 +1383,20 @@ export async function handleConfirmAssistantToolAction(req, res) {
       try {
         const routeResult = await executeConfirmedExecutionToolAction(assistantPendingAction, { conversation });
         clearConversationPendingActionState(conversation);
+        markAssistantRunConfirmationResolved(conversation, assistantPendingAction, routeResult);
+        // Treat approval as "user said yes, keep going" instead of stopping at
+        // a single tool execution. Spawn a fresh async assistant run that
+        // feeds the real tool result back into the supervisor LLM so it
+        // continues the user's original multi-step task (open browser →
+        // search → download → install, etc.) on its own.
+        const continuationConversation = conversation?.id
+          ? (chatUiConversationStore.get(conversation.id) || conversation)
+          : conversation;
+        spawnAssistantContinuationAfterConfirmation({
+          conversation: continuationConversation,
+          action: assistantPendingAction,
+          routeResult
+        });
         return res.json({
           success: true,
           result: routeResult?.message || `Confirmed and executed ${assistantPendingAction.toolName}.`,

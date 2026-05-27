@@ -26,7 +26,8 @@ export function createDesktopWaitChangeToolDefinition({ handlers }) {
           default: 2.0,
           description: 'Mean absolute per-pixel grayscale difference (0-255) above which the region is considered changed.'
         },
-        leaseId: { type: 'string' }
+        leaseId: { type: 'string' },
+        sessionId: { type: 'string' }
       }
     },
     outputSchema: { type: 'object' },

@@ -25,7 +25,9 @@ export function createDesktopInspectWindowToolDefinition({ handlers }) {
         maxMarks: { type: 'integer', minimum: 1, maximum: 200, description: 'Cap on annotated controls (default 50). Raise if the editor has many fields.' },
         maxDepth: { type: 'integer', minimum: 1, maximum: 64, description: 'UIA tree depth to walk (default 24). Raise for very deep Chrome/Electron trees.' },
         previewWidth: { type: 'integer', minimum: 64, maximum: 4096, description: 'Pixel width of the preview image returned to the LLM (default 1280). Smaller → less context tokens; larger → easier to read mark numbers.' },
-        timeoutMs: { type: 'integer', minimum: 1, maximum: 120000 }
+        timeoutMs: { type: 'integer', minimum: 1, maximum: 120000 },
+        leaseId: { type: 'string' },
+        sessionId: { type: 'string' }
       }
     },
     outputSchema: { type: 'object' },

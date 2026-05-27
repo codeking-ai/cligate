@@ -800,6 +800,9 @@ test('Assistant ReAct prompt includes task-space-first context', async () => {
   assert.match(String(service.llmClient.calls[0]?.system || ''), /assistantExecutionId|assistantProjectId|Project\/Task\/Execution/);
   assert.match(String(service.llmClient.calls[0]?.system || ''), /check Shenzhen weather.*check Shanghai weather|查深圳天气.*再查上海天气/);
   assert.match(String(service.llmClient.calls[0]?.system || ''), /parameter swaps, entity swaps, and object swaps within the same workflow|参数替换、实体替换、对象替换通常仍然属于自然延续/);
+  assert.match(String(service.llmClient.calls[0]?.system || ''), /desktop_fill_text_field|desktop_inspect_window|desktop_click_text/);
+  assert.match(String(service.llmClient.calls[0]?.system || ''), /desktop_click_at.*only when|desktop_capture_window.*desktop_click_at|只有在以上路径都不可用时/);
+  assert.match(String(service.llmClient.calls[0]?.system || ''), /moved=false|wait_change.changed=false|skipped_due_to_cursor=true/);
 });
 
 test('AssistantLlmClient returns no candidates when no supervisor binding is configured (no silent emergency fallback)', async () => {

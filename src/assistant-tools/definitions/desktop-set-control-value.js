@@ -1,7 +1,7 @@
 export function createDesktopSetControlValueToolDefinition({ handlers }) {
   return {
     name: 'desktop_set_control_value',
-    description: 'Set the value of a matched input control (text box, search field) via UIA ValuePattern — replaces existing content. Prefer this over typing keystrokes because it does not depend on focus, clipboard, or IME state. Use the same window/control selectors as desktop_find_control. To trigger submission afterwards, follow with desktop_send_control_keys keys="{Enter}".',
+    description: 'Set the value of a matched input control (text box, search field) via UIA ValuePattern — replaces existing content. Prefer this over typing keystrokes because it does not depend on focus, clipboard, or IME state. If you want the full workflow with read-back verification, prefer desktop_fill_text_field. Use the same window/control selectors as desktop_find_control. To trigger submission afterwards, follow with desktop_send_control_keys keys="{Enter}".',
     inputSchema: {
       type: 'object',
       properties: {

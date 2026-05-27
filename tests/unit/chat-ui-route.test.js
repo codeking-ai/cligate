@@ -205,6 +205,268 @@ test('handleConfirmAssistantToolAction replays write_file pending actions using 
   }
 });
 
+test('handleConfirmAssistantToolAction spawns a fresh assistant continuation run carrying the real tool result so the supervisor can finish the original multi-step task', async () => {
+  // Regression: approving step 1 of "open browser → search → download → install"
+  // used to stop at "Tool completed" because the approval handler only ran one
+  // tool and never spawned a new ReAct turn. Verify that approving an execution
+  // tool now fires a fresh async assistant run, that the run prompt carries the
+  // REAL execution outcome (so the supervisor LLM doesn't think the tool is
+  // still pending), and that the prompt resists the model's instinct to ask
+  // for the same approval again.
+  const conversationId = 'conversation-continuation-1';
+  const externalConversationId = 'chat-session-continuation-1';
+  const assistantRunId = 'run-continuation-1';
+  const workspaceRoot = process.cwd();
+  const command = process.platform === 'win32'
+    ? 'echo continuation-mkdir'
+    : 'printf continuation-mkdir';
+
+  const conversation = {
+    id: conversationId,
+    externalConversationId,
+    metadata: {
+      assistantCore: {
+        lastRunId: assistantRunId,
+        pendingActionConfirmToken: ''
+      },
+      uiChatMessages: []
+    }
+  };
+
+  const originalGet = chatUiConversationStore.get;
+  const originalGetBySessionId = chatUiConversationStore.getBySessionId;
+  const originalFindOrCreateBySessionId = chatUiConversationStore.findOrCreateBySessionId;
+  const originalPatch = chatUiConversationStore.patch;
+  const originalRunGet = assistantRunStore.get;
+  const originalRunSave = assistantRunStore.save;
+  const originalRouteMessage = chatUiConversationService.routeMessage;
+
+  chatUiConversationStore.get = (id) => (id === conversationId ? conversation : null);
+  chatUiConversationStore.getBySessionId = (id) => (id === externalConversationId ? conversation : null);
+  chatUiConversationStore.findOrCreateBySessionId = (id) => (id === externalConversationId ? conversation : conversation);
+  chatUiConversationStore.patch = (id, patch) => {
+    conversation.metadata = {
+      ...(conversation.metadata || {}),
+      ...(patch?.metadata || {}),
+      assistantCore: {
+        ...((conversation.metadata?.assistantCore && typeof conversation.metadata.assistantCore === 'object')
+          ? conversation.metadata.assistantCore
+          : {}),
+        ...((patch?.metadata?.assistantCore && typeof patch.metadata.assistantCore === 'object')
+          ? patch.metadata.assistantCore
+          : {})
+      }
+    };
+    return conversation;
+  };
+
+  const runRecord = {
+    id: assistantRunId,
+    status: 'waiting_user',
+    triggerText: '帮我打开浏览器,搜索飞书,进行下载后安装',
+    metadata: {
+      stopPolicy: {
+        status: 'waiting_user',
+        closure: 'waiting_user',
+        reason: 'assistant_confirmation_required'
+      }
+    }
+  };
+  let currentRun = runRecord;
+  assistantRunStore.get = (id) => (id === assistantRunId ? currentRun : null);
+  assistantRunStore.save = (run) => { currentRun = run; return run; };
+
+  // Capture the spawned continuation call.
+  const routeCalls = [];
+  chatUiConversationService.routeMessage = async (input) => {
+    routeCalls.push(input);
+    return {
+      type: 'assistant_run_accepted',
+      assistantRun: { id: 'run-continuation-spawned-1', status: 'queued' },
+      conversation: { id: conversationId }
+    };
+  };
+
+  const pendingAction = assistantPendingActionStore.create({
+    conversationId,
+    assistantRunId,
+    toolName: 'run_shell_command',
+    input: { command, cwd: workspaceRoot },
+    title: 'Confirmation required before continuing',
+    summary: `Target scope: ${workspaceRoot}`,
+    metadata: { requestedPath: workspaceRoot }
+  });
+
+  try {
+    const res = mockRes();
+    await handleConfirmAssistantToolAction({
+      body: { confirmToken: pendingAction.confirmToken }
+    }, res);
+
+    assert.equal(res._status, 200);
+    assert.equal(res._body.success, true);
+
+    // The continuation must have been kicked off.
+    // (fire-and-forget; await a microtask so the spawned call settles before
+    // we read its captured arguments.)
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(routeCalls.length, 1, 'expected exactly one continuation routeMessage');
+
+    const spawned = routeCalls[0];
+    assert.equal(spawned.sessionId, externalConversationId);
+    assert.equal(spawned.assistantExecutionMode, 'async');
+    const prompt = String(spawned.text || '');
+    // The prompt must:
+    //  (a) tell the model THIS tool already ran (no second approval needed),
+    //  (b) include the actual tool name so the model can re-anchor,
+    //  (c) re-anchor on the user's original goal,
+    //  (d) carry the real success / exitCode signal.
+    assert.match(prompt, /run_shell_command/);
+    assert.match(prompt, /approved by the user and has just been executed/i);
+    assert.match(prompt, /Do not request approval for the same step again/i);
+    assert.match(prompt, /Re-read the conversation history/i);
+    assert.match(prompt, /outcome: success/i);
+  } finally {
+    assistantPendingActionStore.dismiss(pendingAction.confirmToken);
+    chatUiConversationStore.get = originalGet;
+    chatUiConversationStore.getBySessionId = originalGetBySessionId;
+    chatUiConversationStore.findOrCreateBySessionId = originalFindOrCreateBySessionId;
+    chatUiConversationStore.patch = originalPatch;
+    assistantRunStore.get = originalRunGet;
+    assistantRunStore.save = originalRunSave;
+    chatUiConversationService.routeMessage = originalRouteMessage;
+  }
+});
+
+test('handleConfirmAssistantToolAction marks the originating assistant run as resolved so it cannot rebuild a fresh pending action', async () => {
+  // Regression: after a user clicked the approval button and the tool actually
+  // ran, the underlying assistant run was left at status="waiting_user" with
+  // stopPolicy.reason="assistant_confirmation_required". The next routeMessage
+  // call then went through ensurePendingAssistantAction → buildPendingActionFromRun
+  // and resurrected a NEW pending action from the same run, so the UI showed
+  // "等待确认" again right after the approval.
+  const conversationId = 'conversation-mark-resolved-1';
+  const assistantRunId = 'run-mark-resolved-1';
+  const workspaceRoot = process.cwd();
+  const command = process.platform === 'win32'
+    ? 'echo mark-resolved-confirm-tool'
+    : 'printf mark-resolved-confirm-tool';
+
+  const persistedRun = {
+    id: assistantRunId,
+    status: 'waiting_user',
+    triggerText: 'approve please',
+    metadata: {
+      stopPolicy: {
+        status: 'waiting_user',
+        closure: 'waiting_user',
+        reason: 'assistant_confirmation_required'
+      },
+      toolResults: [{
+        toolName: 'run_shell_command',
+        input: { command, cwd: workspaceRoot },
+        result: {
+          kind: 'policy_block',
+          requiresApproval: true,
+          requiresConfirmation: true,
+          requestedPath: workspaceRoot
+        }
+      }]
+    }
+  };
+
+  const originalRunGet = assistantRunStore.get;
+  const originalRunSave = assistantRunStore.save;
+  const originalGet = chatUiConversationStore.get;
+  const originalPatch = chatUiConversationStore.patch;
+
+  let currentRun = persistedRun;
+  const savedRuns = [];
+  assistantRunStore.get = (id) => (id === assistantRunId ? currentRun : null);
+  assistantRunStore.save = (run) => {
+    savedRuns.push(run);
+    currentRun = run;
+    return run;
+  };
+
+  const conversation = {
+    id: conversationId,
+    metadata: {
+      assistantCore: {
+        lastRunId: assistantRunId,
+        pendingActionConfirmToken: ''
+      },
+      uiChatMessages: [{
+        role: 'assistant',
+        kind: 'agent-message',
+        content: '这一步需要你确认后我才能继续。',
+        assistantRunId,
+        runStatus: 'waiting_user',
+        pendingAction: { confirmToken: 'placeholder' }
+      }]
+    }
+  };
+  chatUiConversationStore.get = () => conversation;
+  chatUiConversationStore.patch = (id, patch) => {
+    conversation.metadata = {
+      ...(conversation.metadata || {}),
+      ...(patch?.metadata || {}),
+      assistantCore: {
+        ...((conversation.metadata?.assistantCore && typeof conversation.metadata.assistantCore === 'object')
+          ? conversation.metadata.assistantCore
+          : {}),
+        ...((patch?.metadata?.assistantCore && typeof patch.metadata.assistantCore === 'object')
+          ? patch.metadata.assistantCore
+          : {})
+      },
+      ...(Array.isArray(patch?.metadata?.uiChatMessages) ? { uiChatMessages: patch.metadata.uiChatMessages } : {})
+    };
+    return conversation;
+  };
+
+  const pendingAction = assistantPendingActionStore.create({
+    conversationId,
+    assistantRunId,
+    toolName: 'run_shell_command',
+    input: { command, cwd: workspaceRoot },
+    title: 'Confirmation required before continuing',
+    summary: `Target scope: ${workspaceRoot}`,
+    metadata: { requestedPath: workspaceRoot }
+  });
+
+  try {
+    const res = mockRes();
+    await handleConfirmAssistantToolAction({
+      body: { confirmToken: pendingAction.confirmToken }
+    }, res);
+
+    assert.equal(res._status, 200);
+    assert.equal(res._body.success, true);
+
+    // The originating run must be moved out of waiting_user so the next
+    // routeMessage call does NOT resurrect a fresh pending action.
+    assert.equal(currentRun.status, 'completed');
+    assert.equal(currentRun.metadata.stopPolicy.reason, 'assistant_confirmation_resolved');
+    assert.equal(currentRun.metadata.stopPolicy.status, 'completed');
+    assert.equal(currentRun.metadata.confirmationResolution.decision, 'approve');
+    assert.equal(currentRun.metadata.confirmationResolution.toolName, 'run_shell_command');
+
+    // The conversation summary must move past "等待确认" so the UI does not
+    // keep showing it.
+    assert.notEqual(conversation.metadata.assistantCore.lastRunSummary, '等待确认');
+    assert.ok(conversation.metadata.assistantCore.lastRunResolvedAt);
+
+    // And the pending action store must not be re-populated for this run.
+    assert.equal(assistantPendingActionStore.findLatestByConversationId(conversationId), null);
+  } finally {
+    assistantRunStore.get = originalRunGet;
+    assistantRunStore.save = originalRunSave;
+    chatUiConversationStore.get = originalGet;
+    chatUiConversationStore.patch = originalPatch;
+    assistantPendingActionStore.dismiss(pendingAction.confirmToken);
+  }
+});
+
 test('handleRouteChatAgentMessage records pending assistant run id for async chat-ui runs', async () => {
   const originalRouteMessage = chatUiConversationService.routeMessage;
   const originalGet = chatUiConversationStore.get;

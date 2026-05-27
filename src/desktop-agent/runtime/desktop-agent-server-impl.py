@@ -27,6 +27,8 @@ DEFAULT_PREVIEW_WIDTH = 1280
 AUTH_TOKEN = ""
 _action_lock = threading.Lock()
 _active_lease_id = ""
+_SCREENSHOT_CONTEXT_LIMIT = 32
+_SHOT_CTX_BY_KEY: dict[str, dict] = {}
 
 
 class POINT(ctypes.Structure):
@@ -1051,8 +1053,17 @@ def uia_act(spec: dict) -> dict:
 def uia_tree(spec: dict) -> dict:
     auto = _uia()
     timeout = float(spec.get("timeout_ms", 4000)) / 1000.0
-    max_depth = int(spec.get("max_depth", 4))
-    max_nodes = int(spec.get("max_nodes", 400))
+    inspect_mode = bool(spec.get("inspect_window"))
+    # Inspect-window mode walks deeper and visits more nodes because its job is
+    # to surface every interactive Edit/Button/Hyperlink in a complex editor,
+    # not to summarize a few top-level controls. The default_depth=24 matches
+    # what desktop_inspect_window advertises in its tool schema; the old
+    # default_depth=4 silently truncated marks in Chrome/Electron/WeChat-MP
+    # editors even when callers omitted max_depth.
+    default_depth = 24 if inspect_mode else 4
+    default_nodes = 1500 if inspect_mode else 400
+    max_depth = int(spec.get("max_depth", default_depth))
+    max_nodes = int(spec.get("max_nodes", default_nodes))
     win = _find_window_ctrl(auto, spec, timeout)
     counter = [0]
 
@@ -1076,7 +1087,64 @@ def uia_tree(spec: dict) -> dict:
         return node
 
     root = walk(win, 0)
-    return {"ok": True, "action": "uia.tree", "nodes": counter[0], "max_depth": max_depth, "tree": root}
+    result = {"ok": True, "action": "uia.tree", "nodes": counter[0], "max_depth": max_depth, "tree": root}
+    if not inspect_mode:
+        return result
+
+    window_info = _control_info(win)
+    window_bbox = window_info.get("bbox")
+    if not isinstance(window_bbox, list) or len(window_bbox) != 4:
+        raise RuntimeError("inspect window requires a window bounding rectangle")
+    wx, wy, ww, wh = (int(v) for v in window_bbox)
+    if ww <= 0 or wh <= 0:
+        raise RuntimeError("inspect window requires a visible window region")
+
+    root_dir_path = ensure_dirs()
+    preview_width = int(spec.get("preview_width") or DEFAULT_PREVIEW_WIDTH)
+    max_marks = int(spec.get("max_marks") or 50)
+    capture_region = (wx, wy, ww, wh)
+    image, backend = screenshot_image(str(spec.get("backend") or "auto"), capture_region)
+    marks = _inspect_window_marks(spec, win, timeout, max_depth, max_marks)
+    annotated = _annotate_marks_image(image.copy(), marks, window_bbox)
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
+    full_path = root_dir_path / "screenshots" / f"inspect-window-{stamp}.png"
+    annotated.save(full_path)
+    preview_path, preview_meta = add_preview(annotated, root_dir_path, preview_width)
+    inspect_preview_width = int(preview_meta.get("preview_width") or annotated.size[0])
+    inspect_preview_height = int(preview_meta.get("preview_height") or annotated.size[1])
+    result.update({
+        "action": "uia.inspect_window",
+        "window": window_info,
+        "marks": marks,
+        "mark_count": len(marks),
+        "path": str(full_path),
+        "preview": str(preview_path),
+        "preview_width": inspect_preview_width,
+        "preview_height": inspect_preview_height,
+        "backend": backend,
+        "window_region": {"x": wx, "y": wy, "w": ww, "h": wh},
+        "window_region_source": "window_bbox",
+    })
+    # Record the annotated capture as the active screenshot context so that a
+    # follow-up desktop_click_at(space="preview", x, y) resolves into the same
+    # window-cropped frame the LLM just looked at. Without this, the click
+    # falls back to the previous capture_window context (or the default bucket)
+    # and lands tens of pixels off the intended mark — the exact failure mode
+    # the optimization plan was meant to close. Keyed by the same session /
+    # lease ID the caller used, so concurrent tasks do not stomp each other.
+    _record_screenshot_context(
+        context_key=_context_key_from_payload(spec),
+        region=capture_region,
+        image_size=annotated.size,
+        preview_width=inspect_preview_width,
+        preview_height=inspect_preview_height,
+    )
+    if spec.get("inline"):
+        which = (spec.get("inline_target") or "preview").lower()
+        target_path = preview_path if which == "preview" else full_path
+        result["inline_b64"] = _file_b64(target_path)
+        result["inline_target"] = which
+    return result
 
 
 def uia_wait(spec: dict) -> dict:
@@ -1108,6 +1176,141 @@ def uia_find_all(spec: dict) -> dict:
         "count": len(controls),
         "controls": [_control_info(ctrl) for ctrl in controls]
     }
+
+
+def _interactive_mark_color(control_type: str | None) -> str:
+    ctype = str(control_type or "").lower()
+    if ctype in ("editcontrol", "documentcontrol"):
+        return "#dc2626"
+    if ctype in ("buttoncontrol", "checkboxcontrol", "radiobuttoncontrol", "comboboxcontrol"):
+        return "#2563eb"
+    if ctype in ("hyperlinkcontrol", "tabitemcontrol", "menuitemcontrol", "listitemcontrol", "treeitemcontrol"):
+        return "#16a34a"
+    return "#ea580c"
+
+
+def _is_mark_candidate(info: dict) -> bool:
+    bbox = info.get("bbox")
+    if not isinstance(bbox, list) or len(bbox) != 4:
+        return False
+    if int(bbox[2]) <= 1 or int(bbox[3]) <= 1:
+        return False
+    if bool(info.get("is_offscreen")):
+        return False
+    ctype = str(info.get("control_type") or "").lower()
+    if ctype in {
+        "editcontrol",
+        "documentcontrol",
+        "buttoncontrol",
+        "hyperlinkcontrol",
+        "checkboxcontrol",
+        "radiobuttoncontrol",
+        "comboboxcontrol",
+        "listitemcontrol",
+        "menuitemcontrol",
+        "tabitemcontrol",
+        "treeitemcontrol",
+        "textcontrol",
+        "panecontrol",
+    }:
+        return True
+    if info.get("automation_id") or info.get("name"):
+        return True
+    return False
+
+
+def _mark_priority(info: dict) -> tuple[int, int]:
+    ctype = str(info.get("control_type") or "").lower()
+    order = {
+        "editcontrol": 0,
+        "documentcontrol": 1,
+        "buttoncontrol": 2,
+        "hyperlinkcontrol": 3,
+        "comboboxcontrol": 4,
+        "checkboxcontrol": 5,
+        "radiobuttoncontrol": 6,
+        "tabitemcontrol": 7,
+        "menuitemcontrol": 8,
+        "listitemcontrol": 9,
+        "treeitemcontrol": 10,
+        "textcontrol": 11,
+        "panecontrol": 12,
+    }.get(ctype, 20)
+    bbox = info.get("bbox") or [0, 0, 0, 0]
+    area = int(bbox[2]) * int(bbox[3])
+    return (order, -area)
+
+
+def _inspect_window_marks(spec: dict, win, timeout: float, max_depth: int, max_marks: int) -> list[dict]:
+    auto = _uia()
+    controls = _find_controls(auto, win, {
+        **spec,
+        "search_depth": max_depth,
+    }, timeout)
+    marks = []
+    seen = set()
+    for ctrl in controls:
+        info = _control_info(ctrl)
+        if not _is_mark_candidate(info):
+            continue
+        bbox = tuple(info.get("bbox") or [])
+        selector_key = (
+            str(info.get("control_type") or ""),
+            str(info.get("automation_id") or ""),
+            str(info.get("name") or ""),
+            str(info.get("class_name") or ""),
+            bbox,
+        )
+        if selector_key in seen:
+            continue
+        seen.add(selector_key)
+        marks.append({
+            "controlType": info.get("control_type"),
+            "name": info.get("name"),
+            "automationId": info.get("automation_id"),
+            "className": info.get("class_name"),
+            "bbox": info.get("bbox"),
+            "center": info.get("center"),
+            "isEnabled": info.get("is_enabled"),
+            "isOffscreen": info.get("is_offscreen"),
+            "color": _interactive_mark_color(info.get("control_type")),
+        })
+    marks.sort(key=_mark_priority)
+    trimmed = []
+    for idx, mark in enumerate(marks[:max_marks], start=1):
+        trimmed.append({
+            "id": idx,
+            **mark,
+        })
+    return trimmed
+
+
+def _annotate_marks_image(image, marks: list[dict], window_bbox: list[int]):
+    from PIL import ImageDraw  # type: ignore
+
+    draw = ImageDraw.Draw(image)
+    wx, wy = int(window_bbox[0]), int(window_bbox[1])
+    for mark in marks:
+        bbox = mark.get("bbox") or [0, 0, 0, 0]
+        x, y, w, h = (int(v) for v in bbox)
+        left = max(0, x - wx)
+        top = max(0, y - wy)
+        right = max(left + 1, left + max(w, 1))
+        bottom = max(top + 1, top + max(h, 1))
+        color = str(mark.get("color") or "#ea580c")
+        draw.rectangle((left, top, right, bottom), outline=color, width=3)
+        label = str(mark.get("id") or "")
+        if not label:
+            continue
+        label_w = 20 + max(0, (len(label) - 1) * 8)
+        label_h = 20
+        label_left = left
+        label_top = max(0, top - label_h)
+        label_right = label_left + label_w
+        label_bottom = label_top + label_h
+        draw.rectangle((label_left, label_top, label_right, label_bottom), fill=color)
+        draw.text((label_left + 6, label_top + 3), label, fill="white")
+    return image
 
 
 # ---------- Screenshot ----------
@@ -1389,24 +1592,24 @@ def find_text(payload: dict) -> dict:
 # uses this so the LLM can pass coordinates in the "preview" pixel grid it
 # just saw, without having to track preview_width / preview_height / region
 # itself — those three were the single largest source of "click landed at
-# (2406, 1041) which is OFF the target window" errors. When the LLM passes
-# space="preview" and a screenshot context exists, we honor it as the source
-# of truth; LLM-supplied preview_width / preview_height become hints we can
-# sanity-check against, not the math we trust.
-_LAST_SCREENSHOT_CTX: dict | None = None
+# (2406, 1041) which is OFF the target window" errors. The old process-global
+# singleton could also leak one task's capture into another task's click math,
+# so we now store the context by session/lease key and resolve clicks against
+# the matching context whenever one is provided.
 
 
 def _record_screenshot_context(
     *,
+    context_key: str,
     region: tuple[int, int, int, int] | None,
     image_size: tuple[int, int],
     preview_width: int,
     preview_height: int,
 ) -> None:
-    global _LAST_SCREENSHOT_CTX
+    global _SHOT_CTX_BY_KEY
     full_w, full_h = screen_size()
     img_w, img_h = image_size
-    _LAST_SCREENSHOT_CTX = {
+    _SHOT_CTX_BY_KEY[context_key] = {
         "region": list(region) if region else None,
         "image_width": int(img_w),
         "image_height": int(img_h),
@@ -1416,6 +1619,22 @@ def _record_screenshot_context(
         "screen_height": int(full_h),
         "captured_at": time.monotonic(),
     }
+    if len(_SHOT_CTX_BY_KEY) > _SCREENSHOT_CONTEXT_LIMIT:
+        oldest_key = min(
+            _SHOT_CTX_BY_KEY.items(),
+            key=lambda item: float(item[1].get("captured_at") or 0.0)
+        )[0]
+        _SHOT_CTX_BY_KEY.pop(oldest_key, None)
+
+
+def _lookup_screenshot_context(payload: dict) -> dict | None:
+    key = _context_key_from_payload(payload)
+    ctx = _SHOT_CTX_BY_KEY.get(key)
+    if ctx:
+        return ctx
+    if key != "default":
+        return _SHOT_CTX_BY_KEY.get("default")
+    return None
 
 
 def take_screenshot(payload: dict) -> dict:
@@ -1455,6 +1674,7 @@ def take_screenshot(payload: dict) -> dict:
         result["screen_width"] = full_w
         result["screen_height"] = full_h
     _record_screenshot_context(
+        context_key=_context_key_from_payload(payload),
         region=region,
         image_size=image.size,
         preview_width=int(meta.get("preview_width") or image.size[0]),
@@ -1480,7 +1700,7 @@ def resolve_point(payload: dict) -> tuple[int, int, dict]:
         rx = int(round(float(x) * width))
         ry = int(round(float(y) * height))
     elif space == "preview":
-        ctx = _LAST_SCREENSHOT_CTX
+        ctx = _lookup_screenshot_context(payload)
         # Two coordinate frames are in play:
         #   - LLM frame: the previewWidth/previewHeight the LLM THINKS it is
         #     looking at (often echoes the previewWidth it asked the capture
@@ -1586,6 +1806,17 @@ def _meta_from_payload(payload: dict) -> dict:
         "session_id": session_id,
         "action_id": action_id,
     }
+
+
+def _context_key_from_payload(payload: dict) -> str:
+    meta = _meta_from_payload(payload)
+    session_id = str(meta.get("session_id") or "").strip()
+    lease_id = str(meta.get("lease_id") or "").strip()
+    if session_id:
+        return f"session:{session_id}"
+    if lease_id:
+        return f"lease:{lease_id}"
+    return "default"
 
 
 def _with_meta(result: dict, payload: dict) -> dict:
@@ -1831,7 +2062,11 @@ class DesktopAgentHandler(BaseHTTPRequestHandler):
                 elif path == "/ui/act":
                     result = _with_meta(uia_act(payload), payload)
                 elif path == "/ui/tree":
-                    result = _with_meta(uia_tree(payload), payload)
+                    inspect_payload = {
+                        **payload,
+                        "inspect_window": bool(payload.get("inspect_window")),
+                    }
+                    result = _with_meta(uia_tree(inspect_payload), payload)
                 elif path == "/ui/wait":
                     result = _with_meta(uia_wait(payload), payload)
                 else:

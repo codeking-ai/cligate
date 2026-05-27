@@ -156,6 +156,31 @@ export function createDesktopToolHandlers({
       return result;
     }),
 
+    desktopInspectWindow: wrapHandler(async ({ input = {} } = {}) => {
+      const result = await desktopClient.inspectWindow({
+        ...input,
+        inline: true,
+        inlineTarget: input?.inlineTarget || 'preview'
+      });
+      const base64 = String(result?.inline_b64 || '');
+      if (base64) {
+        const { inline_b64: _omit, ...rest } = result;
+        return {
+          ...rest,
+          inline_b64_omitted: true,
+          content: [{
+            type: 'image',
+            source: {
+              type: 'base64',
+              media_type: 'image/png',
+              data: base64
+            }
+          }]
+        };
+      }
+      return result;
+    }),
+
     desktopFindControl: wrapHandler(async ({ input = {} } = {}) => desktopClient.findControl(input)),
 
     desktopFindAllControls: wrapHandler(async ({ input = {} } = {}) => desktopClient.findAllControls(input)),
@@ -189,6 +214,10 @@ export function createDesktopToolHandlers({
     desktopTypeText: wrapHandler(async ({ input = {} } = {}) => desktopClient.typeText(input)),
 
     desktopClickAt: wrapHandler(async ({ input = {} } = {}) => desktopClient.clickAt(input)),
+
+    desktopClickText: wrapHandler(async ({ input = {} } = {}) => desktopClient.clickText(input)),
+
+    desktopFillTextField: wrapHandler(async ({ input = {} } = {}) => desktopClient.fillTextField(input)),
 
     desktopMoveMouse: wrapHandler(async ({ input = {} } = {}) => desktopClient.moveMouse(input)),
 

@@ -747,6 +747,9 @@ test('createBuiltinAssistantToolRegistry includes desktop read-only tools', () =
   assert.ok(toolNames.includes('desktop_launch_app'));
   assert.ok(toolNames.includes('desktop_focus_window'));
   assert.ok(toolNames.includes('desktop_find_control'));
+  assert.ok(toolNames.includes('desktop_inspect_window'));
+  assert.ok(toolNames.includes('desktop_click_text'));
+  assert.ok(toolNames.includes('desktop_fill_text_field'));
   assert.ok(toolNames.includes('desktop_click_control'));
   assert.ok(toolNames.includes('desktop_set_control_value'));
   assert.ok(toolNames.includes('desktop_send_control_keys'));

@@ -13,6 +13,8 @@ export function createDesktopMoveMouseToolDefinition({ handlers }) {
         },
         previewWidth: { type: 'integer' },
         previewHeight: { type: 'integer' },
+        leaseId: { type: 'string' },
+        sessionId: { type: 'string' },
         region: {
           oneOf: [
             { type: 'array', items: { type: 'integer' }, minItems: 4, maxItems: 4 },

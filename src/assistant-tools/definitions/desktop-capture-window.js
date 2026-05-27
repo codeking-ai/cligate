@@ -28,7 +28,8 @@ export function createDesktopCaptureWindowToolDefinition({ handlers }) {
         inline: { type: 'boolean' },
         inlineTarget: { type: 'string', enum: ['preview', 'full'] },
         previewWidth: { type: 'integer', minimum: 64, maximum: 4096 },
-        leaseId: { type: 'string' }
+        leaseId: { type: 'string' },
+        sessionId: { type: 'string' }
       }
     },
     outputSchema: { type: 'object' },

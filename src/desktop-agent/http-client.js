@@ -140,6 +140,22 @@ export class DesktopAgentHttpClient {
     });
   }
 
+  uiTree(spec = {}) {
+    return this.request('/ui/tree', {
+      method: 'POST',
+      body: {
+        ...normalizeWindowSpec(spec),
+        inspect_window: spec?.inspectWindow === true,
+        ...(Number.isFinite(spec?.maxMarks) ? { max_marks: Number(spec.maxMarks) } : {}),
+        ...(Number.isFinite(spec?.maxDepth) ? { max_depth: Number(spec.maxDepth) } : {}),
+        ...(Number.isFinite(spec?.maxNodes) ? { max_nodes: Number(spec.maxNodes) } : {}),
+        ...(Number.isFinite(spec?.previewWidth) ? { preview_width: Number(spec.previewWidth) } : {}),
+        ...(spec?.inline === false ? { inline: false } : { inline: true }),
+        ...(typeof spec?.inlineTarget === 'string' ? { inline_target: spec.inlineTarget } : {}),
+      }
+    });
+  }
+
   launch(input = {}) {
     return this.request('/launch', {
       method: 'POST',
