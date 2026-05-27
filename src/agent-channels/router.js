@@ -41,6 +41,18 @@ function isAffirmativeConfirmation(text = '') {
   ].some((pattern) => pattern.test(normalized));
 }
 
+function collectAssistantRunArtifactRefs(run = null) {
+  const refs = new Set();
+  const toolResults = Array.isArray(run?.metadata?.toolResults) ? run.metadata.toolResults : [];
+  for (const entry of toolResults) {
+    const artifactId = String(entry?.metadata?.artifactId || '').trim();
+    if (artifactId) {
+      refs.add(artifactId);
+    }
+  }
+  return [...refs];
+}
+
 export class AgentChannelRouter {
   constructor({
     conversationStore = agentChannelConversationStore,
@@ -171,12 +183,15 @@ export class AgentChannelRouter {
     const assistantResult = await this.assistantModeService.maybeHandleMessage({
       conversation,
       text: message.text,
+      inputParts: Array.isArray(message.inputParts) ? message.inputParts : null,
       defaultRuntimeProvider: options.defaultRuntimeProvider || 'codex',
       cwd: options.cwd,
       model: options.model,
       executionMode: 'async',
       onBackgroundResult: async (backgroundResult) => {
         const outboundText = String(backgroundResult?.message || '').trim();
+        const artifactRefs = collectAssistantRunArtifactRefs(backgroundResult?.assistantRun);
+        const hasOutboundArtifacts = artifactRefs.length > 0;
         const relatedRuntimeSessionIds = Array.isArray(backgroundResult?.assistantRun?.relatedRuntimeSessionIds)
           ? backgroundResult.assistantRun.relatedRuntimeSessionIds.filter(Boolean)
           : [];
@@ -200,7 +215,7 @@ export class AgentChannelRouter {
             assistantMetadata: latestConversation.metadata?.assistantCore || {}
           });
         }
-        if (!outboundText) {
+        if (!outboundText && !hasOutboundArtifacts) {
           return;
         }
         const latestConversation = backgroundResult.conversation || this.conversationStore.get(conversation.id);
@@ -222,7 +237,8 @@ export class AgentChannelRouter {
               text: outboundText,
               assistantRunId: backgroundResult?.assistantRun?.id || '',
               kind: 'assistant-run-result',
-              sourceType: 'assistant_run_result'
+              sourceType: 'assistant_run_result',
+              ...(artifactRefs.length > 0 ? { artifactRefs } : {})
             },
             message: {
               text: outboundText
@@ -254,6 +270,7 @@ export class AgentChannelRouter {
         payload: {
           text: message.text || '',
           messageType: message.messageType || 'text',
+          inputParts: Array.isArray(message.inputParts) ? message.inputParts : [],
           externalUserId: message.externalUserId || '',
           externalUserName: message.externalUserName || '',
           action: message.action || null,
@@ -295,6 +312,7 @@ export class AgentChannelRouter {
       payload: {
         text: message.text || '',
         messageType: message.messageType || 'text',
+        inputParts: Array.isArray(message.inputParts) ? message.inputParts : [],
         externalUserId: message.externalUserId || '',
         externalUserName: message.externalUserName || '',
         action: message.action || null,

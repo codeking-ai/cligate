@@ -1547,7 +1547,10 @@ export class AgentOrchestratorMessageService {
     metadata = {}
   } = {}) {
     const text = String(message?.text || '').trim();
-    if (!text) {
+    const inputParts = Array.isArray(message?.inputParts)
+      ? message.inputParts.filter((part) => part && typeof part === 'object')
+      : [];
+    if (!text && inputParts.length === 0) {
       throw new Error('message text is required');
     }
     if (conversation?.id && this.stateCoordinator) {
@@ -1555,7 +1558,8 @@ export class AgentOrchestratorMessageService {
         this.stateCoordinator.ingestConversationTurn({
           conversation,
           role: 'user',
-          text
+          text,
+          ...(inputParts.length > 0 ? { inputParts } : {})
         });
       } catch {
         // dual-write should not block existing routing behavior

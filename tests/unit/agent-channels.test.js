@@ -2278,6 +2278,84 @@ test('AgentChannelRouter keeps aggregated assistant background results when mult
   assert.ok(deliveries.some((entry) => String(entry.payload?.text || '').includes('Claude Code')));
 });
 
+test('AgentChannelRouter sends assistant image-only background results when artifact refs are present', async () => {
+  const conversationStore = new AgentChannelConversationStore({
+    configDir: createTempDir('cligate-agent-channels-assistant-image-only-conv-')
+  });
+  const deliveryStore = new AgentChannelDeliveryStore({
+    configDir: createTempDir('cligate-agent-channels-assistant-image-only-delivery-')
+  });
+  const pairingStore = new AgentChannelPairingStore({
+    configDir: createTempDir('cligate-agent-channels-assistant-image-only-pairing-')
+  });
+  const sent = [];
+  const router = new AgentChannelRouter({
+    conversationStore,
+    deliveryStore,
+    pairingStore,
+    messageService: new AgentOrchestratorMessageService({ runtimeSessionManager: createHybridRuntimeManager() }),
+    assistantModeService: {
+      async maybeHandleMessage({ conversation, onBackgroundResult }) {
+        await onBackgroundResult({
+          type: 'assistant_response',
+          message: '',
+          assistantRun: {
+            id: 'assistant-run-image-only-1',
+            relatedRuntimeSessionIds: [],
+            status: 'completed',
+            metadata: {
+              toolResults: [{
+                toolName: 'view_image',
+                metadata: {
+                  artifactId: 'artifact-image-only-1'
+                }
+              }]
+            }
+          },
+          conversation
+        });
+        return {
+          type: 'assistant_run_accepted',
+          message: 'accepted',
+          assistantRun: {
+            id: 'assistant-run-image-only-1',
+            status: 'queued'
+          },
+          conversation
+        };
+      }
+    }
+  });
+  router.deliverySender = {
+    setRegistry() {},
+    setDeliveryStore() {},
+    async send(payload) {
+      sent.push(payload);
+      return { messageId: 'out_image_only_1' };
+    },
+    suppress() {}
+  };
+
+  const result = await router.routeInboundMessage({
+    channel: 'dingtalk',
+    accountId: 'default',
+    externalConversationId: 'assistant-image-only-chat-1',
+    externalUserId: 'user-1',
+    externalUserName: 'tester',
+    externalMessageId: 'msg-image-only',
+    text: 'show me the image',
+    messageType: 'text'
+  }, {
+    defaultRuntimeProvider: 'codex'
+  });
+
+  assert.equal(result.type, 'assistant_run_accepted');
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0].payload.text, '');
+  assert.deepEqual(sent[0].payload.artifactRefs, ['artifact-image-only-1']);
+});
+
 test('assistant mode suppresses direct runtime completion delivery while preserving conversation state', async () => {
   const runtimeSessionManager = createRuntimeManager();
   const conversationStore = new AgentChannelConversationStore({

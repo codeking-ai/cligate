@@ -146,11 +146,15 @@ export function createNormalizedChannelMessage({
   externalUserName = '',
   text = '',
   messageType = 'text',
+  inputParts = null,
   action = null,
   metadata = {},
   raw = null,
   ts = null
 } = {}) {
+  const normalizedInputParts = Array.isArray(inputParts)
+    ? inputParts.filter((part) => part && typeof part === 'object')
+    : [];
   return {
     channel: String(channel || ''),
     accountId: String(accountId || 'default'),
@@ -163,6 +167,7 @@ export function createNormalizedChannelMessage({
     externalUserName: String(externalUserName || ''),
     text: String(text || ''),
     messageType: String(messageType || 'text'),
+    ...(normalizedInputParts.length > 0 ? { inputParts: normalizedInputParts } : {}),
     action,
     metadata: metadata && typeof metadata === 'object' ? metadata : {},
     ts: ts || nowIso(),

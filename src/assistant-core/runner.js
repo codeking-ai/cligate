@@ -426,6 +426,9 @@ export class AssistantRunner {
               toolName: entry.toolName,
               input: entry.input,
               summary: entry.summary,
+              metadata: entry.metadata && typeof entry.metadata === 'object'
+                ? { ...entry.metadata }
+                : undefined,
               startedAt: entry.startedAt,
               completedAt: entry.completedAt
             })),

@@ -1,4 +1,5 @@
 import crypto from 'crypto';
+import { readFileSync } from 'fs';
 import { URL } from 'url';
 
 import { createNormalizedChannelMessage } from '../models.js';
@@ -8,6 +9,9 @@ const DINGTALK_TIMESTAMP_SKEW_MS = 60 * 60 * 1000;
 const DINGTALK_STREAM_CALLBACK_TOPIC = '/v1.0/im/bot/messages/get';
 const DINGTALK_STREAM_RECONNECT_DELAY_MS = 3000;
 const DINGTALK_SAFE_MESSAGE_LIMIT = 3500;
+const DINGTALK_PICTURE_MESSAGE_TYPE = 'picture';
+const DINGTALK_IMAGE_DOWNLOAD_PATH = 'https://api.dingtalk.com/v1.0/robot/messageFiles/download';
+const DINGTALK_MEDIA_UPLOAD_PATH = 'https://oapi.dingtalk.com/media/upload';
 
 function providerLabel(providerId) {
   if (providerId === 'claude-code') return 'Claude Code';
@@ -64,16 +68,184 @@ function buildRouterFailureText(error) {
 }
 
 function readTextCandidate(payload = {}) {
+  if (payload?.text && typeof payload.text === 'string') {
+    return payload.text;
+  }
   if (payload?.text && typeof payload.text === 'object' && typeof payload.text.content === 'string') {
     return payload.text.content;
   }
-  if (typeof payload?.text === 'string') {
-    return payload.text;
-  }
   if (typeof payload?.content === 'string') {
+    try {
+      const parsed = JSON.parse(payload.content);
+      if (typeof parsed?.text === 'string') {
+        return parsed.text;
+      }
+      if (typeof parsed?.content === 'string') {
+        return parsed.content;
+      }
+    } catch {
+      // fall through to raw content string
+    }
     return payload.content;
   }
+  if (payload?.content && typeof payload.content === 'object') {
+    if (typeof payload.content.text === 'string') {
+      return payload.content.text;
+    }
+    if (typeof payload.content.content === 'string') {
+      return payload.content.content;
+    }
+  }
   return '';
+}
+
+function readContentObject(payload = {}) {
+  if (payload?.content && typeof payload.content === 'object') {
+    return payload.content;
+  }
+  if (typeof payload?.content === 'string') {
+    try {
+      const parsed = JSON.parse(payload.content);
+      return parsed && typeof parsed === 'object' ? parsed : {};
+    } catch {
+      return {};
+    }
+  }
+  return {};
+}
+
+function detectInboundMessageType(payload = {}) {
+  const explicit = String(
+    payload?.msgtype
+    || payload?.msgType
+    || payload?.messageType
+    || payload?.message_type
+    || ''
+  ).trim().toLowerCase();
+  if (explicit) {
+    return explicit;
+  }
+  const content = readContentObject(payload);
+  if (
+    content.downloadCode
+    || content.download_code
+    || content.picDownloadCode
+    || content.pic_download_code
+  ) {
+    return DINGTALK_PICTURE_MESSAGE_TYPE;
+  }
+  return 'text';
+}
+
+function inferImageMediaType(fileName = '', downloadCode = '') {
+  const normalized = `${String(fileName || '').trim()} ${String(downloadCode || '').trim()}`.toLowerCase();
+  if (normalized.includes('.png')) return 'image/png';
+  if (normalized.includes('.webp')) return 'image/webp';
+  if (normalized.includes('.gif')) return 'image/gif';
+  if (normalized.includes('.bmp')) return 'image/bmp';
+  return 'image/jpeg';
+}
+
+function normalizeOutboundImageCandidates(images = []) {
+  if (!Array.isArray(images)) {
+    return [];
+  }
+  return images
+    .filter((image) => image && typeof image === 'object')
+    .map((image) => ({
+      photoURL: String(
+        image.photoURL
+        || image.photoUrl
+        || image.image_url
+        || image.imageUrl
+        || image.url
+        || ''
+      ).trim(),
+      mediaId: String(image.mediaId || image.media_id || '').trim(),
+      mediaType: String(image.mediaType || image.media_type || '').trim(),
+      title: String(image.title || '').trim(),
+      artifactId: String(image.artifactId || '').trim(),
+      path: String(image.path || image.localPath || image.local_path || '').trim()
+    }))
+    .filter((image) => image.photoURL || image.mediaId || image.path);
+}
+
+function isSupportedDingTalkPhotoUrl(photoURL = '') {
+  return /^https?:\/\//i.test(String(photoURL || '').trim());
+}
+
+function isDataUrl(value = '') {
+  return /^data:/i.test(String(value || '').trim());
+}
+
+function inferMediaTypeFromPath(path = '') {
+  const normalized = String(path || '').trim().toLowerCase();
+  if (normalized.endsWith('.png')) return 'image/png';
+  if (normalized.endsWith('.webp')) return 'image/webp';
+  if (normalized.endsWith('.gif')) return 'image/gif';
+  if (normalized.endsWith('.bmp')) return 'image/bmp';
+  return 'image/jpeg';
+}
+
+function inferUploadExtension(mediaType = '') {
+  const normalized = String(mediaType || '').trim().toLowerCase();
+  if (normalized === 'image/png') return 'png';
+  if (normalized === 'image/webp') return 'webp';
+  if (normalized === 'image/gif') return 'gif';
+  if (normalized === 'image/bmp') return 'bmp';
+  return 'jpg';
+}
+
+function dataUrlToUploadPayload(dataUrl = '', mediaTypeHint = '') {
+  const trimmed = String(dataUrl || '').trim();
+  const match = trimmed.match(/^data:([^;]+);base64,(.+)$/i);
+  if (!match) {
+    throw new Error('invalid data url for dingtalk image upload');
+  }
+  const mediaType = String(mediaTypeHint || match[1] || 'image/jpeg').trim() || 'image/jpeg';
+  return {
+    buffer: Buffer.from(match[2], 'base64'),
+    mediaType,
+    fileName: `cligate-image.${inferUploadExtension(mediaType)}`
+  };
+}
+
+function filePathToUploadPayload(path = '', mediaTypeHint = '') {
+  const normalizedPath = String(path || '').trim();
+  if (!normalizedPath) {
+    throw new Error('image path is required for dingtalk upload');
+  }
+  const mediaType = String(mediaTypeHint || inferMediaTypeFromPath(normalizedPath)).trim() || 'image/jpeg';
+  const extension = inferUploadExtension(mediaType);
+  return {
+    buffer: readFileSync(normalizedPath),
+    mediaType,
+    fileName: normalizedPath.split(/[\\/]/).pop() || `cligate-image.${extension}`
+  };
+}
+
+function buildMultipartFormData({ boundary = '', fields = [], file = null } = {}) {
+  const chunks = [];
+  for (const field of fields) {
+    chunks.push(Buffer.from(
+      `--${boundary}\r\n`
+      + `Content-Disposition: form-data; name="${String(field?.name || '')}"\r\n\r\n`
+      + `${String(field?.value || '')}\r\n`,
+      'utf8'
+    ));
+  }
+  if (file?.buffer) {
+    chunks.push(Buffer.from(
+      `--${boundary}\r\n`
+      + `Content-Disposition: form-data; name="media"; filename="${String(file.fileName || 'image.jpg')}"\r\n`
+      + `Content-Type: ${String(file.mediaType || 'application/octet-stream')}\r\n\r\n`,
+      'utf8'
+    ));
+    chunks.push(Buffer.isBuffer(file.buffer) ? file.buffer : Buffer.from(file.buffer));
+    chunks.push(Buffer.from('\r\n', 'utf8'));
+  }
+  chunks.push(Buffer.from(`--${boundary}--\r\n`, 'utf8'));
+  return Buffer.concat(chunks);
 }
 
 function buildWebhookTextBody(text) {
@@ -103,6 +275,28 @@ function buildGroupTextBody({ robotCode, openConversationId, text }) {
     msgKey: 'sampleText',
     msgParam: JSON.stringify({
       content: String(text || '')
+    })
+  };
+}
+
+function buildSingleImageBody({ robotCode, userId, photoURL }) {
+  return {
+    robotCode: String(robotCode || ''),
+    userIds: [String(userId || '')],
+    msgKey: 'sampleImageMsg',
+    msgParam: JSON.stringify({
+      photoURL: String(photoURL || '')
+    })
+  };
+}
+
+function buildGroupImageBody({ robotCode, openConversationId, photoURL }) {
+  return {
+    robotCode: String(robotCode || ''),
+    openConversationId: String(openConversationId || ''),
+    msgKey: 'sampleImageMsg',
+    msgParam: JSON.stringify({
+      photoURL: String(photoURL || '')
     })
   };
 }
@@ -498,6 +692,62 @@ export class DingTalkChannelProvider {
     return { ok: true, mode: 'hmac' };
   }
 
+  async buildInboundImageParts(payload = {}) {
+    const content = readContentObject(payload);
+    const downloadCode = String(
+      content.downloadCode
+      || content.download_code
+      || content.picDownloadCode
+      || content.pic_download_code
+      || payload?.downloadCode
+      || ''
+    ).trim();
+    if (!downloadCode) {
+      return [];
+    }
+
+    const accessToken = await this.getAccessToken();
+    const response = await this.fetchImpl(DINGTALK_IMAGE_DOWNLOAD_PATH, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-acs-dingtalk-access-token': accessToken
+      },
+      body: JSON.stringify({
+        downloadCode,
+        robotCode: String(payload?.robotCode || chooseSetting(this.settings, 'robotCode')).trim()
+      })
+    });
+
+    const data = await response.json();
+    const imageUrl = String(data.downloadUrl || data.download_url || data.url || '').trim();
+    if (!response.ok || !imageUrl) {
+      throw new Error('DingTalk image download response missing downloadUrl');
+    }
+
+    const parts = [{
+      type: 'input_image',
+      image_url: imageUrl,
+      media_type: inferImageMediaType(
+        content.fileName || content.file_name || data.fileName || data.file_name || '',
+        downloadCode
+      )
+    }];
+    const caption = String(
+      content.caption
+      || content.title
+      || content.text
+      || ''
+    ).trim();
+    if (caption) {
+      parts.unshift({
+        type: 'text',
+        text: caption
+      });
+    }
+    return parts;
+  }
+
   normalizeInbound(payload = {}) {
     if (payload?.challenge) {
       return {
@@ -506,7 +756,9 @@ export class DingTalkChannelProvider {
       };
     }
 
+    const inboundMessageType = detectInboundMessageType(payload);
     const text = String(readTextCandidate(payload) || '').trim();
+    const content = readContentObject(payload);
     const conversationId = String(
       payload?.conversationId
       || payload?.openConversationId
@@ -524,21 +776,28 @@ export class DingTalkChannelProvider {
       || payload?.senderId
       || ''
     ).trim();
+    const externalMessageId = String(
+      payload?.msgId
+      || payload?.messageId
+      || payload?.eventId
+      || payload?.processQueryKey
+      || ''
+    ).trim();
 
-    if (!text || !conversationId || !userId) {
+    if ((!text && inboundMessageType === 'text') || !conversationId || !userId) {
       return null;
     }
 
-    return createNormalizedChannelMessage({
+    const baseMessage = {
       channel: 'dingtalk',
       accountId: this.instanceId || 'default',
       deliveryMode: 'webhook',
-      externalMessageId: String(payload?.msgId || payload?.messageId || payload?.eventId || ''),
+      externalMessageId,
       externalConversationId: conversationId,
       externalUserId: userId,
       externalUserName: String(payload?.senderNick || payload?.senderName || payload?.nick || ''),
       text,
-      messageType: 'text',
+      messageType: inboundMessageType,
       metadata: {
         sessionWebhook: String(payload?.sessionWebhook || payload?.sessionWebhookExpiredTime ? payload?.sessionWebhook || '' : ''),
         sessionWebhookExpiredTime: String(payload?.sessionWebhookExpiredTime || ''),
@@ -548,10 +807,13 @@ export class DingTalkChannelProvider {
         rawConversationId: conversationId,
         senderStaffId: staffId,
         senderId: String(payload?.senderId || ''),
-        senderUnionId: String(payload?.senderUnionId || '')
+        senderUnionId: String(payload?.senderUnionId || ''),
+        rawContent: content
       },
       raw: payload
-    });
+    };
+
+    return createNormalizedChannelMessage(baseMessage);
   }
 
   async getAccessToken() {
@@ -613,7 +875,74 @@ export class DingTalkChannelProvider {
     };
   }
 
-  async sendViaAppApi({ conversationId, text, robotCode, conversationType = '', senderStaffId = '' }) {
+  async sendOneImage({ conversation, channelContext, image } = {}) {
+    const photoURL = await this.resolveOutboundImageMediaRef(image);
+    return this.sendViaAppApi({
+      conversationId: conversation?.externalConversationId,
+      photoURL,
+      robotCode: channelContext.robotCode || '',
+      conversationType: channelContext.conversationType || '',
+      senderStaffId: channelContext.senderStaffId || ''
+    });
+  }
+
+  async uploadImageMedia({ buffer, fileName = 'cligate-image.jpg', mediaType = 'image/jpeg' } = {}) {
+    const accessToken = await this.getAccessToken();
+    const boundary = `----cligate-${crypto.randomBytes(8).toString('hex')}`;
+    const body = buildMultipartFormData({
+      boundary,
+      fields: [{
+        name: 'type',
+        value: 'image'
+      }],
+      file: {
+        buffer,
+        fileName,
+        mediaType
+      }
+    });
+    const uploadUrl = `${DINGTALK_MEDIA_UPLOAD_PATH}?access_token=${encodeURIComponent(accessToken)}`;
+    const response = await this.fetchImpl(uploadUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': `multipart/form-data; boundary=${boundary}`
+      },
+      body
+    });
+
+    const data = await response.json();
+    const mediaId = String(data?.media_id || data?.mediaId || '').trim();
+    if (!response.ok || !mediaId || Number(data?.errcode || 0) !== 0) {
+      throw new Error(data?.errmsg || data?.message || 'Failed to upload DingTalk image media');
+    }
+    return mediaId;
+  }
+
+  async resolveOutboundImageMediaRef(image = {}) {
+    const mediaId = String(image?.mediaId || '').trim();
+    if (mediaId) {
+      return mediaId;
+    }
+
+    const photoURL = String(image?.photoURL || '').trim();
+    if (isSupportedDingTalkPhotoUrl(photoURL)) {
+      return photoURL;
+    }
+    if (isDataUrl(photoURL)) {
+      const upload = dataUrlToUploadPayload(photoURL, image?.mediaType || '');
+      return this.uploadImageMedia(upload);
+    }
+
+    const path = String(image?.path || '').trim();
+    if (path) {
+      const upload = filePathToUploadPayload(path, image?.mediaType || '');
+      return this.uploadImageMedia(upload);
+    }
+
+    throw new Error('dingtalk image delivery requires an http(s) photoURL, a mediaId, a data URL, or a readable local image path');
+  }
+
+  async sendViaAppApi({ conversationId, text = '', photoURL = '', robotCode, conversationType = '', senderStaffId = '' }) {
     const effectiveRobotCode = String(robotCode || chooseSetting(this.settings, 'robotCode')).trim();
     if (!effectiveRobotCode) {
       throw new Error('dingtalk robotCode is not configured');
@@ -636,17 +965,29 @@ export class DingTalkChannelProvider {
         'x-acs-dingtalk-access-token': accessToken
       },
       body: JSON.stringify(
-        isGroupConversation
-          ? buildGroupTextBody({
-            robotCode: effectiveRobotCode,
-            openConversationId: conversationId,
-            text
-          })
-          : buildSingleTextBody({
-            robotCode: effectiveRobotCode,
-            userId: senderStaffId,
-            text
-          })
+        photoURL
+          ? (isGroupConversation
+              ? buildGroupImageBody({
+                robotCode: effectiveRobotCode,
+                openConversationId: conversationId,
+                photoURL
+              })
+              : buildSingleImageBody({
+                robotCode: effectiveRobotCode,
+                userId: senderStaffId,
+                photoURL
+              }))
+          : (isGroupConversation
+              ? buildGroupTextBody({
+                robotCode: effectiveRobotCode,
+                openConversationId: conversationId,
+                text
+              })
+              : buildSingleTextBody({
+                robotCode: effectiveRobotCode,
+                userId: senderStaffId,
+                text
+              }))
       )
     });
 
@@ -676,7 +1017,15 @@ export class DingTalkChannelProvider {
       }
     }
 
-    const normalized = this.normalizeInbound(payload);
+    let normalized = this.normalizeInbound(payload);
+    if (normalized?.messageType === DINGTALK_PICTURE_MESSAGE_TYPE) {
+      const inputParts = await this.buildInboundImageParts(payload);
+      normalized = createNormalizedChannelMessage({
+        ...normalized,
+        text: normalized.text || '[DingTalk image]',
+        inputParts
+      });
+    }
     if (normalized?.type === 'challenge') {
       return {
         status: 200,
@@ -744,12 +1093,43 @@ export class DingTalkChannelProvider {
     });
   }
 
-  async sendMessage({ conversation, text, buttons = [] } = {}) {
+  async sendMessage({ conversation, text, buttons = [], images = [] } = {}) {
     const channelContext = conversation?.metadata?.channelContext || {};
     const sessionWebhook = String(channelContext.sessionWebhook || '').trim();
     const expiredAt = coerceTimestamp(channelContext.sessionWebhookExpiredTime);
     const now = Date.now();
+    const providerMode = String(this.settings?.mode || 'stream').trim().toLowerCase();
+    const normalizedImages = normalizeOutboundImageCandidates(images);
+    const sendableImages = normalizedImages.filter((image) => (
+      Boolean(image.mediaId)
+      || isSupportedDingTalkPhotoUrl(image.photoURL)
+      || isDataUrl(image.photoURL)
+      || Boolean(image.path)
+    ));
     const textWithActions = `${String(text || '')}${buildButtonCommandText(buttons)}`;
+    const hasText = Boolean(textWithActions.trim());
+    if (normalizedImages.length > 0 && providerMode === 'webhook') {
+      throw new Error('dingtalk image delivery is unavailable when the channel is configured in webhook mode; configure app credentials and use stream/app mode instead');
+    }
+    if (normalizedImages.length > 0 && sendableImages.length !== normalizedImages.length) {
+      const unsupportedCount = normalizedImages.length - sendableImages.length;
+      this.logger?.warn?.('[DingTalk] Skipping unsupported outbound image(s); supported image sources are mediaId, http(s), data URLs, and readable local paths.');
+    }
+    if (sendableImages.length > 0 && !hasText) {
+      let result = null;
+      for (const image of sendableImages) {
+        result = await this.sendOneImage({
+          conversation,
+          channelContext,
+          image
+        });
+      }
+      return result;
+    }
+    if (normalizedImages.length > 0 && !hasText && sendableImages.length === 0) {
+      throw new Error('dingtalk image delivery requires a mediaId, an http(s) photoURL, a data URL, or a readable local image path');
+    }
+
     const textChunks = splitDingTalkText(textWithActions);
     let result = null;
 
@@ -776,6 +1156,16 @@ export class DingTalkChannelProvider {
         conversationType: channelContext.conversationType || '',
         senderStaffId: channelContext.senderStaffId || ''
       });
+    }
+
+    if (sendableImages.length > 0) {
+      for (const image of sendableImages) {
+        result = await this.sendOneImage({
+          conversation,
+          channelContext,
+          image
+        });
+      }
     }
 
     return result;
