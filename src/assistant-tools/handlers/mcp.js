@@ -10,6 +10,17 @@ export function createMcpToolHandlers({ mcpService = null }) {
     }
     return mcpService;
   };
+  const resolveToolIdentity = (service, serverName, toolName, { fromNamespaced = false } = {}) => {
+    const fallbackNamespacedToolName = buildNamespacedMcpToolName(serverName, toolName);
+    const tools = service.listTools?.({ serverName }) || [];
+    const tool = fromNamespaced
+      ? tools.find((entry) => entry?.namespacedToolName === fallbackNamespacedToolName)
+      : tools.find((entry) => entry?.toolName === toolName);
+    return {
+      toolName: tool?.toolName || toolName,
+      namespacedToolName: tool?.namespacedToolName || fallbackNamespacedToolName
+    };
+  };
 
   return {
     async listMcpServers() {
@@ -47,6 +58,7 @@ export function createMcpToolHandlers({ mcpService = null }) {
     async callMcpTool({ input = {} } = {}) {
       let serverName = String(input.serverName || '').trim();
       let toolName = String(input.toolName || '').trim();
+      let fromNamespaced = false;
       if (!serverName || !toolName) {
         const parsed = parseNamespacedMcpToolName(input.namespacedToolName);
         if (!parsed) {
@@ -54,12 +66,36 @@ export function createMcpToolHandlers({ mcpService = null }) {
         }
         serverName = parsed.serverName;
         toolName = parsed.toolName;
+        fromNamespaced = true;
       }
-      const result = await requireService().callTool({
+      const service = requireService();
+      const identity = resolveToolIdentity(service, serverName, toolName, { fromNamespaced });
+      toolName = identity.toolName;
+      const result = await service.callTool({
         serverName,
         toolName,
         arguments: input.arguments || {},
         metadata: input.metadata || {}
+      });
+      return {
+        serverName,
+        toolName,
+        namespacedToolName: identity.namespacedToolName,
+        result
+      };
+    },
+
+    async callDirectMcpTool({ input = {}, tool = {} } = {}) {
+      const serverName = String(tool?.metadata?.mcp?.serverName || '').trim();
+      const toolName = String(tool?.metadata?.mcp?.toolName || '').trim();
+      if (!serverName || !toolName) {
+        throw new Error('direct MCP tool is missing raw server/tool metadata');
+      }
+      const result = await requireService().callTool({
+        serverName,
+        toolName,
+        arguments: input || {},
+        metadata: {}
       });
       return {
         serverName,

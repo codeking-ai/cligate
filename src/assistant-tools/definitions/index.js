@@ -40,6 +40,52 @@ import createShellToolHandlers from '../handlers/shell.js';
 import createImageToolHandlers from '../handlers/images.js';
 import createMcpToolHandlers from '../handlers/mcp.js';
 import createDesktopToolHandlers from '../handlers/desktop.js';
+import { buildNamespacedMcpToolName } from '../mcp-service.js';
+
+function createDirectMcpToolDefinitions({ mcpService = null, handlers = {} } = {}) {
+  if (!mcpService) return [];
+  const definitions = [];
+  const seen = new Set();
+  const servers = mcpService.listServers?.() || [];
+  for (const server of servers) {
+    const serverName = String(server?.name || '').trim();
+    if (!serverName) continue;
+    let tools = [];
+    try {
+      tools = mcpService.listTools({ serverName }) || [];
+    } catch {
+      continue;
+    }
+    for (const tool of tools) {
+      const toolName = String(tool?.toolName || tool?.name || '').trim();
+      if (!toolName) continue;
+      const namespacedToolName = tool?.namespacedToolName || buildNamespacedMcpToolName(serverName, toolName);
+      if (seen.has(namespacedToolName)) continue;
+      seen.add(namespacedToolName);
+      definitions.push({
+        name: namespacedToolName,
+        description: String(tool?.description || `Call MCP tool ${serverName}/${toolName}`).trim(),
+        inputSchema: tool?.inputSchema || { type: 'object', properties: {} },
+        outputSchema: { type: 'object' },
+        visibility: 'direct',
+        mutating: true,
+        requiresApproval: true,
+        parallelSafe: false,
+        source: 'mcp',
+        metadata: {
+          mcp: {
+            direct: true,
+            serverName,
+            toolName,
+            namespacedToolName
+          }
+        },
+        execute: handlers.callDirectMcpTool
+      });
+    }
+  }
+  return definitions;
+}
 
 export function createBuiltinAssistantToolDefinitions({ workspaceGuard, mcpService = null }) {
   const handlers = {
@@ -51,7 +97,7 @@ export function createBuiltinAssistantToolDefinitions({ workspaceGuard, mcpServi
     ...createDesktopToolHandlers(),
     ...createMcpToolHandlers({ mcpService })
   };
-  return [
+  const definitions = [
     createListDirectoryToolDefinition({ handlers }),
     createReadFileToolDefinition({ handlers }),
     createStatPathToolDefinition({ handlers }),
@@ -81,13 +127,19 @@ export function createBuiltinAssistantToolDefinitions({ workspaceGuard, mcpServi
     createDesktopScrollToolDefinition({ handlers }),
     createDesktopWaitChangeToolDefinition({ handlers }),
     createDesktopFindTextToolDefinition({ handlers }),
-    createDesktopCursorInfoToolDefinition({ handlers }),
-    createListMcpServersToolDefinition({ handlers }),
-    createListMcpToolsToolDefinition({ handlers }),
-    createListMcpResourcesToolDefinition({ handlers }),
-    createReadMcpResourceToolDefinition({ handlers }),
-    createCallMcpToolDefinition({ handlers })
+    createDesktopCursorInfoToolDefinition({ handlers })
   ];
+  if (mcpService) {
+    definitions.push(
+      createListMcpServersToolDefinition({ handlers }),
+      createListMcpToolsToolDefinition({ handlers }),
+      createListMcpResourcesToolDefinition({ handlers }),
+      createReadMcpResourceToolDefinition({ handlers }),
+      createCallMcpToolDefinition({ handlers }),
+      ...createDirectMcpToolDefinitions({ mcpService, handlers })
+    );
+  }
+  return definitions;
 }
 
 export default createBuiltinAssistantToolDefinitions;

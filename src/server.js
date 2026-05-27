@@ -19,6 +19,7 @@ import chatUiRuntimeObserver from './chat-ui/runtime-observer.js';
 import assistantConsolidator from './assistant-core/consolidator.js';
 import localScheduler from './assistant-core/local-scheduler.js';
 import desktopAgentService from './desktop-agent/service.js';
+import mcpConnectionManager from './mcp/index.js';
 
 export function createServer({ port }) {
   ensureAccountsPersist();
@@ -96,6 +97,9 @@ export function createServer({ port }) {
   chatUiRuntimeObserver.start();
   assistantConsolidator.start();
   localScheduler.start();
+  mcpConnectionManager.start().catch((error) => {
+    console.error('[MCP] Failed to start MCP connection manager:', error.message);
+  });
 
   if (settings.desktopAgent?.enabled === true && settings.desktopAgent?.autoStart === true) {
     desktopAgentService.start().catch((error) => {
@@ -123,6 +127,7 @@ export function startServer({ port }) {
     chatUiRuntimeObserver.stop();
     assistantConsolidator.stop();
     localScheduler.stop();
+    mcpConnectionManager.stop().catch(() => {});
   });
   return server;
 }

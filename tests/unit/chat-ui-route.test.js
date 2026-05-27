@@ -9,6 +9,7 @@ import chatUiConversationService from '../../src/chat-ui/conversation-service.js
 import assistantRunStore from '../../src/assistant-core/run-store.js';
 import agentChannelDeliveryStore from '../../src/agent-channels/delivery-store.js';
 import artifactService from '../../src/assistant-core/artifact-service.js';
+import mcpConnectionManager from '../../src/mcp/index.js';
 
 function mockRes() {
   return {
@@ -742,6 +743,108 @@ test('handleConfirmAssistantToolAction clears persisted conversation pending sta
   } finally {
     chatUiConversationStore.get = originalGet;
     chatUiConversationStore.patch = originalPatch;
+    assistantPendingActionStore.dismiss(pendingAction.confirmToken);
+  }
+});
+
+test('handleConfirmAssistantToolAction replays approved direct MCP tool confirmations with mounted MCP tools', async () => {
+  const conversationId = 'conversation-mcp-direct-confirm-1';
+  const pendingAction = assistantPendingActionStore.create({
+    conversationId,
+    assistantRunId: 'run-mcp-direct-confirm-1',
+    toolName: 'mcp__docs__search',
+    input: {
+      query: 'approved direct call'
+    },
+    title: 'Confirmation required before continuing',
+    summary: 'MCP tool requires approval'
+  });
+
+  const conversation = {
+    id: conversationId,
+    metadata: {
+      assistantCore: {
+        pendingActionConfirmToken: pendingAction.confirmToken
+      },
+      uiChatMessages: [{
+        role: 'assistant',
+        pendingAction: {
+          confirmToken: pendingAction.confirmToken
+        }
+      }]
+    }
+  };
+  const calls = [];
+
+  const originalGet = chatUiConversationStore.get;
+  const originalPatch = chatUiConversationStore.patch;
+  const originalHasEnabledServers = mcpConnectionManager.hasEnabledServers;
+  const originalListServers = mcpConnectionManager.listServers;
+  const originalListTools = mcpConnectionManager.listTools;
+  const originalCallTool = mcpConnectionManager.callTool;
+
+  chatUiConversationStore.get = (id) => (id === conversationId ? conversation : null);
+  chatUiConversationStore.patch = (id, patch) => {
+    if (id !== conversationId) return conversation;
+    conversation.metadata = {
+      ...(conversation.metadata || {}),
+      ...(patch.metadata || {})
+    };
+    return conversation;
+  };
+  mcpConnectionManager.hasEnabledServers = () => true;
+  mcpConnectionManager.listServers = () => [{ name: 'docs' }];
+  mcpConnectionManager.listTools = ({ serverName } = {}) => {
+    assert.equal(serverName, 'docs');
+    return [{
+      serverName: 'docs',
+      toolName: 'search',
+      namespacedToolName: 'mcp__docs__search',
+      description: 'Search docs',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          query: { type: 'string' }
+        }
+      }
+    }];
+  };
+  mcpConnectionManager.callTool = async ({ serverName, toolName, arguments: args }) => {
+    calls.push({ serverName, toolName, args });
+    return {
+      content: [{
+        type: 'text',
+        text: `called:${toolName}:${args.query}`
+      }]
+    };
+  };
+
+  try {
+    const res = mockRes();
+    await handleConfirmAssistantToolAction({
+      body: {
+        confirmToken: pendingAction.confirmToken
+      }
+    }, res);
+
+    assert.equal(res._status, 200);
+    assert.equal(res._body.success, true);
+    assert.deepEqual(calls, [{
+      serverName: 'docs',
+      toolName: 'search',
+      args: { query: 'approved direct call' }
+    }]);
+    assert.equal(res._body.routeResult.toolResult.status, 'completed');
+    assert.equal(res._body.routeResult.toolResult.structured.namespacedToolName, 'mcp__docs__search');
+    assert.equal(conversation.metadata.assistantCore.pendingActionConfirmToken, null);
+    assert.equal(conversation.metadata.uiChatMessages[0].pendingAction, null);
+  } finally {
+    chatUiConversationStore.get = originalGet;
+    chatUiConversationStore.patch = originalPatch;
+    mcpConnectionManager.hasEnabledServers = originalHasEnabledServers;
+    mcpConnectionManager.listServers = originalListServers;
+    mcpConnectionManager.listTools = originalListTools;
+    mcpConnectionManager.callTool = originalCallTool;
     assistantPendingActionStore.dismiss(pendingAction.confirmToken);
   }
 });

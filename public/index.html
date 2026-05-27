@@ -7,9 +7,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>CliGate</title>
     <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🚀</text></svg>">
-    <script type="module" src="/js/app.js?v=20260510-page-modules-1"></script>
+    <script type="module" src="/js/app.js?v=20260527-mcp-layout-1"></script>
     <script src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js" defer></script>
-    <link rel="stylesheet" href="/css/style.css?v=20260503-sidebar-section-spacing-1">
+    <link rel="stylesheet" href="/css/style.css?v=20260527-mcp-layout-1">
 </head>
 
 <body class="bg-space-950 text-gray-300 font-sans antialiased min-h-screen selection:bg-neon-purple selection:text-white"
@@ -202,6 +202,13 @@
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 8h10M7 12h8m-8 4h6M6 4h12a2 2 0 012 2v12a2 2 0 01-2 2H8l-4 4V6a2 2 0 012-2z" />
                                 </svg>
                                 <span class="sidebar-label" x-text="t('skillsTitle')"></span>
+                            </button>
+                            <button class="nav-item"
+                                :class="{'active': activeTab === 'mcp'}" @click="setActiveTab('mcp')" :title="sidebarCollapsed ? t('mcpTitle') : ''">
+                                <svg class="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7h7m2 0h7M4 12h16M4 17h7m2 0h7" />
+                                </svg>
+                                <span class="sidebar-label" x-text="t('mcpTitle')"></span>
                             </button>
                         </nav>
                     </div>
@@ -418,6 +425,7 @@
                     <div x-show="activeTab === 'channels'" x-transition class="view-container" data-partial-view="channels"></div>
 
                     <div x-show="activeTab === 'skills'" x-transition class="view-container workspace-view" data-partial-view="skills"></div>
+                    <div x-show="activeTab === 'mcp'" x-transition class="view-container workspace-view" data-partial-view="mcp"></div>
 
                     <div x-show="activeTab === 'tasks'" x-transition class="view-container session-workspace-view tasks-view flex flex-col min-h-0">
                         <div class="tasks-subtabs flex items-center gap-2 mb-4 flex-shrink-0">

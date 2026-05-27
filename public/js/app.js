@@ -10,6 +10,7 @@ import { createDashboardPageModule } from './modules/dashboard-page.js';
 import { createLogsPageModule } from './modules/logs-page.js';
 import { createSettingsPageModule } from './modules/settings-page.js';
 import { createSkillsPageModule } from './modules/skills-page.js';
+import { createMcpPageModule } from './modules/mcp-page.js';
 import { createToolsPageModule } from './modules/tools-page.js';
 import { createUsagePricingPageModule } from './modules/usage-pricing-page.js';
 
@@ -37,6 +38,7 @@ function createShellModule() {
       assistantTasks: '/partials/views/assistant-tasks.html',
       assistantWorkbench: '/partials/views/assistant-workbench.html',
       skills: '/partials/views/skills.html',
+      mcp: '/partials/views/mcp.html',
       scheduledTasks: '/partials/views/scheduled-tasks.html',
       localModels: '/partials/views/local-models.html',
       apikeys: '/partials/views/api-keys.html',
@@ -221,7 +223,7 @@ function createShellModule() {
 
     sectionForTab(tab) {
       if (['dashboard', 'chat', 'tasks', 'assistantTasks', 'assistantWorkbench', 'scheduledTasks'].includes(tab)) return 'workspace';
-      if (['assistantAgent', 'skills'].includes(tab)) return 'assistant';
+      if (['assistantAgent', 'skills', 'mcp'].includes(tab)) return 'assistant';
       if (['tools'].includes(tab)) return 'cliTools';
       if (['accounts', 'apikeys', 'localModels'].includes(tab)) return 'credentials';
       if (['channels'].includes(tab)) return 'channels';
@@ -308,6 +310,9 @@ function createShellModule() {
       }
       if (tab === 'skills') {
         this.loadSkills();
+      }
+      if (tab === 'mcp') {
+        this.loadMcpServers();
       }
       if (tab === 'assistantWorkbench') {
         this.loadAssistantWorkbench();
@@ -580,6 +585,7 @@ function registerApp() {
     createScheduledTasksPageModule(),
     createSettingsPageModule(),
     createSkillsPageModule(),
+    createMcpPageModule(),
     createLogsPageModule(),
     createUsagePricingPageModule(),
     createToolsPageModule(),

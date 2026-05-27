@@ -1,4 +1,5 @@
 import AssistantRunner from '../assistant-core/runner.js';
+import { ASSISTANT_RUN_STATUS } from '../assistant-core/models.js';
 import createDefaultAssistantToolRegistry from '../assistant-core/tool-registry.js';
 import AssistantToolExecutor from '../assistant-core/tool-executor.js';
 import createBuiltinAssistantToolRegistry, {
@@ -28,6 +29,7 @@ export class AssistantDialogueService {
     enableBuiltinExecutionTools = false,
     executionWorkspaceRoot = process.cwd(),
     executionMcpService = null,
+    executionMcpServiceResolver = null,
     llmClient = assistantLlmClient,
     fallbackRunner = null,
     messageService = null,
@@ -38,7 +40,10 @@ export class AssistantDialogueService {
     this.taskViewService = taskViewService;
     this.enableBuiltinExecutionTools = enableBuiltinExecutionTools === true;
     this.executionWorkspaceRoot = executionWorkspaceRoot || process.cwd();
-    this.executionMcpService = executionMcpService || null;
+    this.executionMcpServiceResolver = typeof executionMcpServiceResolver === 'function'
+      ? executionMcpServiceResolver
+      : null;
+    this.executionMcpService = executionMcpService || this.executionMcpServiceResolver?.() || null;
     this.supervisorToolRegistry = toolRegistry || createDefaultAssistantToolRegistry({
       observationService: this.observationService,
       messageService,
@@ -101,9 +106,17 @@ export class AssistantDialogueService {
     }
 
     const nextWorkspaceRoot = String(cwd || this.executionWorkspaceRoot || process.cwd()).trim() || process.cwd();
-    if (this.executionToolRegistry && nextWorkspaceRoot === this.executionWorkspaceRoot) {
+    const nextMcpService = this.executionMcpServiceResolver
+      ? (this.executionMcpServiceResolver() || null)
+      : this.executionMcpService;
+    if (
+      this.executionToolRegistry
+      && nextWorkspaceRoot === this.executionWorkspaceRoot
+      && nextMcpService === this.executionMcpService
+    ) {
       return;
     }
+    this.executionMcpService = nextMcpService;
 
     const builtinExecutionSurface = createBuiltinAssistantToolRegistry({
       workspaceRoot: nextWorkspaceRoot,
@@ -340,6 +353,30 @@ export class AssistantDialogueService {
         cwd,
         model
       });
+      if (
+        executed?.run?.status === ASSISTANT_RUN_STATUS.FAILED
+        && String(executed?.run?.metadata?.stopPolicy?.reason || '').includes('assistant_llm_failed')
+      ) {
+        const fallbackRun = this.runStore.save({
+          ...run,
+          metadata: {
+            ...(run.metadata || {}),
+            assistantAgent: {
+              mode: 'fallback',
+              reason: executed.run.metadata.stopPolicy.reason
+            }
+          }
+        });
+        return this.fallbackRunner.run({
+          run: fallbackRun,
+          conversation,
+          text,
+          inputParts,
+          defaultRuntimeProvider,
+          cwd,
+          model
+        });
+      }
       return {
         ...executed,
         run: this.runStore.save(executed.run)

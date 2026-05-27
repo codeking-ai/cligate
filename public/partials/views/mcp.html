@@ -1,0 +1,214 @@
+<div class="mcp-page">
+  <div class="mcp-header">
+    <div class="mcp-header-copy">
+      <div class="mcp-eyebrow" x-text="t('mcpWorkspaceEyebrow')"></div>
+      <div class="mcp-title-row">
+        <h1 x-text="t('mcpTitle')"></h1>
+        <span class="mcp-count-chip" x-text="mcpServers.length + ' ' + t('mcpServersLabel')"></span>
+      </div>
+      <p x-text="t('mcpOverviewDesc')"></p>
+    </div>
+    <div class="mcp-header-actions">
+      <button class="btn btn-sm btn-surface" @click="loadMcpServers({ preserveSelection: true })" :disabled="mcpLoading"
+        x-text="mcpLoading ? t('refreshing') : t('refresh')"></button>
+      <button class="btn btn-sm btn-accent-cyan" @click="resetMcpForm()" x-text="t('mcpNewServer')"></button>
+    </div>
+  </div>
+
+  <div class="mcp-stats">
+    <div class="mcp-stat">
+      <span x-text="t('mcpConnectedServers')"></span>
+      <strong x-text="mcpServers.filter((s) => s.status === 'connected').length"></strong>
+    </div>
+    <div class="mcp-stat">
+      <span x-text="t('enabled')"></span>
+      <strong x-text="mcpServers.filter((s) => s.enabled).length"></strong>
+    </div>
+    <div class="mcp-stat">
+      <span x-text="t('mcpToolsTitle')"></span>
+      <strong x-text="mcpServers.reduce((sum, s) => sum + Number(s.toolCount || 0), 0)"></strong>
+    </div>
+    <div class="mcp-stat">
+      <span x-text="t('mcpResourcesTitle')"></span>
+      <strong x-text="mcpServers.reduce((sum, s) => sum + Number(s.resourceCount || 0), 0)"></strong>
+    </div>
+  </div>
+
+  <div class="mcp-layout">
+    <aside class="mcp-panel mcp-server-panel">
+      <div class="mcp-panel-head">
+        <div>
+          <h2 x-text="t('mcpServersTitle')"></h2>
+          <p x-text="mcpServers.filter((s) => s.enabled).length + ' ' + t('enabled')"></p>
+        </div>
+      </div>
+
+      <div class="mcp-server-list">
+        <template x-for="server in mcpServers" :key="server.name">
+          <button type="button" class="mcp-server-row"
+            :class="{ 'is-selected': selectedMcpServerName === server.name }"
+            @click="selectMcpServer(server.name)">
+            <div class="mcp-server-row-main">
+              <div class="mcp-server-name" x-text="server.name"></div>
+              <span class="mcp-status-pill" :class="mcpStatusClass(server)" x-text="server.status || '-'"></span>
+            </div>
+            <div class="mcp-server-endpoint" x-text="mcpServerSummary(server)"></div>
+            <div class="mcp-server-meta">
+              <span x-text="mcpTransportLabel(server.transport)"></span>
+              <span x-text="(server.toolCount || 0) + ' ' + t('mcpToolsShort')"></span>
+              <span x-text="(server.resourceCount || 0) + ' ' + t('mcpResourcesShort')"></span>
+            </div>
+          </button>
+        </template>
+
+        <div x-show="!mcpLoading && mcpServers.length === 0" class="mcp-empty" x-text="t('mcpServersEmpty')"></div>
+      </div>
+    </aside>
+
+    <main class="mcp-main">
+      <section class="mcp-panel">
+        <div class="mcp-panel-head mcp-config-head">
+          <div>
+            <h2 x-text="selectedMcpServerName ? t('mcpEditServer') : t('mcpNewServer')"></h2>
+            <p x-text="t('mcpEnableHint')"></p>
+          </div>
+          <div class="mcp-row-actions" x-show="selectedMcpServer">
+            <button class="btn btn-xs btn-surface" @click="toggleMcpServer(selectedMcpServer)"
+              x-text="selectedMcpServer?.enabled ? t('disabled') : t('enabled')"></button>
+            <button class="btn btn-xs btn-surface" @click="reloadMcpServer()" x-text="t('mcpReload')"></button>
+            <button class="btn btn-xs btn-danger" @click="deleteMcpServer()" x-text="t('delete')"></button>
+          </div>
+        </div>
+
+        <div class="mcp-form">
+          <div class="mcp-form-grid">
+            <label class="mcp-field mcp-field-wide">
+              <span x-text="t('mcpName')"></span>
+              <input class="input" x-model="mcpForm.name" :disabled="!!selectedMcpServerName">
+            </label>
+            <label class="mcp-field">
+              <span x-text="t('mcpTimeout')"></span>
+              <input type="number" min="1000" step="1000" class="input" x-model.number="mcpForm.timeoutMs">
+            </label>
+            <label class="mcp-field">
+              <span x-text="t('mcpApprovalMode')"></span>
+              <select class="input" x-model="mcpForm.approvalMode">
+                <option value="ask" x-text="t('mcpApprovalAsk')"></option>
+                <option value="always" x-text="t('mcpApprovalAlways')"></option>
+                <option value="never" x-text="t('mcpApprovalNever')"></option>
+              </select>
+            </label>
+          </div>
+
+          <div class="mcp-transport-section">
+            <div class="mcp-field-label" x-text="t('mcpTransport')"></div>
+            <div class="mcp-transport-grid">
+              <button type="button" class="mcp-transport-option"
+                :class="{ 'is-selected': mcpForm.transport === 'stdio' }"
+                @click="setMcpTransport('stdio')">
+                <strong x-text="t('mcpTransportStdio')"></strong>
+                <span x-text="t('mcpTransportStdioMeta')"></span>
+              </button>
+              <button type="button" class="mcp-transport-option"
+                :class="{ 'is-selected': mcpForm.transport === 'http' }"
+                @click="setMcpTransport('http')">
+                <strong x-text="t('mcpTransportHttp')"></strong>
+                <span x-text="t('mcpTransportHttpMeta')"></span>
+              </button>
+            </div>
+          </div>
+
+          <div class="mcp-form-section" x-show="mcpForm.transport === 'stdio'">
+            <div class="mcp-section-title" x-text="t('mcpStdioSection')"></div>
+            <div class="mcp-form-grid">
+              <label class="mcp-field">
+                <span x-text="t('mcpCommand')"></span>
+                <input class="input" x-model="mcpForm.command" placeholder="npx">
+              </label>
+              <label class="mcp-field mcp-field-wide">
+                <span x-text="t('mcpCwd')"></span>
+                <input class="input" x-model="mcpForm.cwd" placeholder="D:\proxypool-hub">
+              </label>
+              <label class="mcp-field mcp-field-full">
+                <span x-text="t('mcpArgs')"></span>
+                <textarea rows="4" class="input" x-model="mcpForm.argsText" :placeholder="t('mcpArgsPlaceholder')"></textarea>
+              </label>
+              <label class="mcp-field mcp-field-full">
+                <span x-text="t('mcpEnv')"></span>
+                <textarea rows="4" class="input" x-model="mcpForm.envText" :placeholder="t('mcpEnvPlaceholder')"></textarea>
+              </label>
+            </div>
+          </div>
+
+          <div class="mcp-form-section" x-show="mcpForm.transport === 'http'">
+            <div class="mcp-section-title" x-text="t('mcpHttpSection')"></div>
+            <div class="mcp-form-grid">
+              <label class="mcp-field mcp-field-full">
+                <span x-text="t('mcpUrl')"></span>
+                <input class="input" x-model="mcpForm.url" placeholder="https://example.com/mcp">
+              </label>
+              <label class="mcp-field">
+                <span x-text="t('mcpBearerTokenEnvVar')"></span>
+                <input class="input" x-model="mcpForm.bearerTokenEnvVar" placeholder="MCP_TOKEN">
+              </label>
+              <label class="mcp-field mcp-field-full">
+                <span x-text="t('mcpHeaders')"></span>
+                <textarea rows="5" class="input" x-model="mcpForm.headersText" :placeholder="t('mcpHeadersPlaceholder')"></textarea>
+              </label>
+            </div>
+          </div>
+
+          <div class="mcp-save-row">
+            <label class="mcp-enable-toggle">
+              <span x-text="mcpForm.enabled ? t('enabled') : t('disabled')"></span>
+              <button type="button" class="mcp-switch" :class="{ 'is-on': mcpForm.enabled }" @click="mcpForm.enabled = !mcpForm.enabled">
+                <span></span>
+              </button>
+            </label>
+            <button class="btn btn-sm btn-accent-cyan" @click="saveMcpServer()" :disabled="mcpSaving"
+              x-text="mcpSaving ? t('saving') : t('save')"></button>
+          </div>
+        </div>
+      </section>
+
+      <section class="mcp-panel">
+        <div class="mcp-panel-head">
+          <div>
+            <h2 x-text="t('mcpCapabilitiesTitle')"></h2>
+            <p x-text="selectedMcpServerName || t('mcpServersEmpty')"></p>
+          </div>
+          <div class="mcp-tabs">
+            <button type="button" :class="{ 'is-selected': mcpCapabilityTab === 'tools' }"
+              @click="mcpCapabilityTab = 'tools'"
+              x-text="t('mcpToolsTitle') + ' ' + mcpTools.length"></button>
+            <button type="button" :class="{ 'is-selected': mcpCapabilityTab === 'resources' }"
+              @click="mcpCapabilityTab = 'resources'"
+              x-text="t('mcpResourcesTitle') + ' ' + mcpResources.length"></button>
+          </div>
+        </div>
+
+        <div class="mcp-capability-list" x-show="mcpCapabilityTab === 'tools'">
+          <template x-for="tool in mcpTools" :key="tool.namespacedToolName">
+            <details class="mcp-capability-item">
+              <summary x-text="tool.toolName"></summary>
+              <div class="mcp-capability-desc" x-text="tool.description || '-'"></div>
+              <pre x-text="mcpToolSchemaText(tool)"></pre>
+            </details>
+          </template>
+          <div x-show="mcpTools.length === 0" class="mcp-empty" x-text="t('mcpToolsEmpty')"></div>
+        </div>
+
+        <div class="mcp-capability-list" x-show="mcpCapabilityTab === 'resources'">
+          <template x-for="resource in mcpResources" :key="resource.uri || resource.name">
+            <div class="mcp-resource-item">
+              <strong x-text="resource.name || resource.uri"></strong>
+              <span x-text="resource.uri || '-'"></span>
+              <p x-text="resource.description || ''"></p>
+            </div>
+          </template>
+          <div x-show="mcpResources.length === 0" class="mcp-empty" x-text="t('mcpResourcesEmpty')"></div>
+        </div>
+      </section>
+    </main>
+  </div>
+</div>

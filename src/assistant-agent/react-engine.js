@@ -479,9 +479,14 @@ export class AssistantReactEngine {
           autoApproveAll,
           extraReadRoots
         });
-        toolResults.push(result);
-        workingRun.steps.push(summarizeToolStep(toolCall.name, result));
-        const normalizedResult = normalizeAssistantToolResultEntry(result, {
+        const recordedResult = {
+          ...result,
+          toolName: toolCall.name,
+          input: toolCall.input || {}
+        };
+        toolResults.push(recordedResult);
+        workingRun.steps.push(summarizeToolStep(toolCall.name, recordedResult));
+        const normalizedResult = normalizeAssistantToolResultEntry(recordedResult, {
           toolName: toolCall.name
         });
         this.emitTrace(workingRun.id, {
@@ -496,13 +501,13 @@ export class AssistantReactEngine {
             toolName: normalizedResult.toolName || toolCall.name,
             durationMs: Date.now() - toolStartedAt,
             result: normalizedResult.payload || null,
-            structured: result?.structured ?? null,
-            metadata: result?.metadata || {}
+            structured: recordedResult?.structured ?? null,
+            metadata: recordedResult?.metadata || {}
           },
           visibility: 'detail'
         });
 
-        const session = extractToolResultSession(result);
+        const session = extractToolResultSession(recordedResult);
         if (session?.id && session?.provider) {
           relatedRuntimeSessionIds.add(session.id);
           this.emitTrace(workingRun.id, {
@@ -521,11 +526,11 @@ export class AssistantReactEngine {
           });
         }
 
-        appendToolResultMessage(transcript, toolCall, result);
+        appendToolResultMessage(transcript, toolCall, recordedResult);
 
         const reflected = await this.reflectionService.expandToolResults({
           toolCall: { toolName: toolCall.name, input: toolCall.input || {} },
-          toolResult: result,
+          toolResult: recordedResult,
           toolExecutor: this.toolExecutor,
           context: {
             run: workingRun,

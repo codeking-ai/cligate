@@ -5,6 +5,7 @@ import createBuiltinAssistantToolRegistry, {
   AssistantToolPolicyService,
   AssistantToolsExecutor
 } from '../assistant-tools/index.js';
+import { resolveEnabledMcpService } from './mcp-service-resolver.js';
 
 function normalizeText(value) {
   return String(value || '').trim();
@@ -43,10 +44,11 @@ function clearPendingToken(conversationStore, conversation = null) {
   }) || conversation;
 }
 
-async function executeBuiltinPendingAction(action = {}) {
+async function executeBuiltinPendingAction(action = {}, { mcpService = null } = {}) {
   const workspaceRoot = resolveWorkspaceRoot(action);
   const { registry, workspaceGuard } = createBuiltinAssistantToolRegistry({
-    workspaceRoot
+    workspaceRoot,
+    mcpService
   });
   const executor = new AssistantToolsExecutor({
     toolRegistry: registry,
@@ -80,7 +82,9 @@ export async function resolveAssistantConfirmation({
   runStore = assistantRunStore,
   pendingActionStore = assistantPendingActionStore,
   assistantToolRegistry = null,
-  assistantToolContext = {}
+  assistantToolContext = {},
+  mcpService = null,
+  mcpServiceResolver = resolveEnabledMcpService
 } = {}) {
   const normalizedDecision = normalizeText(decision).toLowerCase();
   if (!['approve', 'deny'].includes(normalizedDecision)) {
@@ -118,7 +122,9 @@ export async function resolveAssistantConfirmation({
   }
 
   if (isExecutionToolPendingAction(action)) {
-    const result = await executeBuiltinPendingAction(action);
+    const result = await executeBuiltinPendingAction(action, {
+      mcpService: mcpService || mcpServiceResolver?.() || null
+    });
     return {
       ...result,
       conversation: clearedConversation

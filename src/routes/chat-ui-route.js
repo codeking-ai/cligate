@@ -34,6 +34,7 @@ import chatUiConversationStore from '../chat-ui/conversation-store.js';
 import assistantRunStore from '../assistant-core/run-store.js';
 import artifactService from '../assistant-core/artifact-service.js';
 import { ensurePendingAssistantAction } from '../assistant-core/pending-action-resolver.js';
+import { resolveEnabledMcpService } from '../assistant-core/mcp-service-resolver.js';
 
 function listPersistedUiChatMessages(conversation) {
   const messages = conversation?.metadata?.uiChatMessages;
@@ -186,7 +187,8 @@ async function executeConfirmedExecutionToolAction(action = {}, { conversation =
       || process.cwd()
   ).trim() || process.cwd();
   const { registry, workspaceGuard } = createBuiltinAssistantToolRegistry({
-    workspaceRoot
+    workspaceRoot,
+    mcpService: resolveEnabledMcpService()
   });
   const executor = new AssistantToolsExecutor({
     toolRegistry: registry,

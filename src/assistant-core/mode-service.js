@@ -7,6 +7,7 @@ import AssistantRunner from './runner.js';
 import agentOrchestratorMessageService from '../agent-orchestrator/message-service.js';
 import assistantTaskViewService from './task-view-service.js';
 import AssistantDialogueService from '../assistant-agent/dialogue-service.js';
+import { resolveEnabledMcpService } from './mcp-service-resolver.js';
 import {
   isToolResultConfirmationRequired,
   normalizeAssistantToolResultEntry
@@ -333,6 +334,7 @@ export class AssistantModeService {
       taskViewService: this.taskViewService,
       messageService: this.messageService,
       enableBuiltinExecutionTools: true,
+      executionMcpServiceResolver: resolveEnabledMcpService,
       fallbackRunner: this.runner,
       runEventStore: this.runEventStore
     });

@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { mkdtemp } from 'node:fs/promises';
 
-import { createBuiltinAssistantToolRegistry } from '../../src/assistant-tools/index.js';
+import { AssistantMcpService, createBuiltinAssistantToolRegistry } from '../../src/assistant-tools/index.js';
 import {
   listAssistantToolDefinitions,
   buildAssistantAnthropicToolDefinitions,
@@ -28,8 +28,18 @@ test('assistant-tools translator lists tools with filtering by approval, visibil
     includeApprovalRequired: true,
     sources: ['mcp']
   });
-  assert.ok(mcpTools.every((tool) => tool.source === 'mcp'));
-  assert.ok(mcpTools.some((tool) => tool.name === 'list_mcp_servers'));
+  assert.deepEqual(mcpTools, []);
+
+  const mcpService = new AssistantMcpService({
+    servers: [{ name: 'docs', tools: [{ name: 'search' }] }]
+  });
+  const { registry: mcpRegistry } = createBuiltinAssistantToolRegistry({ workspaceRoot, mcpService });
+  const mountedMcpTools = listAssistantToolDefinitions(mcpRegistry, {
+    includeApprovalRequired: true,
+    sources: ['mcp']
+  });
+  assert.ok(mountedMcpTools.every((tool) => tool.source === 'mcp'));
+  assert.ok(mountedMcpTools.some((tool) => tool.name === 'list_mcp_servers'));
 
   const byName = listAssistantToolDefinitions(registry, {
     includeApprovalRequired: true,

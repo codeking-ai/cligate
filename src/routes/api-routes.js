@@ -84,6 +84,19 @@ import {
   handleDeleteSkill
 } from './skills-route.js';
 import {
+  handleListMcpServers,
+  handleUpsertMcpServer,
+  handleDeleteMcpServer,
+  handleSetMcpServerEnabled,
+  handleReloadMcpServer,
+  handleReloadMcpServers,
+  handleListMcpServerTools,
+  handleListMcpServerResources,
+  handleReadMcpServerResource,
+  handleCallMcpServerTool,
+  handleGetMcpConfigFile
+} from './mcp-route.js';
+import {
   handleListAssistantRuns,
   handleGetAssistantRun,
   handleListAssistantRunEvents,
@@ -430,6 +443,18 @@ export function registerApiRoutes(app, { port }) {
   app.get('/api/assistant/skills/settings', handleGetSkillSettings);
   app.put('/api/assistant/skills/settings', handleUpdateSkillSettings);
   app.post('/api/assistant/skills/settings', handleSetSkillEnabled);
+  app.get('/api/assistant/mcp/config-file', handleGetMcpConfigFile);
+  app.get('/api/assistant/mcp/servers', handleListMcpServers);
+  app.post('/api/assistant/mcp/servers', handleUpsertMcpServer);
+  app.put('/api/assistant/mcp/servers/:name', handleUpsertMcpServer);
+  app.delete('/api/assistant/mcp/servers/:name', handleDeleteMcpServer);
+  app.post('/api/assistant/mcp/servers/:name/enabled', handleSetMcpServerEnabled);
+  app.post('/api/assistant/mcp/servers/:name/reload', handleReloadMcpServer);
+  app.post('/api/assistant/mcp/reload', handleReloadMcpServers);
+  app.get('/api/assistant/mcp/servers/:name/tools', handleListMcpServerTools);
+  app.get('/api/assistant/mcp/servers/:name/resources', handleListMcpServerResources);
+  app.post('/api/assistant/mcp/servers/:name/resources/read', handleReadMcpServerResource);
+  app.post('/api/assistant/mcp/servers/:name/tools/:toolName/call', handleCallMcpServerTool);
   app.get('/api/assistant/runtime-sessions', handleListAssistantRuntimeSessions);
   app.get('/api/assistant/runtime-sessions/:id', handleGetAssistantRuntimeSession);
   app.get('/api/assistant/runtime-sessions/:id/turns/:turnId', handleGetAssistantRuntimeTurn);

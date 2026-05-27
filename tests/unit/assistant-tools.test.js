@@ -395,16 +395,28 @@ test('AssistantMcpService builds namespaced MCP identities and bridges tool/reso
   const mcpService = new AssistantMcpService({
     servers: [{
       name: 'docs',
-      tools: [{
-        name: 'search',
-        description: 'Search docs',
-        inputSchema: {
-          type: 'object',
-          properties: {
-            query: { type: 'string' }
+      tools: [
+        {
+          name: 'search',
+          description: 'Search docs',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              query: { type: 'string' }
+            }
+          }
+        },
+        {
+          name: 'search docs',
+          description: 'Search docs with a raw MCP name that needs sanitizing',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              query: { type: 'string' }
+            }
           }
         }
-      }],
+      ],
       resources: [{
         uri: 'docs://intro',
         name: 'Intro'
@@ -502,6 +514,92 @@ test('AssistantMcpService builds namespaced MCP identities and bridges tool/reso
   assert.equal(callTool.status, 'completed');
   assert.equal(callTool.structured.namespacedToolName, 'mcp__docs__search');
   assert.equal(callTool.structured.result.echoed.query, 'hello');
+
+  const sanitizedToolCall = await executor.executeToolCall({
+    toolName: 'call_mcp_tool',
+    input: {
+      namespacedToolName: 'mcp__docs__search_docs',
+      arguments: { query: 'legalized' }
+    },
+    metadata: {
+      approved: true
+    }
+  }, {
+    cwd: workspaceRoot
+  });
+  assert.equal(sanitizedToolCall.status, 'completed');
+  assert.equal(sanitizedToolCall.structured.toolName, 'search docs');
+  assert.equal(sanitizedToolCall.structured.result.echoed.query, 'legalized');
+
+  const directApprovalNeeded = await executor.executeToolCall({
+    toolName: 'mcp__docs__search',
+    input: { query: 'hello' }
+  }, {
+    cwd: workspaceRoot
+  });
+  assert.equal(directApprovalNeeded.status, 'requires_approval');
+
+  const directCall = await executor.executeToolCall({
+    toolName: 'mcp__docs__search',
+    input: { query: 'direct' },
+    metadata: {
+      approved: true
+    }
+  }, {
+    cwd: workspaceRoot
+  });
+  assert.equal(directCall.status, 'completed');
+  assert.equal(directCall.structured.toolName, 'search');
+  assert.equal(directCall.structured.result.echoed.query, 'direct');
+});
+
+test('call_mcp_tool preserves uniqued namespaced identity for colliding MCP names', async () => {
+  const mcpService = new AssistantMcpService({
+    servers: [{
+      name: 'docs',
+      tools: [
+        { name: 'search docs' },
+        { name: 'search/docs' }
+      ]
+    }],
+    toolResultFactory({ toolName }) {
+      return { toolName };
+    }
+  });
+  const [firstTool, secondTool] = mcpService.listTools({ serverName: 'docs' });
+  assert.equal(firstTool.namespacedToolName, 'mcp__docs__search_docs');
+  assert.notEqual(secondTool.namespacedToolName, 'mcp__docs__search_docs');
+
+  const workspaceRoot = await mkdtemp(path.join(os.tmpdir(), 'assistant-tools-mcp-collide-'));
+  const { registry, workspaceGuard } = createBuiltinAssistantToolRegistry({
+    workspaceRoot,
+    mcpService
+  });
+  const executor = new AssistantToolsExecutor({
+    toolRegistry: registry,
+    policyService: new AssistantToolPolicyService({
+      workspaceGuard,
+      allowMutatingTools: true
+    })
+  });
+
+  const result = await executor.executeToolCall({
+    toolName: 'call_mcp_tool',
+    input: {
+      namespacedToolName: secondTool.namespacedToolName,
+      arguments: {}
+    },
+    metadata: {
+      approved: true
+    }
+  }, {
+    cwd: workspaceRoot
+  });
+
+  assert.equal(result.status, 'completed');
+  assert.equal(result.structured.toolName, 'search/docs');
+  assert.equal(result.structured.namespacedToolName, secondTool.namespacedToolName);
+  assert.equal(result.structured.result.toolName, 'search/docs');
 });
 
 test('runAssistantToolLoop stops on denial when requested', async () => {

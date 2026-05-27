@@ -113,6 +113,50 @@ html.light .view-card {
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.84), 0 12px 28px rgba(148, 163, 184, 0.1);
 }
 
+html.light .mcp-panel {
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(248, 250, 252, 0.88));
+    border-color: rgba(197, 203, 214, 0.72);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.86), 0 12px 28px rgba(148, 163, 184, 0.1);
+}
+
+html.light .mcp-stat,
+html.light .mcp-count-chip,
+html.light .mcp-tabs,
+html.light .mcp-transport-option,
+html.light .mcp-capability-item,
+html.light .mcp-resource-item {
+    background: rgba(255, 255, 255, 0.7);
+    border-color: rgba(197, 203, 214, 0.72);
+}
+
+html.light .mcp-title-row h1,
+html.light .mcp-server-name,
+html.light .mcp-transport-option strong,
+html.light .mcp-resource-item strong,
+html.light .mcp-capability-item summary {
+    color: #0f172a;
+}
+
+html.light .mcp-stat strong,
+html.light .mcp-panel-head h2 {
+    color: #1e293b;
+}
+
+html.light .mcp-server-row:hover {
+    background: rgba(240, 249, 255, 0.82);
+}
+
+html.light .mcp-server-row.is-selected,
+html.light .mcp-transport-option.is-selected {
+    background: rgba(224, 242, 254, 0.88);
+    border-color: rgba(14, 165, 233, 0.5);
+}
+
+html.light .mcp-tabs button.is-selected {
+    background: rgba(226, 232, 240, 0.92);
+    color: #0f172a;
+}
+
 html.light .nav-item {
     color: #64748b;
     background: rgba(255, 255, 255, 0.62);
@@ -557,8 +601,506 @@ html.light .alert {
     width: 100%;
 }
 
+.view-container[data-partial-view="mcp"] {
+    max-width: 1320px;
+}
+
 @media (min-width: 1024px) {
     .view-container { padding: 2rem; }
+}
+
+.mcp-page {
+    display: flex;
+    flex-direction: column;
+    gap: 1.25rem;
+}
+
+.mcp-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 1.5rem;
+}
+
+.mcp-header-copy {
+    min-width: 0;
+}
+
+.mcp-eyebrow {
+    color: #64748b;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.7rem;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+}
+
+.mcp-title-row {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    margin-top: 0.35rem;
+}
+
+.mcp-title-row h1 {
+    color: #fff;
+    font-size: 1.55rem;
+    font-weight: 700;
+    line-height: 1.2;
+}
+
+.mcp-header-copy p {
+    margin-top: 0.55rem;
+    max-width: 58rem;
+    color: #64748b;
+    font-size: 0.875rem;
+    line-height: 1.6;
+}
+
+.mcp-count-chip,
+.mcp-status-pill {
+    display: inline-flex;
+    align-items: center;
+    height: 1.45rem;
+    padding: 0 0.6rem;
+    border-radius: 999px;
+    border: 1px solid rgba(71, 85, 105, 0.5);
+    background: rgba(15, 23, 42, 0.4);
+    color: #94a3b8;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.68rem;
+    white-space: nowrap;
+}
+
+.mcp-header-actions,
+.mcp-row-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+}
+
+.mcp-stats {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 0.75rem;
+}
+
+.mcp-stat {
+    min-width: 0;
+    border: 1px solid rgba(71, 85, 105, 0.28);
+    border-radius: 0.9rem;
+    background: rgba(15, 23, 42, 0.34);
+    padding: 0.8rem 1rem;
+}
+
+.mcp-stat span {
+    display: block;
+    color: #64748b;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.65rem;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+}
+
+.mcp-stat strong {
+    display: block;
+    margin-top: 0.35rem;
+    color: #e2e8f0;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 1.35rem;
+    line-height: 1.1;
+}
+
+.mcp-layout {
+    display: grid;
+    grid-template-columns: 20rem minmax(0, 1fr);
+    gap: 1.25rem;
+    align-items: start;
+}
+
+.mcp-main {
+    display: flex;
+    flex-direction: column;
+    gap: 1.25rem;
+    min-width: 0;
+}
+
+.mcp-panel {
+    min-width: 0;
+    overflow: hidden;
+    border: 1px solid rgba(71, 85, 105, 0.24);
+    border-radius: 1rem;
+    background: linear-gradient(180deg, rgba(18, 22, 34, 0.88), rgba(12, 17, 28, 0.8));
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04), 0 16px 34px rgba(2, 6, 23, 0.18);
+}
+
+.mcp-panel-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: 1rem 1.15rem;
+    border-bottom: 1px solid rgba(71, 85, 105, 0.26);
+}
+
+.mcp-panel-head h2 {
+    color: #cbd5e1;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.75rem;
+    font-weight: 600;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+}
+
+.mcp-panel-head p {
+    margin-top: 0.25rem;
+    color: #64748b;
+    font-size: 0.78rem;
+    line-height: 1.45;
+}
+
+.mcp-server-list {
+    max-height: 36rem;
+    overflow: auto;
+}
+
+.mcp-server-row {
+    display: block;
+    width: 100%;
+    border: 0;
+    border-bottom: 1px solid rgba(71, 85, 105, 0.22);
+    border-left: 3px solid transparent;
+    background: transparent;
+    padding: 0.9rem 1rem;
+    text-align: left;
+    cursor: pointer;
+    transition: background-color 0.15s ease, border-color 0.15s ease;
+}
+
+.mcp-server-row:hover {
+    background: rgba(30, 41, 59, 0.28);
+}
+
+.mcp-server-row.is-selected {
+    border-left-color: var(--color-neon-cyan);
+    background: rgba(34, 211, 238, 0.08);
+}
+
+.mcp-server-row-main {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 0.75rem;
+}
+
+.mcp-server-name {
+    min-width: 0;
+    color: #f8fafc;
+    font-size: 0.9rem;
+    font-weight: 600;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.mcp-server-endpoint {
+    margin-top: 0.35rem;
+    color: #64748b;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.72rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.mcp-server-meta {
+    display: flex;
+    justify-content: space-between;
+    gap: 0.5rem;
+    margin-top: 0.7rem;
+    color: #64748b;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.68rem;
+}
+
+.mcp-form {
+    padding: 1.15rem;
+}
+
+.mcp-form-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 1rem;
+}
+
+.mcp-field {
+    display: block;
+    min-width: 0;
+}
+
+.mcp-field-wide,
+.mcp-field-full {
+    grid-column: span 2;
+}
+
+.mcp-field span,
+.mcp-field-label {
+    display: block;
+    margin-bottom: 0.4rem;
+    color: #64748b;
+    font-size: 0.76rem;
+}
+
+.mcp-field .input {
+    border-radius: 0.72rem;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.78rem;
+}
+
+.mcp-transport-section,
+.mcp-form-section {
+    margin-top: 1.1rem;
+}
+
+.mcp-transport-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.75rem;
+}
+
+.mcp-transport-option {
+    border: 1px solid rgba(71, 85, 105, 0.38);
+    border-radius: 0.85rem;
+    background: rgba(15, 23, 42, 0.28);
+    padding: 0.85rem;
+    text-align: left;
+    cursor: pointer;
+    transition: border-color 0.15s ease, background-color 0.15s ease;
+}
+
+.mcp-transport-option:hover {
+    background: rgba(30, 41, 59, 0.32);
+}
+
+.mcp-transport-option.is-selected {
+    border-color: rgba(34, 211, 238, 0.58);
+    background: rgba(34, 211, 238, 0.09);
+}
+
+.mcp-transport-option strong,
+.mcp-transport-option span {
+    display: block;
+}
+
+.mcp-transport-option strong {
+    color: #f8fafc;
+    font-size: 0.88rem;
+}
+
+.mcp-transport-option span {
+    margin-top: 0.25rem;
+    color: #64748b;
+    font-size: 0.74rem;
+    line-height: 1.45;
+}
+
+.mcp-section-title {
+    margin-bottom: 0.75rem;
+    color: #94a3b8;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.72rem;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+}
+
+.mcp-save-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    margin-top: 1.2rem;
+    padding-top: 1rem;
+    border-top: 1px solid rgba(71, 85, 105, 0.22);
+}
+
+.mcp-enable-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.75rem;
+    color: #cbd5e1;
+    font-size: 0.82rem;
+}
+
+.mcp-switch {
+    position: relative;
+    width: 2.75rem;
+    height: 1.5rem;
+    border: 1px solid rgba(71, 85, 105, 0.5);
+    border-radius: 999px;
+    background: rgba(30, 41, 59, 0.7);
+    cursor: pointer;
+}
+
+.mcp-switch span {
+    position: absolute;
+    top: 0.22rem;
+    left: 0.24rem;
+    width: 1rem;
+    height: 1rem;
+    border-radius: 999px;
+    background: #fff;
+    transition: transform 0.15s ease;
+}
+
+.mcp-switch.is-on {
+    border-color: rgba(34, 197, 94, 0.46);
+    background: rgba(34, 197, 94, 0.7);
+}
+
+.mcp-switch.is-on span {
+    transform: translateX(1.2rem);
+}
+
+.mcp-tabs {
+    display: inline-flex;
+    gap: 0.25rem;
+    padding: 0.25rem;
+    border: 1px solid rgba(71, 85, 105, 0.34);
+    border-radius: 0.7rem;
+    background: rgba(15, 23, 42, 0.3);
+}
+
+.mcp-tabs button {
+    min-height: 2rem;
+    border: 0;
+    border-radius: 0.5rem;
+    background: transparent;
+    color: #64748b;
+    padding: 0 0.75rem;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.72rem;
+    cursor: pointer;
+}
+
+.mcp-tabs button.is-selected {
+    background: rgba(51, 65, 85, 0.72);
+    color: #f8fafc;
+}
+
+.mcp-capability-list {
+    padding: 1rem;
+    max-height: 26rem;
+    overflow: auto;
+}
+
+.mcp-capability-item,
+.mcp-resource-item {
+    border: 1px solid rgba(71, 85, 105, 0.25);
+    border-radius: 0.8rem;
+    background: rgba(15, 23, 42, 0.22);
+    padding: 0.85rem;
+}
+
+.mcp-capability-item + .mcp-capability-item,
+.mcp-resource-item + .mcp-resource-item {
+    margin-top: 0.65rem;
+}
+
+.mcp-capability-item summary {
+    cursor: pointer;
+    color: #f8fafc;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.82rem;
+}
+
+.mcp-capability-desc,
+.mcp-resource-item p {
+    margin-top: 0.5rem;
+    color: #94a3b8;
+    font-size: 0.78rem;
+    line-height: 1.55;
+}
+
+.mcp-capability-item pre {
+    max-height: 14rem;
+    margin-top: 0.75rem;
+    overflow: auto;
+    border: 1px solid rgba(71, 85, 105, 0.22);
+    border-radius: 0.65rem;
+    background: rgba(2, 6, 23, 0.38);
+    color: #cbd5e1;
+    padding: 0.8rem;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.7rem;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+.mcp-resource-item strong,
+.mcp-resource-item span {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.mcp-resource-item strong {
+    color: #f8fafc;
+    font-size: 0.88rem;
+}
+
+.mcp-resource-item span {
+    margin-top: 0.25rem;
+    color: #64748b;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.72rem;
+}
+
+.mcp-empty {
+    padding: 2.5rem 1rem;
+    color: #64748b;
+    font-size: 0.84rem;
+    text-align: center;
+}
+
+@media (max-width: 1100px) {
+    .mcp-layout {
+        grid-template-columns: 1fr;
+    }
+
+    .mcp-server-list {
+        max-height: 22rem;
+    }
+}
+
+@media (max-width: 760px) {
+    .mcp-header,
+    .mcp-panel-head,
+    .mcp-save-row {
+        align-items: stretch;
+        flex-direction: column;
+    }
+
+    .mcp-header-actions,
+    .mcp-row-actions {
+        width: 100%;
+    }
+
+    .mcp-header-actions .btn,
+    .mcp-row-actions .btn {
+        flex: 1;
+    }
+
+    .mcp-stats,
+    .mcp-form-grid,
+    .mcp-transport-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .mcp-field-wide,
+    .mcp-field-full {
+        grid-column: span 1;
+    }
 }
 
 .view-card {

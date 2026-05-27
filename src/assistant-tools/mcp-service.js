@@ -2,6 +2,23 @@ function normalizeText(value) {
   return String(value || '').trim();
 }
 
+function hashText(value = '') {
+  let hash = 2166136261;
+  const text = String(value || '');
+  for (let index = 0; index < text.length; index += 1) {
+    hash ^= text.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(36).slice(0, 6);
+}
+
+function normalizeToolName(value) {
+  const normalized = normalizeText(value)
+    .replace(/[^a-zA-Z0-9_-]+/g, '_')
+    .replace(/^_+|_+$/g, '');
+  return normalized || 'tool';
+}
+
 function validateServerName(value) {
   const name = normalizeText(value);
   if (!/^[a-zA-Z0-9_-]+$/.test(name)) {
@@ -11,7 +28,34 @@ function validateServerName(value) {
 }
 
 export function buildNamespacedMcpToolName(serverName, toolName) {
-  return `mcp__${validateServerName(serverName)}__${normalizeText(toolName)}`;
+  const server = validateServerName(serverName);
+  const prefix = `mcp__${server}__`;
+  const rawToolName = normalizeText(toolName);
+  const normalizedTool = normalizeToolName(rawToolName);
+  const maxLength = 64;
+  const available = Math.max(8, maxLength - prefix.length);
+  if ((prefix + normalizedTool).length <= maxLength) {
+    return prefix + normalizedTool;
+  }
+  const suffix = `_${hashText(rawToolName)}`;
+  const headLength = Math.max(1, available - suffix.length);
+  return prefix + normalizedTool.slice(0, headLength) + suffix;
+}
+
+export function ensureUniqueMcpToolNames(tools = []) {
+  const counts = new Map();
+  return (Array.isArray(tools) ? tools : []).map((tool) => {
+    const baseName = normalizeText(tool?.namespacedToolName)
+      || buildNamespacedMcpToolName(tool?.serverName, tool?.toolName || tool?.name);
+    const count = counts.get(baseName) || 0;
+    counts.set(baseName, count + 1);
+    if (count === 0) {
+      return { ...tool, namespacedToolName: baseName };
+    }
+    const suffix = `_${hashText(`${tool?.serverName}:${tool?.toolName || tool?.name}:${count}`)}`;
+    const nextName = `${baseName.slice(0, Math.max(1, 64 - suffix.length))}${suffix}`;
+    return { ...tool, namespacedToolName: nextName };
+  });
 }
 
 export function parseNamespacedMcpToolName(value) {
@@ -57,13 +101,13 @@ export class AssistantMcpService {
 
   listTools({ serverName = '' } = {}) {
     const server = this._requireServer(serverName);
-    return server.tools.map((tool) => ({
+    return ensureUniqueMcpToolNames(server.tools.map((tool) => ({
       serverName: server.name,
       toolName: normalizeText(tool?.name),
       namespacedToolName: buildNamespacedMcpToolName(server.name, tool?.name),
       description: normalizeText(tool?.description),
       inputSchema: tool?.inputSchema || { type: 'object', properties: {} }
-    }));
+    })));
   }
 
   listResources({ serverName = '', cursor = '' } = {}) {
