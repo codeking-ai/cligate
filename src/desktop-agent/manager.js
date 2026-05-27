@@ -2,6 +2,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
+import { request as httpRequest } from 'node:http';
 import { getDesktopAgentSettings } from './settings.js';
 import { ensureDesktopAgentToken } from './token-store.js';
 
@@ -36,6 +37,46 @@ function ringAppend(prev, chunk) {
     : next;
 }
 
+function probeExternalAgent(baseUrl, timeoutMs = 800) {
+  return new Promise((resolve) => {
+    let parsed;
+    try {
+      parsed = new URL('/health', baseUrl);
+    } catch {
+      resolve(null);
+      return;
+    }
+    const req = httpRequest(
+      {
+        method: 'GET',
+        hostname: parsed.hostname,
+        port: parsed.port || 8765,
+        path: parsed.pathname,
+        timeout: timeoutMs
+      },
+      (res) => {
+        let body = '';
+        res.setEncoding('utf8');
+        res.on('data', (chunk) => {
+          body += chunk;
+          if (body.length > 4096) body = body.slice(0, 4096);
+        });
+        res.on('end', () => {
+          let parsedBody = null;
+          try { parsedBody = JSON.parse(body); } catch { parsedBody = null; }
+          resolve({ statusCode: res.statusCode || 0, body: parsedBody });
+        });
+      }
+    );
+    req.on('error', () => resolve(null));
+    req.on('timeout', () => {
+      req.destroy();
+      resolve(null);
+    });
+    req.end();
+  });
+}
+
 export class DesktopAgentManager {
   constructor({
     getSettings = getDesktopAgentSettings,
@@ -50,16 +91,29 @@ export class DesktopAgentManager {
     this.lastError = '';
     this.recentStderr = '';
     this.recentStdout = '';
+    this.external = false;
   }
 
   getStatus() {
+    if (this.external) {
+      return {
+        running: true,
+        pid: null,
+        startedAt: this.startedAt,
+        lastError: this.lastError,
+        recentStderr: this.recentStderr,
+        recentStdout: this.recentStdout,
+        external: true
+      };
+    }
     return {
       running: !!this.child && this.child.exitCode === null,
       pid: this.child?.pid || null,
       startedAt: this.startedAt,
       lastError: this.lastError,
       recentStderr: this.recentStderr,
-      recentStdout: this.recentStdout
+      recentStdout: this.recentStdout,
+      external: false
     };
   }
 
@@ -69,6 +123,22 @@ export class DesktopAgentManager {
     }
     const settings = this.getSettings();
     const token = this.ensureToken();
+    // An *external* agent (typically the elevated scheduled task installed via
+    // scripts/desktop-agent/install-elevated-task.ps1) may already own the port.
+    // Spawning a second one would EADDRINUSE and silently leave the dashboard
+    // pointing at the right port anyway, so detect this case and treat it as
+    // "running, just not by us". This also means CliGate restarts no longer
+    // tear down an elevated agent that's actively driving an installer.
+    const existing = await probeExternalAgent(String(settings.baseUrl || 'http://127.0.0.1:8765'));
+    if (existing && existing.statusCode && existing.statusCode < 500) {
+      this.external = true;
+      this.startedAt = new Date().toISOString();
+      this.lastError = '';
+      this.recentStderr = '';
+      this.recentStdout = 'external desktop-agent detected on the configured port — reusing it';
+      return this.getStatus();
+    }
+    this.external = false;
     const command = String(settings.command || '').trim() || 'python';
     const args = Array.isArray(settings.args) && settings.args.length > 0
       ? [...settings.args]
@@ -118,6 +188,14 @@ export class DesktopAgentManager {
   }
 
   stop() {
+    // External (scheduled-task) agents are owned by the OS; do not try to kill
+    // them from the dashboard process — we don't have rights and even if we
+    // did, the next logon would resurrect them anyway. Just drop our handle.
+    if (this.external) {
+      this.external = false;
+      this.startedAt = null;
+      return this.getStatus();
+    }
     if (this.child && this.child.exitCode === null) {
       this.child.kill();
     }

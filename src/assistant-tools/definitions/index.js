@@ -25,6 +25,9 @@ import createDesktopTypeTextToolDefinition from './desktop-type-text.js';
 import createDesktopClickAtToolDefinition from './desktop-click-at.js';
 import createDesktopMoveMouseToolDefinition from './desktop-move-mouse.js';
 import createDesktopScrollToolDefinition from './desktop-scroll.js';
+import createDesktopWaitChangeToolDefinition from './desktop-wait-change.js';
+import createDesktopFindTextToolDefinition from './desktop-find-text.js';
+import createDesktopCursorInfoToolDefinition from './desktop-cursor-info.js';
 import createListMcpServersToolDefinition from './list-mcp-servers.js';
 import createListMcpToolsToolDefinition from './list-mcp-tools.js';
 import createListMcpResourcesToolDefinition from './list-mcp-resources.js';
@@ -76,6 +79,9 @@ export function createBuiltinAssistantToolDefinitions({ workspaceGuard, mcpServi
     createDesktopClickAtToolDefinition({ handlers }),
     createDesktopMoveMouseToolDefinition({ handlers }),
     createDesktopScrollToolDefinition({ handlers }),
+    createDesktopWaitChangeToolDefinition({ handlers }),
+    createDesktopFindTextToolDefinition({ handlers }),
+    createDesktopCursorInfoToolDefinition({ handlers }),
     createListMcpServersToolDefinition({ handlers }),
     createListMcpToolsToolDefinition({ handlers }),
     createListMcpResourcesToolDefinition({ handlers }),

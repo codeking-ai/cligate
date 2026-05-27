@@ -1,7 +1,7 @@
 export function createDesktopHealthToolDefinition({ handlers }) {
   return {
     name: 'desktop_health',
-    description: 'Probe the desktop-agent companion service. Returns screen size, cursor position, and the currently active window. Call this FIRST when any desktop_* tool returns AgentUnreachable, or before a long sequence of UI actions to confirm the agent is alive. Has no side effects.',
+    description: 'Probe the desktop-agent companion service. Returns screen size, cursor position, the currently active window, plus THREE critical diagnostic fields you must inspect BEFORE attempting any sequence of clicks: (1) `elevated` (bool) and `integrity_level` ("high"/"medium"/...): if elevated=false and the target is a UAC-elevated installer, every input is dropped by Windows UIPI — stop clicking, tell the user to run `scripts/desktop-agent/install-elevated-task.ps1` from an Administrator PowerShell. (2) `remote_session` (bool): true means the agent runs inside an RDP session — SetCursorPos calls fight the client\'s pointer sync, desktop_move_mouse will frequently report moved=false; tell the user precision pointer control is unreliable over RDP and suggest local execution. (3) `active_window`: confirms which window is in front, so you click the right one. Call this FIRST when any desktop_* tool returns AgentUnreachable, or before a long sequence of UI actions to confirm the agent is alive. Has no side effects.',
     inputSchema: {
       type: 'object',
       properties: {}

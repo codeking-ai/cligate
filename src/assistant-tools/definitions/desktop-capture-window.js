@@ -1,7 +1,7 @@
 export function createDesktopCaptureWindowToolDefinition({ handlers }) {
   return {
     name: 'desktop_capture_window',
-    description: 'Screenshot the desktop, a specific window (windowHwnd), or an explicit pixel region. Set inline=true to get base64 data back inline (default). Use this when (a) a UIA selector fails and you need to SEE the actual UI, (b) the app does not expose accessibility metadata, or (c) you need to verify a desktop_click/set_value visually landed. Screenshots are stored under .tmp/desktop-control-agent/screenshots/.',
+    description: 'Screenshot the desktop, a specific window (windowHwnd / windowTitle / windowClass), or an explicit pixel region. When you pass any window identifier WITHOUT a region, the agent auto-crops to that window\'s BoundingRectangle so small dialogs are not lost inside a 2560x1600 preview. AFTER this call: just use `space:"preview"` on desktop_click_at / desktop_move_mouse with x,y in the PREVIEW pixel grid you visually identified — the server now remembers the preview/region/screen relationship from this capture and resolves the math itself. You do NOT need to echo previewWidth/previewHeight back; if you do, they will be cross-checked against the server\'s record and the server\'s value wins. window_region={x,y,w,h} is also returned for advanced use with space:"region". Set inline=true to get base64 inline (default). Do NOT pass a placeholder region like {x:0,y:0,w:0,h:0} when you only have the window handle — leave region out entirely. Screenshots are stored under .tmp/desktop-control-agent/screenshots/.',
     inputSchema: {
       type: 'object',
       properties: {

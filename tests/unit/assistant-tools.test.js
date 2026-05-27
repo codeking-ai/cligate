@@ -68,6 +68,10 @@ test('AssistantToolPolicyService denies outside-workspace paths and requires app
   assert.equal(mutatingDecision.allowed, true);
   assert.equal(mutatingDecision.requiresApproval, true);
 
+  // Read-only path outside the workspace, no approval signal: hard deny.
+  // This restores the pre-fix behavior — we briefly tried routing reads
+  // through the requires_approval flow but that left the assistant stuck
+  // mid-task after the confirmation roundtrip resolved.
   const deniedDecision = policy.evaluateToolCall({
     tool: { name: 'read_file', mutating: false },
     invocation: { input: { path: '../outside.txt' } },
@@ -75,6 +79,36 @@ test('AssistantToolPolicyService denies outside-workspace paths and requires app
   });
   assert.equal(deniedDecision.allowed, false);
   assert.equal(deniedDecision.reason, 'path_outside_workspace');
+
+  // ...but when the conversation has been opted into autoApproveAll (or the
+  // call explicitly carries metadata.approved=true), the SAME read passes
+  // immediately without a confirmation prompt — the fix for the original
+  // complaint that "我直接同意" had no effect on read paths.
+  const approvedOutsideReadDecision = policy.evaluateToolCall({
+    tool: { name: 'read_file', mutating: false },
+    invocation: { input: { path: '../outside.txt' }, metadata: { approved: true } },
+    context: { cwd: workspaceRoot }
+  });
+  assert.equal(approvedOutsideReadDecision.allowed, true);
+  assert.equal(approvedOutsideReadDecision.requiresApproval, false);
+
+  const autoApproveOutsideReadDecision = policy.evaluateToolCall({
+    tool: { name: 'read_file', mutating: false },
+    invocation: { input: { path: '../outside.txt' } },
+    context: { cwd: workspaceRoot, autoApproveAll: true }
+  });
+  assert.equal(autoApproveOutsideReadDecision.allowed, true);
+  assert.equal(autoApproveOutsideReadDecision.requiresApproval, false);
+
+  // desktop_* tools operate on OS paths (e.g. installer EXEs in Downloads)
+  // and should never be gated by the workspace root.
+  const desktopOutsideDecision = policy.evaluateToolCall({
+    tool: { name: 'desktop_launch_app', mutating: false },
+    invocation: { input: { path: 'C:/Users/test/Downloads/installer.exe' } },
+    context: { cwd: workspaceRoot }
+  });
+  assert.equal(desktopOutsideDecision.allowed, true);
+  assert.equal(desktopOutsideDecision.requiresApproval, false);
 
   const outsideMutatingDecision = policy.evaluateToolCall({
     tool: { name: 'write_file', mutating: true, requiresApproval: true },

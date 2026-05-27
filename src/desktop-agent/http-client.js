@@ -213,6 +213,7 @@ export class DesktopAgentHttpClient {
         ...(input?.region ? { region: input.region } : {}),
         ...(input?.previewWidth ? { preview_width: Number(input.previewWidth) } : {}),
         ...(input?.previewHeight ? { preview_height: Number(input.previewHeight) } : {}),
+        ...(input?.verifyHover === true ? { verify_hover: true } : {}),
         ...withTransportMeta(input)
       }
     });
@@ -238,6 +239,38 @@ export class DesktopAgentHttpClient {
       method: 'POST',
       body: {
         amount: Number(input?.amount) || 0,
+        ...withTransportMeta(input)
+      }
+    });
+  }
+
+  waitChange(input = {}) {
+    return this.request('/wait_change', {
+      method: 'POST',
+      body: {
+        ...(input?.region ? { region: input.region } : {}),
+        ...(Number.isFinite(input?.timeoutMs) ? { timeout_ms: Number(input.timeoutMs) } : {}),
+        ...(Number.isFinite(input?.pollMs) ? { poll_ms: Number(input.pollMs) } : {}),
+        ...(Number.isFinite(input?.threshold) ? { threshold: Number(input.threshold) } : {}),
+        ...(Number.isFinite(input?.signatureSize) ? { signature_size: Number(input.signatureSize) } : {}),
+        ...withTransportMeta(input)
+      }
+    });
+  }
+
+  cursorInfo() {
+    return this.request('/cursor_info');
+  }
+
+  findText(input = {}) {
+    return this.request('/find_text', {
+      method: 'POST',
+      body: {
+        query: String(input?.query || ''),
+        match: String(input?.match || 'contains'),
+        ...(Number.isFinite(input?.minConfidence) ? { min_confidence: Number(input.minConfidence) } : {}),
+        ...(Number.isFinite(input?.maxResults) ? { max_results: Number(input.maxResults) } : {}),
+        ...(input?.region ? { region: input.region } : {}),
         ...withTransportMeta(input)
       }
     });

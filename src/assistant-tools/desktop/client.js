@@ -66,6 +66,18 @@ export class AssistantDesktopClient {
   async scroll(input = {}) {
     return this.service.scroll(input);
   }
+
+  async waitChange(input = {}) {
+    return this.service.waitChange(input);
+  }
+
+  async findText(input = {}) {
+    return this.service.findText(input);
+  }
+
+  async cursorInfo() {
+    return this.service.cursorInfo();
+  }
 }
 
 const assistantDesktopClient = new AssistantDesktopClient();

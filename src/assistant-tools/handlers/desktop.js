@@ -192,7 +192,13 @@ export function createDesktopToolHandlers({
 
     desktopMoveMouse: wrapHandler(async ({ input = {} } = {}) => desktopClient.moveMouse(input)),
 
-    desktopScroll: wrapHandler(async ({ input = {} } = {}) => desktopClient.scroll(input))
+    desktopScroll: wrapHandler(async ({ input = {} } = {}) => desktopClient.scroll(input)),
+
+    desktopWaitChange: wrapHandler(async ({ input = {} } = {}) => desktopClient.waitChange(input)),
+
+    desktopFindText: wrapHandler(async ({ input = {} } = {}) => desktopClient.findText(input)),
+
+    desktopCursorInfo: wrapHandler(async () => desktopClient.cursorInfo())
   };
 }
 

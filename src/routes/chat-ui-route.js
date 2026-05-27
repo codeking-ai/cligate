@@ -1472,9 +1472,16 @@ export async function handleRouteChatAgentMessage(req, res) {
         if (!conversation?.metadata || !backgroundRunId) {
           return;
         }
-        if (getPendingUiAssistantRunId(conversation) !== backgroundRunId) {
-          return;
-        }
+        // NOTE: We deliberately do NOT gate on `pendingRunId === backgroundRunId`.
+        // If the user fires off a follow-up message while the first run is still
+        // executing, `uiChatPendingAssistantRunId` moves to the new run's id —
+        // and when run-A finally finishes, the old mismatch check used to return
+        // here without persisting A's reply, leaving the chat with only the
+        // "trace anchor" placeholder ("已经在后台处理…") and the final answer
+        // visible only inside the expanded execution-trace panel. The dedup
+        // below (`hasPersistedUiAssistantMessage`) is already idempotent, so it
+        // is safe to always persist regardless of which run is currently
+        // "pending" from the route's perspective.
 
         const messageContent = String(backgroundResult?.message || '').trim();
         if (hasPersistedUiAssistantMessage(conversation, {
@@ -1489,9 +1496,14 @@ export async function handleRouteChatAgentMessage(req, res) {
           ? conversation.metadata.uiChatMessages
           : [];
         const runStatus = String(backgroundResult?.assistantRun?.status || '').trim();
-        const nextPendingRunId = ['completed', 'failed', 'cancelled', 'waiting_user'].includes(runStatus)
+        const isTerminal = ['completed', 'failed', 'cancelled', 'waiting_user'].includes(runStatus);
+        // Only clear the pending pointer if it still refers to THIS run. With
+        // concurrent runs, blindly setting pendingRunId='' here would also wipe
+        // out the pointer to a newer run that just started.
+        const currentPending = getPendingUiAssistantRunId(conversation);
+        const nextPendingRunId = isTerminal && currentPending === backgroundRunId
           ? ''
-          : backgroundRunId;
+          : currentPending || (isTerminal ? '' : backgroundRunId);
         saveChatUiOutboundDelivery(conversation, {
           sessionId,
           text: messageContent,

@@ -564,7 +564,15 @@ test('handleRouteChatAgentMessage falls back to default workspace root when cwd 
   }
 });
 
-test('handleRouteChatAgentMessage ignores stale background results from an older assistant run', async () => {
+test('handleRouteChatAgentMessage persists late background results from an older assistant run alongside the newer pending run', async () => {
+  // Regression: when the user fires off a follow-up message while the first
+  // run is still executing, the original guard `pendingRunId === backgroundRunId`
+  // dropped run-A's reply on the floor. The chat then showed only the trace
+  // anchor ("已经在后台处理…") and the final answer was visible only inside the
+  // expanded execution-trace panel — exactly the bug a user reported as
+  // "all replies got swallowed by the execution process, no separate final
+  // reply block". The new behavior persists run-A's reply AND keeps run-new
+  // as the pending pointer so the newer run can finalize the same way.
   const originalRouteMessage = chatUiConversationService.routeMessage;
   const originalFindOrCreateBySessionId = chatUiConversationStore.findOrCreateBySessionId;
   const originalPatch = chatUiConversationStore.patch;
@@ -615,6 +623,7 @@ test('handleRouteChatAgentMessage ignores stale background results from an older
     }, res);
 
     assert.equal(typeof capturedBackgroundHandler, 'function');
+    const patchCountAfterRoute = patchCount;
 
     await capturedBackgroundHandler({
       message: 'Qingdao weather: cloudy',
@@ -624,9 +633,23 @@ test('handleRouteChatAgentMessage ignores stale background results from an older
       }
     });
 
-    assert.equal(patchCount, 1);
-    assert.deepEqual(conversation.metadata.uiChatMessages, []);
+    assert.equal(patchCount, patchCountAfterRoute + 1);
+    assert.equal(conversation.metadata.uiChatMessages.length, 1);
+    assert.equal(conversation.metadata.uiChatMessages[0].assistantRunId, 'run-old');
+    assert.equal(conversation.metadata.uiChatMessages[0].runStatus, 'completed');
+    assert.equal(conversation.metadata.uiChatMessages[0].content, 'Qingdao weather: cloudy');
+    // run-new is still pending; do NOT clobber its pointer with run-old's terminal status.
     assert.equal(conversation.metadata.uiChatPendingAssistantRunId, 'run-new');
+
+    // Re-firing the same stale result must be idempotent (dedup via hasPersistedUiAssistantMessage).
+    await capturedBackgroundHandler({
+      message: 'Qingdao weather: cloudy',
+      assistantRun: {
+        id: 'run-old',
+        status: 'completed'
+      }
+    });
+    assert.equal(conversation.metadata.uiChatMessages.length, 1);
   } finally {
     chatUiConversationService.routeMessage = originalRouteMessage;
     chatUiConversationStore.findOrCreateBySessionId = originalFindOrCreateBySessionId;

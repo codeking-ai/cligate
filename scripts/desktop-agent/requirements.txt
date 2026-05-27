@@ -1,0 +1,24 @@
+# Desktop-agent Python runtime dependencies.
+#
+# Install on the host that will run the desktop companion service:
+#     pip install -r requirements.txt
+#
+# Notes:
+# - All imports inside desktop-agent-server.py are LAZY — the server boots and
+#   /health works even without these. Each package is only required when its
+#   corresponding endpoint is called for the first time.
+# - mss is optional (faster screenshot backend). Without it screenshot_image
+#   automatically falls back to pyautogui.
+
+uiautomation>=2.0      # UIA control tree (used by /ui/find, /ui/act, /ui/tree, /ui/wait, /ui/find_all)
+pyautogui>=0.9.54      # Screenshot + keyboard/mouse fallback (non-Windows + mss-less screenshot)
+pyperclip>=1.8.2       # Clipboard paste path for /type and ValuePattern fallback
+Pillow>=10.0           # Image processing for screenshot preview/region
+mss>=9.0               # Optional: faster multi-monitor screenshot backend
+
+# OCR — used by /find_text to locate text in self-drawn / DirectUI windows
+# (Dingtalk installer, parts of WeChat/QQ) where UIA returns no controls.
+# rapidocr-onnxruntime is preferred: ~30 MB, CPU-only, ONNX models auto-download
+# on first call, no system deps. Fully optional — /find_text returns a clear
+# error if the package is not installed, no other endpoints regress.
+rapidocr-onnxruntime>=1.3 ; sys_platform == "win32"
