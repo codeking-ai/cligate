@@ -22,6 +22,15 @@ import { recognizeTier, refreshProviderModels, autoUpdateMappings } from './mode
 import { logger } from './utils/logger.js';
 import { getPrimaryLocalRuntime } from './local-runtime-manager.js';
 import { listOllamaModels } from './runtimes/ollama.js';
+import { logEveryNSeconds, resetLogSamplerKey } from './utils/log-sampler.js';
+
+// Once a local runtime has failed N times in a row we stop fetching it
+// entirely for the rest of the process — the URL clearly isn't listening
+// and re-trying every 30 minutes just adds latency to discovery and a warn
+// per attempt. The user's next deliberate action (changing the URL,
+// enabling Ollama from the dashboard) will reset this in-memory state.
+const LOCAL_RUNTIME_MAX_CONSECUTIVE_FAILURES = 3;
+const _localRuntimeProbeState = { consecutiveFailures: 0, lastTriedAt: 0 };
 
 const CACHE_TTL_MS = 30 * 60 * 1000; // 30 minutes
 const REFRESH_INTERVAL_MS = 30 * 60 * 1000;
@@ -149,13 +158,29 @@ async function discoverFromApiKeys() {
 
 async function discoverFromLocalRuntime() {
     const runtime = getPrimaryLocalRuntime();
-    if (!runtime || runtime.enabled === false || runtime.type !== 'ollama') {
+    if (!runtime || runtime.enabled === false || runtime.type !== 'ollama' || !runtime.baseUrl) {
         return {};
     }
 
+    // If we've already failed many times in a row, don't bother trying again
+    // until something resets the state (config change, manual reset). The
+    // dashboard's "test local runtime" action and successful discovery both
+    // reset the counter via resetLocalRuntimeProbe() below.
+    if (_localRuntimeProbeState.consecutiveFailures >= LOCAL_RUNTIME_MAX_CONSECUTIVE_FAILURES) {
+        logEveryNSeconds('model-discovery:local-runtime:skipped', 6 * 3600, ({ suppressed }) => {
+            const tail = suppressed > 0 ? ` (skipped ${suppressed} more probes since last log)` : '';
+            logger.info(`[ModelDiscovery] Local runtime (${runtime.name}) marked unreachable after ${_localRuntimeProbeState.consecutiveFailures} consecutive failures — skipping until reset${tail}`);
+        });
+        return {};
+    }
+
+    _localRuntimeProbeState.lastTriedAt = Date.now();
     try {
         const models = await listOllamaModels(runtime.baseUrl);
         if (!Array.isArray(models) || models.length === 0) return {};
+        _localRuntimeProbeState.consecutiveFailures = 0;
+        resetLogSamplerKey('model-discovery:local-runtime:failed');
+        resetLogSamplerKey('model-discovery:local-runtime:skipped');
         logger.info(`[ModelDiscovery] Local runtime ${runtime.name}: found ${models.length} models`);
         return {
             ollama: models.map(m => ({
@@ -165,9 +190,27 @@ async function discoverFromLocalRuntime() {
             }))
         };
     } catch (err) {
-        logger.warn(`[ModelDiscovery] Local runtime discovery failed: ${err.message}`);
+        _localRuntimeProbeState.consecutiveFailures += 1;
+        // First failure logs immediately, subsequent failures are throttled to
+        // once every 6 hours so a persistently-broken local runtime doesn't
+        // generate a warn every 30 minutes forever.
+        logEveryNSeconds('model-discovery:local-runtime:failed', 6 * 3600, ({ suppressed }) => {
+            const tail = suppressed > 0 ? ` (+${suppressed} suppressed since last log)` : '';
+            logger.warn(`[ModelDiscovery] Local runtime discovery failed (${_localRuntimeProbeState.consecutiveFailures} consecutive): ${err.message}${tail}`);
+        });
         return {};
     }
+}
+
+/**
+ * Allow callers (e.g. "test connection" UI button, manual config change) to
+ * forget the failure streak and try again on the next discovery cycle.
+ */
+export function resetLocalRuntimeProbe() {
+    _localRuntimeProbeState.consecutiveFailures = 0;
+    _localRuntimeProbeState.lastTriedAt = 0;
+    resetLogSamplerKey('model-discovery:local-runtime:failed');
+    resetLogSamplerKey('model-discovery:local-runtime:skipped');
 }
 
 // ─── Main discovery flow ─────────────────────────────────────────────────────
@@ -330,5 +373,6 @@ export default {
     getDiscoveredProviderModels,
     getDiscoveredTierMap,
     startModelDiscovery,
-    stopModelDiscovery
+    stopModelDiscovery,
+    resetLocalRuntimeProbe
 };

@@ -17,10 +17,14 @@ import { convertOutputToAnthropic, generateMessageId } from '../translators/resp
 import { logger } from '../utils/logger.js';
 import { estimateCostWithRegistry, getDefaultPricing } from '../pricing-registry.js';
 import { normalizeJsonSchema } from '../json-schema-normalizer.js';
+import { isTransientUpstreamError, backoffDelayMs, sleep } from '../utils/transient-error.js';
 
 const DEFAULT_API_VERSION = '2024-10-21';
-const AZURE_NETWORK_RETRY_ATTEMPTS = 2;
-const AZURE_NETWORK_RETRY_DELAY_MS = 250;
+// Weak-network upstream (Azure mostly behaves but the cross-border path
+// reliably drops one or two TCP connections under load). Three additional
+// attempts past the initial try gives the request a realistic chance of
+// landing before the supervisor moves on to the next tier.
+const AZURE_NETWORK_RETRY_ATTEMPTS = 4;
 
 function sanitizeAnthropicToolSchemaForAzureResponses(schema) {
     if (!schema || typeof schema !== 'object' || Array.isArray(schema)) {
@@ -250,51 +254,8 @@ function normalizeResponsesPayloadForAzure(body) {
     };
 }
 
-function sleep(ms) {
-    return new Promise(resolve => setTimeout(resolve, ms));
-}
-
-function collectErrorMessages(error) {
-    const messages = [];
-    const queue = [error];
-    const seen = new Set();
-
-    while (queue.length > 0) {
-        const current = queue.shift();
-        if (!current || seen.has(current)) continue;
-        seen.add(current);
-
-        if (typeof current.message === 'string' && current.message.length > 0) {
-            messages.push(current.message);
-        }
-        if (typeof current.code === 'string' && current.code.length > 0) {
-            messages.push(current.code);
-        }
-        if (current.cause && typeof current.cause === 'object') {
-            queue.push(current.cause);
-        }
-    }
-
-    return messages.map(msg => msg.toLowerCase());
-}
-
-function isRetryableAzureNetworkError(error) {
-    const haystack = collectErrorMessages(error).join(' | ');
-    return [
-        'other side closed',
-        'socket hang up',
-        'fetch failed',
-        'econnreset',
-        'etimedout',
-        'eai_again',
-        'enotfound',
-        'und_err_socket',
-        'und_err_connect_timeout',
-        'connect timeout',
-        'headers timeout',
-        'body timeout'
-    ].some(pattern => haystack.includes(pattern));
-}
+// sleep / error classification moved to ../utils/transient-error.js so every
+// LLM-facing out-edge shares the same definition of "worth retrying."
 
 export class AzureOpenAIProvider extends BaseProvider {
     constructor(config) {
@@ -350,14 +311,14 @@ export class AzureOpenAIProvider extends BaseProvider {
                 return await fetch(url, options);
             } catch (error) {
                 lastError = error;
-                const retryable = isRetryableAzureNetworkError(error);
+                const retryable = isTransientUpstreamError(error);
                 const hasNextAttempt = attempt < AZURE_NETWORK_RETRY_ATTEMPTS;
                 if (!retryable || !hasNextAttempt) {
                     break;
                 }
 
                 logger.warn(`[Azure OpenAI] Retrying ${operation} after transient network error (attempt ${attempt + 1}/${AZURE_NETWORK_RETRY_ATTEMPTS}): ${error?.cause?.code || error?.code || error?.cause?.message || error?.message}`);
-                await sleep(AZURE_NETWORK_RETRY_DELAY_MS * attempt);
+                await sleep(backoffDelayMs(attempt));
             }
         }
 

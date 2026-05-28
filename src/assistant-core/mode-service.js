@@ -103,6 +103,25 @@ function buildAssistantPendingAction(executed = {}, conversation = null, persist
   });
 }
 
+// Heuristic over the tier-failure log embedded in `all_supervisor_tiers_failed`.
+// llm-client.complete() formats it as
+//   all_supervisor_tiers_failed: <label1>: <msg1> | <label2>: <msg2> | ...
+// We grep across the joined messages to decide whether the user should
+// expect this to resolve on retry (transient) or take action (config).
+function detectTierFailureFlavor(reason) {
+  const text = String(reason || '');
+  if (!text.startsWith('all_supervisor_tiers_failed')) return null;
+  const lower = text.toLowerCase();
+  const transientHints = ['econnreset', 'fetch failed', 'socket hang up', 'etimedout', 'timeout', 'enotfound', 'network'];
+  const configHints = ['invalid_request', 'auth_expired', 'model_quota_exhausted', 'forbidden', 'cloudflare_blocked'];
+  const transient = transientHints.some((hint) => lower.includes(hint));
+  const config = configHints.some((hint) => lower.includes(hint));
+  if (transient && !config) return 'transient';
+  if (config && !transient) return 'config';
+  if (transient && config) return 'mixed';
+  return 'unknown';
+}
+
 function buildFallbackMessage(reason, text) {
   const source = String(text || '');
   const zh = /[\u3400-\u9fff]/.test(source);
@@ -111,12 +130,33 @@ function buildFallbackMessage(reason, text) {
       ? 'CliGate Assistant 的 LLM supervisor 当前已关闭，因此已回退到基础 assistant 流程。'
       : 'CliGate Assistant supervisor is currently disabled, so the request fell back to the basic assistant flow.';
   }
+  if (reason === 'no_supervisor_binding') {
+    return zh
+      ? 'CliGate Assistant 还没有绑定可用的模型来源，请到设置里选择一个 supervisor 凭据。'
+      : 'CliGate Assistant has no supervisor model bound yet — pick one in settings.';
+  }
   if (reason === 'no_available_llm_source') {
     return zh
-      ? 'CliGate Assistant 当前没有可用的模型来源，因此已回退到基础 assistant 流程。'
-      : 'CliGate Assistant could not find an available model source, so the request fell back to the basic assistant flow.';
+      ? 'CliGate Assistant 当前没有可用的模型来源（绑定的 tier 都被熔断或停用），因此已回退到基础 assistant 流程。'
+      : 'CliGate Assistant could not find an available model source (every bound tier is currently tripped or disabled), so the request fell back to the basic assistant flow.';
   }
-  if (reason === 'assistant llm failed' || String(reason || '').includes('assistant llm failed')) {
+  const tierFlavor = detectTierFailureFlavor(reason);
+  if (tierFlavor === 'transient') {
+    return zh
+      ? 'CliGate Assistant 的所有 supervisor tier 这一轮都因为网络抖动失败（ECONNRESET / fetch failed），稍后重试通常即可恢复，本次已回退到基础流程。'
+      : 'All supervisor tiers failed this turn due to transient network errors (ECONNRESET / fetch failed). Retrying usually recovers; this turn fell back to the basic flow.';
+  }
+  if (tierFlavor === 'config') {
+    return zh
+      ? 'CliGate Assistant 的所有 supervisor tier 都因为配置问题被拒绝（如模型与账号不兼容 / 凭据失效），请到设置里检查 supervisor 绑定，并 reset 对应的 breaker。'
+      : 'All supervisor tiers were rejected by the upstream (model not supported by this account, credentials expired, etc.). Check the supervisor binding in settings and reset the breaker.';
+  }
+  if (tierFlavor === 'mixed') {
+    return zh
+      ? 'CliGate Assistant 的 supervisor tier 同时遇到网络抖动和配置错误：可能至少一个 tier 绑错了，建议先到设置里修正再重试。'
+      : 'Supervisor tiers failed with a mix of transient and configuration errors — likely at least one tier is misconfigured. Fix the binding in settings before retrying.';
+  }
+  if (reason === 'assistant llm failed' || String(reason || '').includes('assistant_llm_failed')) {
     return zh
       ? 'CliGate Assistant 在本轮执行中调用模型失败，因此已回退到基础 assistant 流程。'
       : 'CliGate Assistant failed during model execution for this turn, so the request fell back to the basic assistant flow.';

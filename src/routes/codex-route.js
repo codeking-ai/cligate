@@ -36,6 +36,23 @@ import {
     normalizeDeepSeekRequestBody
 } from '../deepseek-utils.js';
 import { shouldInjectEndTurnFalse, maybeInjectFromLocals } from '../utils/codex-compaction-tracker.js';
+import { fetchWithTransientRetry } from '../utils/transient-error.js';
+import { logEveryNSeconds } from '../utils/log-sampler.js';
+
+// Codex CLI fires these polling endpoints on a short interval (plugins
+// inventory, telemetry, "wham" apps). Forwarding them is fine, but logging
+// each one drowns out the real /responses traffic — sample to once a minute
+// per endpoint and fold the suppressed count into the next emit.
+const CODEX_CATCHALL_HIGH_VOLUME_RX = /\/(ps\/plugins\/installed|plugins\/featured|plugins\/list|wham\/apps|analytics-events)/;
+
+function codexCatchAllLogKey(method, upstreamPath) {
+    // Drop the query string so all variants of e.g.
+    //   /backend-api/ps/plugins/installed?scope=GLOBAL
+    //   /backend-api/ps/plugins/installed?scope=WORKSPACE&includeDownloadUrls=true
+    // share one throttle window instead of producing 4 separate cadences.
+    const pathOnly = String(upstreamPath || '').split('?')[0];
+    return `codex-catchall:${method}:${pathOnly}`;
+}
 
 const UPSTREAM_BASE = 'https://chatgpt.com/backend-api';
 const MAX_RETRIES = 5;
@@ -1441,7 +1458,19 @@ export async function handleCodexCatchAll(req, res) {
     const upstreamPath = req.originalUrl; // preserves query string
     const url = `https://chatgpt.com${upstreamPath}`;
 
-    logger.info(`[Codex] Proxy ${req.method} ${upstreamPath} via ${creds.email}`);
+    const isHighVolume = CODEX_CATCHALL_HIGH_VOLUME_RX.test(upstreamPath);
+    if (isHighVolume) {
+        // Codex's plugin / telemetry polling — only log once a minute per
+        // (method, path) pair so a normal Codex session doesn't generate
+        // dozens of identical lines. The summary includes how many calls
+        // were silently forwarded since the last emit.
+        logEveryNSeconds(codexCatchAllLogKey(req.method, upstreamPath), 60, ({ suppressed }) => {
+            const tail = suppressed > 0 ? ` (+${suppressed} suppressed in last 60s)` : '';
+            logger.info(`[Codex] Proxy ${req.method} ${upstreamPath} via ${creds.email}${tail}`);
+        });
+    } else {
+        logger.info(`[Codex] Proxy ${req.method} ${upstreamPath} via ${creds.email}`);
+    }
 
     try {
         const headers = {
@@ -1457,7 +1486,19 @@ export async function handleCodexCatchAll(req, res) {
             fetchOpts.body = JSON.stringify(req.body);
         }
 
-        const upstreamResponse = await fetch(url, fetchOpts);
+        // Retry the connect phase on transient network errors (ECONNRESET /
+        // fetch failed / und_err_socket). Codex CLI does not retry on its
+        // own and a single weak-network blip turns into a 502 right back to
+        // the user; one or two retries here ride that out invisibly.
+        const upstreamResponse = await fetchWithTransientRetry(
+            () => fetch(url, fetchOpts),
+            {
+                attempts: 3,
+                onRetry: ({ attempt, error }) => logger.warn(
+                    `[Codex] Retrying ${req.method} ${upstreamPath} after transient network error (attempt ${attempt + 1}/3): ${error?.cause?.code || error?.code || error?.message}`
+                )
+            }
+        );
         const responseBody = await upstreamResponse.text();
 
         // Forward status + headers
@@ -1466,7 +1507,16 @@ export async function handleCodexCatchAll(req, res) {
         if (ct) res.setHeader('Content-Type', ct);
         res.send(responseBody);
     } catch (error) {
-        logger.error(`[Codex] Proxy error: ${error.message}`);
+        // Same sampling for the error log: when an endpoint is in a sustained
+        // bad-network window, we'd otherwise emit one error per failed poll.
+        if (isHighVolume) {
+            logEveryNSeconds(`${codexCatchAllLogKey(req.method, upstreamPath)}:error`, 30, ({ suppressed }) => {
+                const tail = suppressed > 0 ? ` (+${suppressed} suppressed in last 30s)` : '';
+                logger.error(`[Codex] Proxy error on ${req.method} ${upstreamPath}: ${error.message}${tail}`);
+            });
+        } else {
+            logger.error(`[Codex] Proxy error: ${error.message}`);
+        }
         return sendCodexError(res, 502, `Proxy error: ${error.message}`);
     }
 }

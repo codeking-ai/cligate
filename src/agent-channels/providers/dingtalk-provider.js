@@ -7,7 +7,16 @@ import { createNormalizedChannelMessage } from '../models.js';
 const DINGTALK_TOKEN_CACHE_TTL_MS = 60 * 60 * 1000;
 const DINGTALK_TIMESTAMP_SKEW_MS = 60 * 60 * 1000;
 const DINGTALK_STREAM_CALLBACK_TOPIC = '/v1.0/im/bot/messages/get';
-const DINGTALK_STREAM_RECONNECT_DELAY_MS = 3000;
+// Stream reconnect uses capped exponential backoff so a misconfigured or
+// permanently-down DingTalk app doesn't spam reconnect attempts (and a log
+// line per attempt) every 3 seconds. Real disconnects (transient WebSocket
+// closes) still recover within ~3s on the first attempt.
+const DINGTALK_STREAM_RECONNECT_BASE_MS = 3000;
+const DINGTALK_STREAM_RECONNECT_MAX_MS = 60_000;
+// How often to actually emit a warn for a sustained reconnect storm. The
+// underlying socket error fires per-frame in some environments; dedup so
+// it shows up at most twice per minute.
+const DINGTALK_STREAM_ERROR_LOG_INTERVAL_MS = 30_000;
 const DINGTALK_SAFE_MESSAGE_LIMIT = 3500;
 const DINGTALK_PICTURE_MESSAGE_TYPE = 'picture';
 const DINGTALK_IMAGE_DOWNLOAD_PATH = 'https://api.dingtalk.com/v1.0/robot/messageFiles/download';
@@ -384,13 +393,15 @@ export class DingTalkChannelProvider {
   constructor({
     fetchImpl = globalThis.fetch,
     webSocketFactory = null,
-    reconnectDelayMs = DINGTALK_STREAM_RECONNECT_DELAY_MS
+    reconnectDelayMs = DINGTALK_STREAM_RECONNECT_BASE_MS,
+    reconnectMaxDelayMs = DINGTALK_STREAM_RECONNECT_MAX_MS
   } = {}) {
     this.id = 'dingtalk';
     this.label = 'DingTalk';
     this.fetchImpl = fetchImpl;
     this.webSocketFactory = webSocketFactory;
     this.reconnectDelayMs = reconnectDelayMs;
+    this.reconnectMaxDelayMs = reconnectMaxDelayMs;
     this.capabilities = {
       mode: 'stream',
       supportedModes: ['stream', 'webhook'],
@@ -433,6 +444,15 @@ export class DingTalkChannelProvider {
     this.streamSocket = null;
     this.streamReconnectTimer = null;
     this.streamClosedByProvider = false;
+    // Bumped on every failed reconnect attempt and every socket-level error
+    // observed while the socket is still considered "live". Reset to 0 the
+    // moment we successfully open a fresh socket. Used to compute the next
+    // reconnect delay as
+    //   delay = min(MAX, BASE * 2^(consecutive - 1))
+    // so the cadence is 3s → 6s → 12s → 24s → 48s → 60s (capped) instead of
+    // a flat 3s spam.
+    this.streamConsecutiveFailures = 0;
+    this.streamLastErrorLogAt = 0;
   }
 
   async start({ settings, router, logger } = {}) {
@@ -490,6 +510,26 @@ export class DingTalkChannelProvider {
     throw new Error('WebSocket is unavailable. Provide webSocketFactory or install a runtime with global WebSocket support.');
   }
 
+  // Log a sustained reconnect/socket error storm at most once every
+  // DINGTALK_STREAM_ERROR_LOG_INTERVAL_MS. The first failure logs
+  // immediately; subsequent failures within the window are silently counted
+  // and shown alongside the next emit.
+  _logStreamProblem(level, label, error) {
+    const now = Date.now();
+    if (now - this.streamLastErrorLogAt < DINGTALK_STREAM_ERROR_LOG_INTERVAL_MS) {
+      return;
+    }
+    this.streamLastErrorLogAt = now;
+    const message = String(error?.message || error || 'unknown error');
+    const consecutive = this.streamConsecutiveFailures;
+    const tail = consecutive > 1 ? ` (consecutive=${consecutive})` : '';
+    if (level === 'error') {
+      this.logger?.error?.(`[DingTalk] ${label}: ${message}${tail}`);
+    } else {
+      this.logger?.warn?.(`[DingTalk] ${label}: ${message}${tail}`);
+    }
+  }
+
   async openStreamConnection() {
     const connection = await this.registerStreamConnection();
     const target = new URL(String(connection.endpoint || ''));
@@ -497,33 +537,31 @@ export class DingTalkChannelProvider {
 
     const socket = await this.createWebSocket(target.toString());
     this.streamSocket = socket;
+    // Reaching this point means register + WebSocket handshake both
+    // succeeded — treat that as a healthy connection until proven otherwise.
+    this.streamConsecutiveFailures = 0;
+    this.streamLastErrorLogAt = 0;
 
-    socket.addEventListener?.('message', (event) => {
-      void this.handleStreamFrame(event?.data);
-    });
-    socket.addEventListener?.('error', (error) => {
-      this.logger?.warn?.(`[DingTalk] Stream socket error: ${error?.message || 'unknown error'}`);
-    });
-    socket.addEventListener?.('close', () => {
+    const onMessage = (data) => { void this.handleStreamFrame(data); };
+    const onError = (error) => {
+      this.streamConsecutiveFailures += 1;
+      this._logStreamProblem('warn', 'Stream socket error', error);
+    };
+    const onClose = () => {
       if (this.streamSocket === socket) {
         this.streamSocket = null;
       }
       this.scheduleStreamReconnect();
-    });
+    };
+
+    socket.addEventListener?.('message', (event) => onMessage(event?.data));
+    socket.addEventListener?.('error', (error) => onError(error));
+    socket.addEventListener?.('close', onClose);
 
     if (typeof socket.on === 'function') {
-      socket.on('message', (data) => {
-        void this.handleStreamFrame(data);
-      });
-      socket.on('error', (error) => {
-        this.logger?.warn?.(`[DingTalk] Stream socket error: ${error?.message || 'unknown error'}`);
-      });
-      socket.on('close', () => {
-        if (this.streamSocket === socket) {
-          this.streamSocket = null;
-        }
-        this.scheduleStreamReconnect();
-      });
+      socket.on('message', onMessage);
+      socket.on('error', onError);
+      socket.on('close', onClose);
     }
   }
 
@@ -534,13 +572,23 @@ export class DingTalkChannelProvider {
     if (this.streamReconnectTimer) {
       return;
     }
+    // Compute next delay using the current failure count. We bump the
+    // counter on the failure path (in the .catch below); the close handler
+    // alone doesn't count as a failure because a clean close after a brief
+    // session is normal.
+    const exponent = Math.max(0, this.streamConsecutiveFailures);
+    const delay = Math.min(
+      this.reconnectMaxDelayMs,
+      this.reconnectDelayMs * 2 ** Math.min(exponent, 5)
+    );
     this.streamReconnectTimer = setTimeout(() => {
       this.streamReconnectTimer = null;
       void this.openStreamConnection().catch((error) => {
-        this.logger?.warn?.(`[DingTalk] Failed to reconnect stream: ${error.message}`);
+        this.streamConsecutiveFailures += 1;
+        this._logStreamProblem('warn', 'Failed to reconnect stream', error);
         this.scheduleStreamReconnect();
       });
-    }, this.reconnectDelayMs);
+    }, delay);
   }
 
   async registerStreamConnection() {

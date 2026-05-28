@@ -15,10 +15,19 @@
  *      │                                │
  *   recordSuccess ◀── probe success ──┘
  *
+ *   *anywhere* ── disable(reason) ──▶ DISABLED   (manual reset only)
+ *
  * Real requests on healthy tiers validate health implicitly; we do not poll
  * healthy tiers in the background. Tripped tiers are probed by the caller
  * (a probe loop in llm-client.js) when `isProbeReady(key)` returns true; the
  * caller invokes recordSuccess on success or rescheduleProbe on failure.
+ *
+ * DISABLED is for *permanent* configuration faults the user has to fix —
+ * "this ChatGPT account does not support gpt-5.4" or "AUTH_EXPIRED, refresh
+ * the OAuth token." Treating those as transient failures was the original
+ * sin: each request burned a recordFailure on every tier in the chain,
+ * tripping otherwise-healthy fallbacks. Disabled tiers stay skipped until
+ * the user re-binds (which calls reset()) or hits the reset-breaker UI.
  */
 
 const DEFAULT_FAILURE_THRESHOLD = 3;
@@ -44,7 +53,8 @@ export class CircuitBreaker {
                 trippedAt: null,
                 nextProbeAt: null,
                 lastSuccessAt: null,
-                lastFailureAt: null
+                lastFailureAt: null,
+                disabledReason: ''
             });
         }
         return this._tiers.get(key);
@@ -61,6 +71,7 @@ export class CircuitBreaker {
         tier.trippedAt = null;
         tier.nextProbeAt = null;
         tier.lastSuccessAt = this._now();
+        tier.disabledReason = '';
     }
 
     /**
@@ -69,6 +80,10 @@ export class CircuitBreaker {
      */
     recordFailure(key) {
         const tier = this._ensure(key);
+        // A disabled tier stays disabled — counting transient blips against
+        // it after the user already learned it's misconfigured just generates
+        // noise.
+        if (tier.state === 'disabled') return tier.state;
         tier.consecutiveFailures += 1;
         tier.lastFailureAt = this._now();
         if (tier.state === 'healthy' && tier.consecutiveFailures >= this.failureThreshold) {
@@ -80,12 +95,32 @@ export class CircuitBreaker {
     }
 
     /**
-     * True when the tier is tripped and the cooldown hasn't expired. Caller
-     * should skip this tier and try the next one in the chain.
+     * Mark a tier as permanently unavailable until the user resets it. Used
+     * for configuration-class errors (model not supported for this account,
+     * OAuth token revoked, account out of quota) that won't resolve by
+     * waiting. listCandidateSources skips disabled tiers without burning a
+     * recordFailure on healthier neighbors.
+     */
+    disable(key, reason = '') {
+        const tier = this._ensure(key);
+        tier.state = 'disabled';
+        tier.disabledReason = String(reason || '').slice(0, 200);
+        tier.lastFailureAt = this._now();
+        tier.trippedAt = null;
+        tier.nextProbeAt = null;
+        return tier.state;
+    }
+
+    /**
+     * True when the tier is tripped and the cooldown hasn't expired, OR when
+     * it has been permanently disabled. Caller should skip this tier and try
+     * the next one in the chain.
      */
     shouldSkip(key) {
         const tier = this._tiers.get(key);
-        if (!tier || tier.state !== 'tripped') return false;
+        if (!tier) return false;
+        if (tier.state === 'disabled') return true;
+        if (tier.state !== 'tripped') return false;
         return this._now() < (tier.nextProbeAt || 0);
     }
 
@@ -149,7 +184,8 @@ export class CircuitBreaker {
                 trippedAt: null,
                 nextProbeAt: null,
                 lastSuccessAt: null,
-                lastFailureAt: null
+                lastFailureAt: null,
+                disabledReason: ''
             };
         }
         return { ...tier };

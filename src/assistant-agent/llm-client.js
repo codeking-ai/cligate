@@ -6,6 +6,7 @@ import {
 import { selectKey } from '../api-key-manager.js';
 import { getServerSettings, setServerSettings } from '../server-settings.js';
 import { logger } from '../utils/logger.js';
+import { isTransientUpstreamError, backoffDelayMs, sleep } from '../utils/transient-error.js';
 
 import { CircuitBreaker, tierKeyFor } from './circuit-breaker.js';
 import {
@@ -156,6 +157,39 @@ export function resolveMaxTokensForModel(model = '', { override = null } = {}) {
   candidates.push(MAX_TOKENS_DEFAULT);
   const picked = candidates.find((value) => Number.isFinite(value) && value > 0) || MAX_TOKENS_DEFAULT;
   return Math.min(MAX_TOKENS_HARD_CEIL, Math.max(MAX_TOKENS_FLOOR, picked));
+}
+
+/**
+ * Bucket a tier failure into one of three classes so the supervisor knows
+ * what to do with it:
+ *
+ *   - transient: ECONNRESET, fetch failed, timeout — same tier might work on
+ *     the next attempt. Worth one same-tier retry before moving on.
+ *   - permanent: 400 INVALID_REQUEST (e.g. "gpt-5.4 not supported when using
+ *     Codex with a ChatGPT account"), AUTH_EXPIRED (revoked token),
+ *     CLOUDFLARE_BLOCKED, MODEL_QUOTA_EXHAUSTED. Won't resolve by waiting;
+ *     mark the tier disabled so the next caller doesn't waste a slot on it.
+ *   - rateLimited: 429. Tier *will* work later but not now; let the breaker
+ *     park it via its normal tripped state for the cooldown window.
+ *   - other: anything else (most 5xx). Counts toward the regular breaker
+ *     budget; recoverable but not immediately retryable.
+ */
+function classifyTierError(error) {
+  if (isTransientUpstreamError(error)) return 'transient';
+  const message = String(error?.message || error || '');
+  if (/^RATE_LIMITED/i.test(message)) return 'rateLimited';
+  if (/^(INVALID_REQUEST|AUTH_EXPIRED|CLOUDFLARE_BLOCKED|MODEL_QUOTA_EXHAUSTED|FORBIDDEN)/i.test(message)) {
+    return 'permanent';
+  }
+  // Anthropic 4xx surfaces as "CLAUDE_API_ERROR: 400 - ..." — treat 4xx (but
+  // not 5xx) as permanent so the breaker doesn't burn through fallback tiers
+  // for the same client-side problem.
+  const claudeMatch = message.match(/^CLAUDE_API_ERROR:\s*(\d{3})/i);
+  if (claudeMatch) {
+    const status = Number(claudeMatch[1]);
+    if (Number.isFinite(status) && status >= 400 && status < 500) return 'permanent';
+  }
+  return 'other';
 }
 
 async function withTurnTimeout(promise, timeoutMs, label = 'assistant_llm_turn') {
@@ -413,42 +447,75 @@ export class AssistantLlmClient {
       const effectiveMaxTokens = resolveMaxTokensForModel(effectiveModel, {
         override: Number.isFinite(maxTokens) && maxTokens > 0 ? maxTokens : null
       });
-      try {
-        const response = await withTurnTimeout(
-          source.send({
-            system,
-            messages,
-            tools,
-            max_tokens: effectiveMaxTokens,
-            model: effectiveModel
-          }),
-          turnTimeoutMs,
-          `assistant_llm_turn[${source.label || source.kind || 'unknown'}]`
-        );
-        this._breaker.recordSuccess(source.tierKey);
-        this._lastUsed = {
-          descriptor: source.descriptor,
-          kind: source.kind,
-          label: source.label,
-          model: effectiveModel,
-          at: Date.now()
-        };
-        this._lastFallbackReason = '';
-        return {
-          ...response,
-          source: {
+
+      // Inner attempt loop: a single same-tier retry on transient errors
+      // (TCP reset, fetch failed, timeout) before moving to the next tier.
+      // Bigger 4xx/quota errors break out immediately and tag the tier as
+      // disabled so we don't keep paying their cost on subsequent turns.
+      const MAX_TIER_ATTEMPTS = 2;
+      let succeeded = false;
+      let lastTierError = null;
+      let lastTierClass = 'other';
+      for (let attempt = 1; attempt <= MAX_TIER_ATTEMPTS; attempt += 1) {
+        try {
+          const response = await withTurnTimeout(
+            source.send({
+              system,
+              messages,
+              tools,
+              max_tokens: effectiveMaxTokens,
+              model: effectiveModel
+            }),
+            turnTimeoutMs,
+            `assistant_llm_turn[${source.label || source.kind || 'unknown'}]`
+          );
+          this._breaker.recordSuccess(source.tierKey);
+          this._lastUsed = {
+            descriptor: source.descriptor,
             kind: source.kind,
             label: source.label,
             model: effectiveModel,
-            descriptor: source.descriptor,
-            maxTokens: effectiveMaxTokens
+            at: Date.now()
+          };
+          this._lastFallbackReason = '';
+          succeeded = true;
+          return {
+            ...response,
+            source: {
+              kind: source.kind,
+              label: source.label,
+              model: effectiveModel,
+              descriptor: source.descriptor,
+              maxTokens: effectiveMaxTokens
+            }
+          };
+        } catch (error) {
+          lastTierError = error;
+          lastTierClass = classifyTierError(error);
+          // Same-tier retry only for transient network blips, and only if we
+          // have a retry slot left.
+          if (lastTierClass === 'transient' && attempt < MAX_TIER_ATTEMPTS) {
+            logger.warn(`[Supervisor] tier transient retry | tier=${source.tierKey} | attempt=${attempt + 1}/${MAX_TIER_ATTEMPTS} | reason=${String(error?.message || error).slice(0, 200)}`);
+            await sleep(backoffDelayMs(attempt));
+            continue;
           }
-        };
-      } catch (error) {
-        const breakerState = this._breaker.recordFailure(source.tierKey);
-        const message = error?.message || String(error);
+          break;
+        }
+      }
+
+      if (!succeeded && lastTierError) {
+        const message = lastTierError?.message || String(lastTierError);
+        let breakerState;
+        if (lastTierClass === 'permanent') {
+          // Configuration-class fault — disable the tier so it doesn't keep
+          // tripping breakers on healthier neighbors. The user has to fix
+          // the binding (or hit the reset-breaker UI) to re-enable it.
+          breakerState = this._breaker.disable(source.tierKey, message);
+        } else {
+          breakerState = this._breaker.recordFailure(source.tierKey);
+        }
         failures.push(`${source.label}: ${message}`);
-        logger.warn(`[Supervisor] tier failed | tier=${source.tierKey} | breaker=${breakerState} | reason=${message.slice(0, 200)}`);
+        logger.warn(`[Supervisor] tier failed | tier=${source.tierKey} | breaker=${breakerState} | class=${lastTierClass} | reason=${message.slice(0, 200)}`);
       }
     }
 

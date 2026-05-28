@@ -6,6 +6,32 @@
 
 import { logger } from './utils/logger.js';
 import { normalizeJsonSchema } from './json-schema-normalizer.js';
+import { isTransientUpstreamError, backoffDelayMs, sleep } from './utils/transient-error.js';
+
+// How many fetch-layer attempts before we surface a CLAUDE_NETWORK_ERROR to
+// the caller. Anthropic's edge occasionally resets long-lived TLS sockets;
+// retrying the *connect* phase is safe because we have not started consuming
+// the response body yet.
+const CLAUDE_NETWORK_RETRY_ATTEMPTS = 3;
+
+async function fetchClaudeWithRetry(operation, url, options) {
+    let lastError;
+    for (let attempt = 1; attempt <= CLAUDE_NETWORK_RETRY_ATTEMPTS; attempt += 1) {
+        try {
+            return await fetch(url, options);
+        } catch (error) {
+            lastError = error;
+            const retryable = isTransientUpstreamError(error);
+            const hasNextAttempt = attempt < CLAUDE_NETWORK_RETRY_ATTEMPTS;
+            if (!retryable || !hasNextAttempt) {
+                throw error;
+            }
+            logger.warn(`[ClaudeAPI] Retrying ${operation} after transient network error (attempt ${attempt + 1}/${CLAUDE_NETWORK_RETRY_ATTEMPTS}): ${error?.cause?.code || error?.code || error?.cause?.message || error?.message}`);
+            await sleep(backoffDelayMs(attempt));
+        }
+    }
+    throw lastError;
+}
 
 const CLAUDE_API_URL = 'https://api.anthropic.com/v1/messages';
 const ANTHROPIC_VERSION = '2023-06-01';
@@ -232,7 +258,7 @@ export async function sendClaudeMessageWithMeta(body, accessToken, { clientBeta 
     const sanitized = { ...sanitizeClaudeBody(body), stream: false };
     let response;
     try {
-        response = await fetch(CLAUDE_API_URL, {
+        response = await fetchClaudeWithRetry('messages', CLAUDE_API_URL, {
             method: 'POST',
             headers: {
                 'Authorization': `Bearer ${accessToken}`,
@@ -270,7 +296,11 @@ export async function sendClaudeStream(body, accessToken, { clientBeta, signal }
     const sanitized = { ...sanitizeClaudeBody(body), stream: true };
     let response;
     try {
-        response = await fetch(CLAUDE_API_URL, {
+        // Retrying the connect phase is safe: fetch only resolves once headers
+        // arrive, so a transient throw here means no SSE bytes have been
+        // delivered to the caller yet. An AbortError from `signal` is not
+        // classified as transient, so it propagates immediately.
+        response = await fetchClaudeWithRetry('stream', CLAUDE_API_URL, {
             method: 'POST',
             headers: {
                 'Authorization': `Bearer ${accessToken}`,

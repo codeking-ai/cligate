@@ -1,4 +1,13 @@
+import { isTransientUpstreamError, backoffDelayMs, sleep } from '../utils/transient-error.js';
+
 const API_URL = 'https://chatgpt.com/backend-api/codex/responses';
+
+// chatgpt.com's edge in cross-border conditions reliably drops the first
+// TCP attempt; without a retry here the supervisor's chatgpt-account tier
+// looks "broken" on every weak-network turn and trips its breaker after
+// 3 consecutive misses. Three attempts past the initial try is enough to
+// ride out a single bad socket without masking real outages.
+const CHATGPT_RESPONSES_RETRY_ATTEMPTS = 3;
 
 export function parseResetTime(response, errorText) {
     const retryAfter = response.headers?.get?.('retry-after');
@@ -73,20 +82,36 @@ export async function executeChatGPTResponsesRequest({
     currentEmail = null
 }) {
     let response;
-    try {
-        response = await fetch(API_URL, {
-            method: 'POST',
-            headers: {
-                Authorization: `Bearer ${accessToken}`,
-                'ChatGPT-Account-ID': accountId,
-                'Content-Type': 'application/json',
-                Accept: 'text/event-stream'
-            },
-            body: JSON.stringify(request)
-        });
-    } catch (fetchError) {
-        console.error('[ChatGPTResponsesExecutor] fetch() failed:', fetchError.message);
-        throw new Error(`FETCH_ERROR: ${fetchError.message}`);
+    let lastFetchError;
+    for (let attempt = 1; attempt <= CHATGPT_RESPONSES_RETRY_ATTEMPTS; attempt += 1) {
+        try {
+            response = await fetch(API_URL, {
+                method: 'POST',
+                headers: {
+                    Authorization: `Bearer ${accessToken}`,
+                    'ChatGPT-Account-ID': accountId,
+                    'Content-Type': 'application/json',
+                    Accept: 'text/event-stream'
+                },
+                body: JSON.stringify(request)
+            });
+            lastFetchError = null;
+            break;
+        } catch (fetchError) {
+            lastFetchError = fetchError;
+            const retryable = isTransientUpstreamError(fetchError);
+            const hasNextAttempt = attempt < CHATGPT_RESPONSES_RETRY_ATTEMPTS;
+            if (!retryable || !hasNextAttempt) {
+                console.error('[ChatGPTResponsesExecutor] fetch() failed:', fetchError.message);
+                throw new Error(`FETCH_ERROR: ${fetchError.message}`);
+            }
+            console.warn(`[ChatGPTResponsesExecutor] Retrying responses after transient network error (attempt ${attempt + 1}/${CHATGPT_RESPONSES_RETRY_ATTEMPTS}): ${fetchError?.cause?.code || fetchError?.code || fetchError?.message}`);
+            await sleep(backoffDelayMs(attempt));
+        }
+    }
+    if (lastFetchError) {
+        // defensive: loop exited without a response and without throwing
+        throw new Error(`FETCH_ERROR: ${lastFetchError.message}`);
     }
 
     await assertChatGPTResponsesOk(response, { accountRotator, currentEmail, modelId });
