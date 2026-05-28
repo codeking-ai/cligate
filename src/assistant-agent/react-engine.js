@@ -369,16 +369,31 @@ export class AssistantReactEngine {
       }
 
       llmSource = completion.source;
+      const completionText = String(completion.text || '').trim();
+      const toolNames = (completion.toolCalls || []).map((call) => call.name).filter(Boolean);
+      // The thinking text the LLM emits before its tool_use block is the user's
+      // only window into supervisor reasoning. Surface it in BOTH the event
+      // summary (so the trace panel renders "what the model just said" instead
+      // of just a list of tool names) AND in payload.thinkingText (so clients
+      // that want it separately can grab the raw string). When the model emits
+      // both text and tool calls, we show the text + a compact tool-name tail
+      // so users see thinking first, mechanics second.
+      const traceTitle = completionText
+        ? 'Model thinking + tool call'
+        : (toolNames.length
+          ? `Model requested ${toolNames.length} tool call(s)`
+          : 'Model produced a reply');
+      const traceSummary = completionText
+        ? (toolNames.length
+          ? `${completionText}\n→ Next: ${toolNames.join(', ')}`
+          : completionText)
+        : (toolNames.length ? `Requested tools: ${toolNames.join(', ')}` : '');
       this.emitTrace(workingRun.id, {
         type: 'assistant.llm.completed',
         phase: 'llm',
         status: 'completed',
-        title: completion.toolCalls?.length
-          ? `Model requested ${completion.toolCalls.length} tool call(s)`
-          : 'Model produced a reply',
-        summary: completion.toolCalls?.length
-          ? `Requested tools: ${completion.toolCalls.map((call) => call.name).filter(Boolean).join(', ')}`
-          : String(completion.text || '').trim().slice(0, 300),
+        title: traceTitle,
+        summary: traceSummary,
         payload: {
           iteration: iterationNumber,
           source: completion.source || null,
@@ -390,7 +405,8 @@ export class AssistantReactEngine {
             input: call.input || {},
             truncated: call?.input?.__truncated === true || call?.__truncated === true
           })),
-          hasText: Boolean(String(completion.text || '').trim())
+          hasText: Boolean(completionText),
+          thinkingText: completionText
         },
         visibility: 'detail'
       });

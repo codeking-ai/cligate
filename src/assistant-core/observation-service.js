@@ -18,6 +18,56 @@ import supervisorTaskStore from '../agent-orchestrator/supervisor-task-store.js'
 import { normalizeWorkspaceRef } from './workspace-store.js';
 import { getConversationPendingRuntimeState } from './pending-runtime-state.js';
 import { ensurePendingAssistantAction } from './pending-action-resolver.js';
+import assistantRunEventStore from './run-event-store.js';
+
+// status values that mean "this run is still alive and operating on the user's
+// task". When a new user message arrives mid-task, the supervisor LLM needs to
+// see these runs in its context to decide between answering directly (status
+// query / unrelated question), taking over (correction), and cancelling
+// (user said stop). Any status NOT in this set is terminal-or-resolved and
+// safe to ignore for triage purposes.
+const ACTIVE_ASSISTANT_RUN_STATUSES = new Set([
+  'queued',
+  'running',
+  'waiting_runtime',
+  'waiting_user'
+]);
+
+function summarizeActiveAssistantRunEvent(event = {}) {
+  if (!event || typeof event !== 'object') return null;
+  return {
+    seq: Number(event.seq || 0),
+    ts: String(event.ts || ''),
+    type: String(event.type || ''),
+    phase: String(event.phase || ''),
+    status: String(event.status || ''),
+    title: String(event.title || '').slice(0, 160),
+    summary: String(event.summary || '').slice(0, 240)
+  };
+}
+
+function buildActiveAssistantRunsSummary(runs = [], runEventStore = assistantRunEventStore, perRunEventLimit = 5) {
+  if (!Array.isArray(runs) || runs.length === 0) return [];
+  return runs
+    .filter((entry) => entry && ACTIVE_ASSISTANT_RUN_STATUSES.has(String(entry.status || '').trim()))
+    .map((entry) => {
+      const allEvents = runEventStore?.list?.(entry.id, { limit: 200 }) || [];
+      const recentEvents = allEvents
+        .slice(-perRunEventLimit)
+        .map(summarizeActiveAssistantRunEvent)
+        .filter(Boolean);
+      return {
+        id: String(entry.id || ''),
+        status: String(entry.status || ''),
+        mode: String(entry.mode || ''),
+        triggerText: String(entry.triggerText || '').slice(0, 400),
+        createdAt: String(entry.createdAt || ''),
+        updatedAt: String(entry.updatedAt || ''),
+        eventCount: allEvents.length,
+        recentEvents
+      };
+    });
+}
 
 function providerLabel(providerId) {
   if (providerId === 'claude-code') return 'Claude Code';
@@ -474,6 +524,7 @@ export class AssistantObservationService {
     policyService = assistantPolicyService,
     workspaceStore = assistantWorkspaceStore,
     assistantRunStore: assistantRunStoreArg = assistantRunStore,
+    runEventStore = assistantRunEventStore,
     artifactService = artifactServiceSingleton,
     assistantTaskStore = assistantDomainTaskStore,
     assistantExecutionStore = assistantDomainExecutionStore,
@@ -488,6 +539,7 @@ export class AssistantObservationService {
     this.policyService = policyService;
     this.workspaceStore = workspaceStore;
     this.assistantRunStore = assistantRunStoreArg;
+    this.runEventStore = runEventStore;
     this.artifactService = artifactService;
     this.clarificationStore = assistantClarificationStore;
     this.assistantTaskStore = assistantTaskStore;
@@ -902,6 +954,13 @@ export class AssistantObservationService {
       recentChatTurns,
       recentToolArtifacts,
       relevantArtifacts,
+      // Surface assistant runs that are still alive (queued / running /
+      // waiting_runtime / waiting_user) so the supervisor LLM can triage
+      // mid-task user messages instead of stomping a concurrent run.
+      // Each entry carries the run's triggerText plus the last few events so
+      // the model has enough context to answer "where are we" / "switch to
+      // 64-bit" / "stop" without itself having to call diagnostic tools.
+      activeAssistantRuns: buildActiveAssistantRunsSummary(recentRuns, this.runEventStore, 5),
       policy
     };
   }

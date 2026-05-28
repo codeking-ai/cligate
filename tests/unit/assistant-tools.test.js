@@ -756,4 +756,10 @@ test('createBuiltinAssistantToolRegistry includes desktop read-only tools', () =
   assert.ok(toolNames.includes('desktop_get_control_text'));
   assert.ok(toolNames.includes('desktop_wait_for_control'));
   assert.ok(toolNames.includes('desktop_capture_window'));
+  // Triage + concurrent-run support.
+  assert.ok(toolNames.includes('cancel_assistant_run'));
+  // Long-wait coverage.
+  assert.ok(toolNames.includes('desktop_wait_for_file'));
+  assert.ok(toolNames.includes('desktop_wait_for_process'));
+  assert.ok(toolNames.includes('desktop_wait_for_window'));
 });

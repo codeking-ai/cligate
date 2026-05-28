@@ -803,6 +803,18 @@ test('Assistant ReAct prompt includes task-space-first context', async () => {
   assert.match(String(service.llmClient.calls[0]?.system || ''), /desktop_fill_text_field|desktop_inspect_window|desktop_click_text/);
   assert.match(String(service.llmClient.calls[0]?.system || ''), /desktop_click_at.*only when|desktop_capture_window.*desktop_click_at|只有在以上路径都不可用时/);
   assert.match(String(service.llmClient.calls[0]?.system || ''), /moved=false|wait_change.changed=false|skipped_due_to_cursor=true/);
+  // Concurrent-run triage rule must reach the supervisor prompt so the LLM
+  // knows how to handle mid-task messages (status query / correction /
+  // cancel / unrelated) instead of stomping a sibling run.
+  assert.match(String(service.llmClient.calls[0]?.system || ''), /active_assistant_runs|cancel_assistant_run|并发 run 处理规则|Concurrent assistant run rule/);
+  assert.match(promptText, /<active_assistant_runs>/);
+  // Execution transparency: the supervisor LLM must be told to emit a short
+  // thinking text block before every tool_use so the chat trace panel can
+  // show the user "what the model is thinking" alongside the tool name.
+  assert.match(
+    String(service.llmClient.calls[0]?.system || ''),
+    /Execution transparency rule|执行过程透明化规则|thinking text block|emit a short text|思考过程/
+  );
 });
 
 test('AssistantLlmClient returns no candidates when no supervisor binding is configured (no silent emergency fallback)', async () => {

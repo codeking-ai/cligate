@@ -833,7 +833,40 @@ export function createChatPageModule() {
       if (message.traceAnchor === true) {
         return String(message.assistantRunId || message.runtimeTraceId || '').trim();
       }
+      // Explicit traceAnchor:false keeps the trace panel hidden (used when a
+      // message must NOT carry execution metadata even though it has a runId
+      // — e.g. legacy persisted messages that pre-date the trace pipeline).
+      if (message.traceAnchor === false) {
+        return String(message.runtimeTraceId || '').trim();
+      }
+      // No explicit anchor → default to "surface the trace panel for any
+      // assistant message tied to a concrete assistant run id". Before this
+      // change only the placeholder "started" message carried traceAnchor=true,
+      // so once the final reply arrived the trace panel disappeared and the
+      // user could no longer click in to see what the run actually did.
+      const role = String(message?.role || '');
+      const runId = String(message?.assistantRunId || '').trim();
+      if (role === 'assistant' && runId) {
+        return runId;
+      }
       return String(message.runtimeTraceId || '').trim();
+    },
+
+    // Auto-expand the execution trace for runs that are still alive. The
+    // moment a user sees an assistant message that is mid-flight, the trace
+    // panel is already open so they can watch the LLM's thinking and tool
+    // calls stream in. Once the run reaches a terminal state the auto flag
+    // is removed; if the user explicitly toggled the panel closed (via the
+    // chevron) we respect that and do NOT force it back open.
+    isAssistantRunTraceOpenAuto(runId) {
+      const normalizedRunId = String(runId || '').trim();
+      if (!normalizedRunId) return false;
+      const explicit = this.chatAssistantRunTraceOpen?.[normalizedRunId];
+      if (explicit === false) return false;
+      if (explicit === true) return true;
+      const activeRunId = this.activeAssistantRunId ? this.activeAssistantRunId() : '';
+      if (activeRunId && activeRunId === normalizedRunId) return true;
+      return false;
     },
 
     assistantRunTraceEvents(runId) {
@@ -851,7 +884,11 @@ export function createChatPageModule() {
 
     isAssistantRunTraceOpen(runId) {
       const normalizedRunId = String(runId || '').trim();
-      return this.chatAssistantRunTraceOpen?.[normalizedRunId] === true;
+      if (this.chatAssistantRunTraceOpen?.[normalizedRunId] === true) return true;
+      if (this.chatAssistantRunTraceOpen?.[normalizedRunId] === false) return false;
+      // No explicit user choice yet — auto-open while the run is still active
+      // so the user sees the execution stream in real time.
+      return this.isAssistantRunTraceOpenAuto(normalizedRunId);
     },
 
     toggleAssistantRunTrace(runId) {

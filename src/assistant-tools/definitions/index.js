@@ -31,6 +31,10 @@ import createDesktopScrollToolDefinition from './desktop-scroll.js';
 import createDesktopWaitChangeToolDefinition from './desktop-wait-change.js';
 import createDesktopFindTextToolDefinition from './desktop-find-text.js';
 import createDesktopCursorInfoToolDefinition from './desktop-cursor-info.js';
+import createCancelAssistantRunToolDefinition from './cancel-assistant-run.js';
+import createDesktopWaitForFileToolDefinition from './desktop-wait-for-file.js';
+import createDesktopWaitForProcessToolDefinition from './desktop-wait-for-process.js';
+import createDesktopWaitForWindowToolDefinition from './desktop-wait-for-window.js';
 import createListMcpServersToolDefinition from './list-mcp-servers.js';
 import createListMcpToolsToolDefinition from './list-mcp-tools.js';
 import createListMcpResourcesToolDefinition from './list-mcp-resources.js';
@@ -43,6 +47,8 @@ import createShellToolHandlers from '../handlers/shell.js';
 import createImageToolHandlers from '../handlers/images.js';
 import createMcpToolHandlers from '../handlers/mcp.js';
 import createDesktopToolHandlers from '../handlers/desktop.js';
+import createAssistantRunToolHandlers from '../handlers/assistant-runs.js';
+import createDesktopWaitToolHandlers from '../handlers/desktop-wait.js';
 import { buildNamespacedMcpToolName } from '../mcp-service.js';
 
 function createDirectMcpToolDefinitions({ mcpService = null, handlers = {} } = {}) {
@@ -98,6 +104,8 @@ export function createBuiltinAssistantToolDefinitions({ workspaceGuard, mcpServi
     ...createShellToolHandlers({ workspaceGuard }),
     ...createImageToolHandlers({ workspaceGuard }),
     ...createDesktopToolHandlers(),
+    ...createDesktopWaitToolHandlers(),
+    ...createAssistantRunToolHandlers(),
     ...createMcpToolHandlers({ mcpService })
   };
   const definitions = [
@@ -133,7 +141,11 @@ export function createBuiltinAssistantToolDefinitions({ workspaceGuard, mcpServi
     createDesktopScrollToolDefinition({ handlers }),
     createDesktopWaitChangeToolDefinition({ handlers }),
     createDesktopFindTextToolDefinition({ handlers }),
-    createDesktopCursorInfoToolDefinition({ handlers })
+    createDesktopCursorInfoToolDefinition({ handlers }),
+    createDesktopWaitForFileToolDefinition({ handlers }),
+    createDesktopWaitForProcessToolDefinition({ handlers }),
+    createDesktopWaitForWindowToolDefinition({ handlers }),
+    createCancelAssistantRunToolDefinition({ handlers })
   ];
   if (mcpService) {
     definitions.push(
