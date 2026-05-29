@@ -16,6 +16,7 @@ import { ScheduledTaskStore } from '../../src/assistant-core/domain/scheduled-ta
 import { EpisodeLedger } from '../../src/assistant-core/domain/episode-ledger.js';
 import { AgentOrchestratorMessageService } from '../../src/agent-orchestrator/message-service.js';
 import { filterMainContextDeliveries } from '../../src/assistant-agent/prompt-builder.js';
+import { getAssistantControlMode } from '../../src/assistant-core/assistant-state.js';
 
 function createTempDir(prefix) {
   return mkdtempSync(join(tmpdir(), prefix));
@@ -158,10 +159,10 @@ test('filterMainContextDeliveries excludes scheduled-task notification deliverie
 });
 
 test('scope conversation is found and used for invoke_assistant runs (no pollution of notifyTargets)', async () => {
-  // We do not actually drive the assistant LLM here — but we verify the
-  // method path: runScheduledTask(action=invoke_assistant) looks up the
-  // scope conversation rather than any notifyTarget conversation. We stub
-  // the assistant module via a dynamic import override.
+  // Static structural checks only — this test does NOT call runScheduledTask,
+  // so it never exercises the dispatch into maybeHandleMessage. The dynamic
+  // dispatch (and its past class-vs-instance crash) is covered by the next
+  // test, which injects a stub assistant-mode service.
   const { conversationStore, coordinator, messageService, sentMessages } = createFixture();
   const convA = conversationStore.findOrCreateByExternal({
     channel: 'dingtalk', accountId: 'default',
@@ -189,4 +190,53 @@ test('scope conversation is found and used for invoke_assistant runs (no polluti
   // Specifically, the scope conversation must NOT be among delivery
   // targets — otherwise notifications would land in the scope itself.
   assert.ok(!resolved.some((t) => t.conversationId === task.scopeConversationId));
+});
+
+test('invoke_assistant dispatches into the assistant in its scope conversation (regression: class-vs-instance crash + control-mode no-op)', async () => {
+  const { conversationStore, coordinator, messageService, sentMessages } = createFixture();
+  const convA = conversationStore.findOrCreateByExternal({
+    channel: 'dingtalk', accountId: 'default',
+    externalConversationId: 'ext-invoke', externalUserId: 'u', title: 'Notify'
+  });
+  const task = coordinator.createScheduledTask({
+    title: 'open wechat',
+    kind: 'reminder',
+    schedule: { recurrence: 'once', delayMinutes: 1 },
+    payload: { action: 'invoke_assistant', message: '用浏览器打开微信公众号' },
+    notifyTargets: [{ kind: 'conversation', conversationId: convA.id }]
+  });
+
+  // Inject a stub assistant-mode service so we drive the REAL dispatch path
+  // (runScheduledTask -> invoke_assistant branch) without spinning up the LLM.
+  // Before the fix, this branch called maybeHandleMessage on the CLASS default
+  // export and threw "assistantModeService.maybeHandleMessage is not a function".
+  const calls = [];
+  messageService._scheduledAssistantModeService = {
+    async maybeHandleMessage(args) {
+      calls.push(args);
+      return { type: 'assistant_response', message: 'opened' };
+    }
+  };
+
+  const result = await messageService.runScheduledTask(task);
+
+  // 1. Dispatch reached the assistant exactly once, with the SCOPE
+  //    conversation (never the notifyTarget) and the task's message.
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].conversation.id, task.scopeConversationId);
+  assert.notEqual(calls[0].conversation.id, convA.id);
+  assert.equal(calls[0].text, '用浏览器打开微信公众号');
+
+  // 2. The scope conversation was promoted to assistant control mode — without
+  //    this, the real maybeHandleMessage would short-circuit to null.
+  const scopeConv = conversationStore.get(task.scopeConversationId);
+  assert.equal(getAssistantControlMode(scopeConv), 'assistant');
+
+  // 3. The assistant's reply is delivered to the notifyTarget as a success.
+  assert.equal(sentMessages.length, 1);
+  assert.equal(sentMessages[0].conversation.id, convA.id);
+  assert.match(String(sentMessages[0].payload.text || ''), /opened/);
+
+  // 4. runScheduledTask resolved without throwing and summarized the run.
+  assert.match(String(result.summary || ''), /assistant invoked/);
 });

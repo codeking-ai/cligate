@@ -10,6 +10,10 @@ export function createScheduledTasksPageModule() {
     // (excludes scheduled-task-scope ones, which are internal).
     scheduledTaskUserConversations: [],
 
+    // Notify-target picker: which channel groups are expanded. Default: all
+    // collapsed; collapsed group headers still show a selected-count badge.
+    scheduledTaskNotifyExpandedChannels: [],
+
     // Selection + run history
     selectedScheduledTask: null,
     scheduledTaskRuns: [],
@@ -128,6 +132,60 @@ export function createScheduledTasksPageModule() {
       const channel = String(conv.channel || '').trim();
       const title = String(conv.title || conv.externalConversationId || conv.id || '').trim();
       return channel ? `[${channel}] ${title}` : title;
+    },
+
+    // Title only (no [channel] prefix) — used inside the grouped picker where
+    // the channel is already the group header.
+    scheduledTaskConversationTitle(conv) {
+      if (!conv) return '';
+      return String(conv.title || conv.externalConversationId || conv.id || '').trim();
+    },
+
+    // Channel group header label. Channel ids are brand names, so these are
+    // intentionally locale-neutral; unknown channels fall back to the raw id.
+    scheduledTaskChannelDisplayName(channel) {
+      const c = String(channel || '').trim().toLowerCase();
+      const map = {
+        'dingtalk': 'DingTalk',
+        'feishu': 'Feishu',
+        'lark': 'Lark',
+        'telegram': 'Telegram',
+        'chat-ui': 'Web Chat',
+        'wechat': 'WeChat'
+      };
+      return map[c] || (channel ? String(channel) : this.t('scheduledTaskChannelOther'));
+    },
+
+    // Group notify-target conversations by channel for the collapsible picker.
+    // selectedCount lets a collapsed header show how many of its conversations
+    // are currently bound.
+    scheduledTaskNotifyGroups() {
+      const groups = new Map();
+      for (const conv of this.scheduledTaskUserConversations) {
+        const channel = String(conv?.channel || 'other').trim() || 'other';
+        if (!groups.has(channel)) groups.set(channel, []);
+        groups.get(channel).push(conv);
+      }
+      const selected = new Set(this.scheduledTaskForm.notifyConversationIds);
+      return Array.from(groups.entries()).map(([channel, conversations]) => ({
+        channel,
+        label: this.scheduledTaskChannelDisplayName(channel),
+        conversations,
+        selectedCount: conversations.filter((c) => selected.has(c.id)).length
+      }));
+    },
+
+    isScheduledTaskNotifyChannelExpanded(channel) {
+      return this.scheduledTaskNotifyExpandedChannels.includes(channel);
+    },
+
+    toggleScheduledTaskNotifyChannel(channel) {
+      const idx = this.scheduledTaskNotifyExpandedChannels.indexOf(channel);
+      if (idx >= 0) {
+        this.scheduledTaskNotifyExpandedChannels.splice(idx, 1);
+      } else {
+        this.scheduledTaskNotifyExpandedChannels.push(channel);
+      }
     },
 
     scheduledTaskConversationLabelById(id) {
@@ -286,6 +344,7 @@ export function createScheduledTasksPageModule() {
         delayMinutes: 5,
         useDelay: false
       };
+      this.scheduledTaskNotifyExpandedChannels = [];
       this.scheduledTaskFormOpen = true;
     },
 
@@ -314,12 +373,22 @@ export function createScheduledTasksPageModule() {
         delayMinutes: 5,
         useDelay: false
       };
+      // Pre-expand the channel groups that already contain selected targets so
+      // the existing selection is visible immediately on edit (new tasks stay
+      // fully collapsed).
+      const selected = new Set(this.scheduledTaskForm.notifyConversationIds);
+      this.scheduledTaskNotifyExpandedChannels = Array.from(new Set(
+        this.scheduledTaskUserConversations
+          .filter((c) => selected.has(c.id))
+          .map((c) => String(c.channel || 'other').trim() || 'other')
+      ));
       this.scheduledTaskFormOpen = true;
     },
 
     closeScheduledTaskForm() {
       this.scheduledTaskFormOpen = false;
       this.scheduledTaskFormError = '';
+      this.scheduledTaskNotifyExpandedChannels = [];
     },
 
     scheduledTaskFormPreview() {

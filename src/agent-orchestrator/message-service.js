@@ -9,6 +9,7 @@ import { AssistantMemoryService } from '../assistant-core/memory-service.js';
 import { AssistantPolicyService } from '../assistant-core/policy-service.js';
 import { AssistantTaskViewService } from '../assistant-core/task-view-service.js';
 import { getAssistantControlMode } from '../assistant-core/assistant-state.js';
+import { ASSISTANT_CONTROL_MODE } from '../assistant-core/models.js';
 import { buildScopeRefs, normalizeScope } from '../assistant-core/scope-resolver.js';
 import supervisorTaskStore from './supervisor-task-store.js';
 import taskExecutionService, { TaskExecutionService } from './task-execution-service.js';
@@ -1376,13 +1377,43 @@ export class AgentOrchestratorMessageService {
         }
       }
 
-      // Drive the assistant via the assistant-mode service. We import it
-      // dynamically to avoid a static import cycle (mode-service depends
-      // on this message-service).
+      // The scope conversation must be in ASSISTANT control mode, otherwise
+      // maybeHandleMessage() short-circuits to null for a plain-text message
+      // that isn't a /cligate command (see mode-service.js — `if (!parsed &&
+      // !assistantModeActive) return null`). Scope conversations are created
+      // generically by ensureScheduledTaskScopeConversation() WITHOUT a control
+      // mode (defaults to 'direct-runtime'), so seed it here. The scope
+      // conversation is the assistant's dedicated home for this task, so
+      // 'assistant' is always the correct mode.
+      if (getAssistantControlMode(scopeConv) !== ASSISTANT_CONTROL_MODE.ASSISTANT) {
+        const assistantCore = {
+          ...(scopeConv.metadata?.assistantCore || {}),
+          controlMode: ASSISTANT_CONTROL_MODE.ASSISTANT
+        };
+        scopeConv = this.conversationStore.patch(scopeConv.id, {
+          metadata: { ...(scopeConv.metadata || {}), assistantCore }
+        }) || scopeConv;
+      }
+
+      // Drive the assistant via the assistant-mode service. We import the
+      // module dynamically to avoid a static import cycle (mode-service.js
+      // statically imports this message-service), then INSTANTIATE it: the
+      // module's default export is the AssistantModeService class, not a
+      // singleton, and maybeHandleMessage is an instance method — calling it on
+      // the class throws "maybeHandleMessage is not a function". Cache the
+      // instance on `this`; tests may pre-set `_scheduledAssistantModeService`
+      // to inject a stub.
       let assistantResult = null;
       let assistantError = null;
       try {
-        const { default: assistantModeService } = await import('../assistant-core/mode-service.js');
+        let assistantModeService = this._scheduledAssistantModeService;
+        if (!assistantModeService) {
+          const { default: AssistantModeService } = await import('../assistant-core/mode-service.js');
+          assistantModeService = this._scheduledAssistantModeService = new AssistantModeService({
+            conversationStore: this.conversationStore,
+            messageService: this
+          });
+        }
         assistantResult = await assistantModeService.maybeHandleMessage({
           conversation: scopeConv,
           text: userText,

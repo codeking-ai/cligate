@@ -223,7 +223,8 @@
                     <span x-show="scheduledTaskForm.action === 'invoke_assistant'" x-text="t('scheduledTaskFormInstructionLabel')"></span>
                     <span x-show="scheduledTaskForm.action !== 'invoke_assistant'" x-text="t('scheduledTaskFormMessageLabel')"></span>
                 </span>
-                <textarea class="textarea textarea-sm w-full" rows="3"
+                <textarea class="textarea textarea-sm w-full min-h-[140px] resize-y leading-relaxed"
+                    :rows="scheduledTaskForm.action === 'invoke_assistant' ? 8 : 4"
                     x-model="scheduledTaskForm.message"
                     :placeholder="scheduledTaskForm.action === 'invoke_assistant' ? t('scheduledTaskFormInstructionPlaceholder') : t('scheduledTaskFormMessagePlaceholder')"></textarea>
             </label>
@@ -244,22 +245,43 @@
                 </span>
             </label>
 
-            <!-- Notify targets (multi) -->
+            <!-- Notify targets (grouped by channel, collapsible) -->
             <div>
-                <span class="session-field-label text-[11px] font-mono text-gray-500 uppercase tracking-wider block mb-2" x-text="t('scheduledTaskFormNotifyTargetsLabel')"></span>
-                <div class="rounded-xl border border-space-border/30 bg-space-900/40 p-3 space-y-2 max-h-[200px] overflow-y-auto">
-                    <div class="text-xs text-gray-500 font-mono" x-show="scheduledTaskUserConversations.length === 0" x-text="t('scheduledTaskFormNoConversations')"></div>
-                    <template x-for="conv in scheduledTaskUserConversations" :key="conv.id">
-                        <label class="flex items-center gap-2 cursor-pointer">
-                            <input type="checkbox" :value="conv.id" x-model="scheduledTaskForm.notifyConversationIds">
-                            <span class="text-sm text-gray-200 truncate" x-text="scheduledTaskConversationLabel(conv)"></span>
-                        </label>
+                <div class="flex items-center justify-between mb-2">
+                    <span class="session-field-label text-[11px] font-mono text-gray-500 uppercase tracking-wider" x-text="t('scheduledTaskFormNotifyTargetsLabel')"></span>
+                    <span class="text-[11px] font-mono text-neon-purple"
+                        x-show="scheduledTaskForm.notifyConversationIds.length > 0"
+                        x-text="t('scheduledTaskFormNotifyTargetsHint', scheduledTaskForm.notifyConversationIds.length)"></span>
+                </div>
+                <div class="rounded-xl border border-space-border/30 bg-space-900/40 divide-y divide-space-border/20 max-h-[240px] overflow-y-auto custom-scrollbar">
+                    <div class="p-3 text-xs text-gray-500 font-mono" x-show="scheduledTaskUserConversations.length === 0" x-text="t('scheduledTaskFormNoConversations')"></div>
+                    <template x-for="group in scheduledTaskNotifyGroups()" :key="group.channel">
+                        <div>
+                            <button type="button"
+                                class="w-full flex items-center justify-between gap-2 px-3 py-2 text-left hover:bg-space-800/40 transition-colors"
+                                @click="toggleScheduledTaskNotifyChannel(group.channel)">
+                                <span class="flex items-center gap-2 min-w-0">
+                                    <span class="text-gray-500 text-xs w-3 shrink-0" x-text="isScheduledTaskNotifyChannelExpanded(group.channel) ? '▾' : '▸'"></span>
+                                    <span class="text-sm text-gray-200 truncate" x-text="group.label"></span>
+                                    <span class="text-[11px] font-mono text-gray-500" x-text="'(' + group.conversations.length + ')'"></span>
+                                </span>
+                                <span class="text-[10px] font-mono text-neon-purple shrink-0" x-show="group.selectedCount > 0" x-text="'· ' + group.selectedCount"></span>
+                            </button>
+                            <div class="px-3 pb-2.5 grid grid-cols-1 sm:grid-cols-2 gap-x-3 gap-y-1.5"
+                                x-show="isScheduledTaskNotifyChannelExpanded(group.channel)">
+                                <template x-for="conv in group.conversations" :key="conv.id">
+                                    <label class="flex items-center gap-2 cursor-pointer min-w-0">
+                                        <input type="checkbox" :value="conv.id" x-model="scheduledTaskForm.notifyConversationIds" class="shrink-0">
+                                        <span class="text-sm text-gray-200 truncate" x-text="scheduledTaskConversationTitle(conv)"></span>
+                                    </label>
+                                </template>
+                            </div>
+                        </div>
                     </template>
                 </div>
                 <span class="text-[11px] text-gray-500 block mt-1">
                     <span x-show="scheduledTaskForm.notifyConversationIds.length === 0 && scheduledTaskForm.action === 'invoke_assistant'" class="text-yellow-400" x-text="t('scheduledTaskFormBackgroundWarning')"></span>
                     <span x-show="scheduledTaskForm.notifyConversationIds.length === 0 && scheduledTaskForm.action !== 'invoke_assistant'" class="text-red-400" x-text="t('scheduledTaskFormNotifyRequired')"></span>
-                    <span x-show="scheduledTaskForm.notifyConversationIds.length > 0" x-text="t('scheduledTaskFormNotifyTargetsHint', scheduledTaskForm.notifyConversationIds.length)"></span>
                 </span>
             </div>
 
