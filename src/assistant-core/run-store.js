@@ -99,6 +99,30 @@ export class AssistantRunStore {
   create(payload = {}) {
     return this.save(createAssistantRun(payload));
   }
+
+  // Retire long-abandoned non-terminal runs by marking them failed, so they
+  // stop being treated as "active" (surfaced to the supervisor / blocking new
+  // work). Guarded: only runs whose createdAt is older than `olderThanMs` are
+  // touched, so genuinely in-flight runs are never swept. Returns the count of
+  // runs retired. Idempotent and safe to call at startup.
+  failStaleNonTerminalRuns({ olderThanMs = 24 * 60 * 60 * 1000, reason = 'stale_nonterminal_cleanup', now = Date.now() } = {}) {
+    const TERMINAL = new Set(['completed', 'failed', 'cancelled']);
+    let count = 0;
+    for (const run of this.records) {
+      if (!run || TERMINAL.has(String(run.status || '').toLowerCase())) continue;
+      const createdMs = Date.parse(String(run.createdAt || run.updatedAt || '')) || 0;
+      if (!createdMs || (now - createdMs) <= olderThanMs) continue;
+      run.status = 'failed';
+      run.updatedAt = nowIso();
+      run.metadata = {
+        ...(run.metadata && typeof run.metadata === 'object' ? run.metadata : {}),
+        staleCleanup: { reason, sweptAt: nowIso(), ageMs: now - createdMs }
+      };
+      count += 1;
+    }
+    if (count > 0) this._save();
+    return count;
+  }
 }
 
 export const assistantRunStore = new AssistantRunStore();

@@ -18,6 +18,7 @@ import agentChannelManager from './agent-channels/manager.js';
 import chatUiRuntimeObserver from './chat-ui/runtime-observer.js';
 import assistantConsolidator from './assistant-core/consolidator.js';
 import localScheduler from './assistant-core/local-scheduler.js';
+import assistantRunStore from './assistant-core/run-store.js';
 import desktopAgentService from './desktop-agent/service.js';
 import mcpConnectionManager from './mcp/index.js';
 
@@ -97,6 +98,19 @@ export function createServer({ port }) {
   chatUiRuntimeObserver.start();
   assistantConsolidator.start();
   localScheduler.start();
+
+  // Retire any long-abandoned non-terminal assistant runs left over from a
+  // previous process. A stuck run that never reached a terminal status would
+  // otherwise keep being treated as "active" and block new work via the
+  // supervisor's concurrent-run rule. Best-effort; never fatal to boot.
+  try {
+    const swept = assistantRunStore.failStaleNonTerminalRuns();
+    if (swept > 0) {
+      console.log(`[AssistantCore] retired ${swept} stale non-terminal assistant run(s) at startup`);
+    }
+  } catch (error) {
+    console.error('[AssistantCore] stale-run cleanup failed:', error?.message || error);
+  }
   mcpConnectionManager.start().catch((error) => {
     console.error('[MCP] Failed to start MCP connection manager:', error.message);
   });

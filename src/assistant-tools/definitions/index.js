@@ -32,6 +32,7 @@ import createDesktopWaitChangeToolDefinition from './desktop-wait-change.js';
 import createDesktopFindTextToolDefinition from './desktop-find-text.js';
 import createDesktopCursorInfoToolDefinition from './desktop-cursor-info.js';
 import createCancelAssistantRunToolDefinition from './cancel-assistant-run.js';
+import createSendMessageToChannelToolDefinition from './send-message-to-channel.js';
 import createDesktopWaitForFileToolDefinition from './desktop-wait-for-file.js';
 import createDesktopWaitForProcessToolDefinition from './desktop-wait-for-process.js';
 import createDesktopWaitForWindowToolDefinition from './desktop-wait-for-window.js';
@@ -48,6 +49,7 @@ import createImageToolHandlers from '../handlers/images.js';
 import createMcpToolHandlers from '../handlers/mcp.js';
 import createDesktopToolHandlers from '../handlers/desktop.js';
 import createAssistantRunToolHandlers from '../handlers/assistant-runs.js';
+import createMessagingToolHandlers from '../handlers/messaging.js';
 import createDesktopWaitToolHandlers from '../handlers/desktop-wait.js';
 import { buildNamespacedMcpToolName } from '../mcp-service.js';
 
@@ -106,6 +108,7 @@ export function createBuiltinAssistantToolDefinitions({ workspaceGuard, mcpServi
     ...createDesktopToolHandlers(),
     ...createDesktopWaitToolHandlers(),
     ...createAssistantRunToolHandlers(),
+    ...createMessagingToolHandlers(),
     ...createMcpToolHandlers({ mcpService })
   };
   const definitions = [
@@ -145,7 +148,8 @@ export function createBuiltinAssistantToolDefinitions({ workspaceGuard, mcpServi
     createDesktopWaitForFileToolDefinition({ handlers }),
     createDesktopWaitForProcessToolDefinition({ handlers }),
     createDesktopWaitForWindowToolDefinition({ handlers }),
-    createCancelAssistantRunToolDefinition({ handlers })
+    createCancelAssistantRunToolDefinition({ handlers }),
+    createSendMessageToChannelToolDefinition({ handlers })
   ];
   if (mcpService) {
     definitions.push(

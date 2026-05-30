@@ -33,6 +33,23 @@ const ACTIVE_ASSISTANT_RUN_STATUSES = new Set([
   'waiting_user'
 ]);
 
+// A non-terminal run that has not advanced for this long is treated as STALE
+// and is no longer surfaced to the supervisor as "active". This prevents a
+// stuck/abandoned run (a runtime that never reported terminal, or an old
+// waiting_user run the user walked away from) from poisoning
+// <active_assistant_runs> forever and freezing the conversation behind the
+// concurrent-run rule. This only hides them from the prompt; it does NOT mutate
+// their stored status (run-store.failStaleNonTerminalRuns does that separately).
+const ACTIVE_RUN_PROMPT_MAX_AGE_MS = 2 * 60 * 60 * 1000; // 2 hours
+
+function assistantRunEffectiveAgeMs(entry, now = Date.now()) {
+  const created = Date.parse(String(entry?.createdAt || '')) || 0;
+  const updated = Date.parse(String(entry?.updatedAt || '')) || 0;
+  const last = Math.max(created, updated);
+  if (!last) return 0; // no usable timestamp -> treat as fresh, don't hide
+  return now - last;
+}
+
 function summarizeActiveAssistantRunEvent(event = {}) {
   if (!event || typeof event !== 'object') return null;
   return {
@@ -46,10 +63,13 @@ function summarizeActiveAssistantRunEvent(event = {}) {
   };
 }
 
-function buildActiveAssistantRunsSummary(runs = [], runEventStore = assistantRunEventStore, perRunEventLimit = 5) {
+function buildActiveAssistantRunsSummary(runs = [], runEventStore = assistantRunEventStore, perRunEventLimit = 5, maxAgeMs = ACTIVE_RUN_PROMPT_MAX_AGE_MS) {
   if (!Array.isArray(runs) || runs.length === 0) return [];
+  const now = Date.now();
   return runs
-    .filter((entry) => entry && ACTIVE_ASSISTANT_RUN_STATUSES.has(String(entry.status || '').trim()))
+    .filter((entry) => entry
+      && ACTIVE_ASSISTANT_RUN_STATUSES.has(String(entry.status || '').trim())
+      && assistantRunEffectiveAgeMs(entry, now) <= maxAgeMs)
     .map((entry) => {
       const allEvents = runEventStore?.list?.(entry.id, { limit: 200 }) || [];
       const recentEvents = allEvents
