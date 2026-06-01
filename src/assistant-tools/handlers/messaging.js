@@ -1,3 +1,6 @@
+import { existsSync, readdirSync, statSync } from 'node:fs';
+import path from 'node:path';
+
 import agentChannelDeliverySender from '../../agent-channels/delivery-sender.js';
 import agentChannelConversationStore from '../../agent-channels/conversation-store.js';
 import artifactService from '../../assistant-core/artifact-service.js';
@@ -17,6 +20,69 @@ function inferImageMediaType(filePath) {
   if (s.endsWith('.gif')) return 'image/gif';
   if (s.endsWith('.bmp')) return 'image/bmp';
   return 'image/png';
+}
+
+const SCREENSHOT_EXT_RE = /\.(png|jpe?g|webp|gif|bmp)$/i;
+
+// The desktop agent writes screenshots under DESKTOP_CONTROL_DIR (when set) or
+// <cwd>/.tmp/desktop-control-agent, in a `screenshots/` subdir — mirror that
+// same resolution the Python agent uses (root_dir() in desktop-agent-server).
+function desktopScreenshotsDir() {
+  const base = String(process.env.DESKTOP_CONTROL_DIR || '').trim()
+    || path.join(process.cwd(), '.tmp', 'desktop-control-agent');
+  return path.join(base, 'screenshots');
+}
+
+// Heuristic gate: only attempt screenshot recovery for paths that were clearly
+// meant to be a desktop screenshot, so an unrelated missing image path never
+// silently turns into "send the latest screenshot".
+function looksLikeScreenshotPath(p) {
+  const normalized = String(p || '').toLowerCase().replace(/\\/g, '/');
+  if (!normalized) return false;
+  return normalized.includes('desktop-control-agent')
+    || normalized.includes('/screenshots/')
+    || /^(?:screen-region-|screen-|inspect-window-|capture[_-])/i.test(path.basename(normalized));
+}
+
+// Recover a screenshot when the supervisor passes a path that doesn't exist.
+// The LLM sometimes reconstructs an approximate screenshot path from memory
+// (wrong directory and/or filename) instead of echoing the exact path
+// desktop_capture_window returned — especially across an approval round-trip
+// where the real path drops out of context. Try an exact basename match in the
+// canonical screenshots dir first, then fall back to the most recently modified
+// screenshot (in the capture→send flow that is the just-captured one). Returns
+// '' when nothing usable is found.
+function recoverScreenshotPath(requestedPath) {
+  const dir = desktopScreenshotsDir();
+  let names;
+  try {
+    names = readdirSync(dir).filter((name) => SCREENSHOT_EXT_RE.test(name));
+  } catch {
+    return '';
+  }
+  if (names.length === 0) return '';
+
+  const wantedBase = path.basename(String(requestedPath || '')).toLowerCase();
+  if (wantedBase) {
+    const exact = names.find((name) => name.toLowerCase() === wantedBase);
+    if (exact) return path.join(dir, exact);
+  }
+
+  let newestPath = '';
+  let newestMtime = -Infinity;
+  for (const name of names) {
+    const full = path.join(dir, name);
+    try {
+      const mtime = statSync(full).mtimeMs;
+      if (mtime > newestMtime) {
+        newestMtime = mtime;
+        newestPath = full;
+      }
+    } catch {
+      // unreadable entry — skip it
+    }
+  }
+  return newestPath;
 }
 
 export function createMessagingToolHandlers({
@@ -60,8 +126,17 @@ export function createMessagingToolHandlers({
       // bloat — the provider uploads the file). desktop_capture_window returns
       // exactly such a path in its `path` field.
       const images = [];
+      let recoveredImageNote = '';
       if (imagePath) {
-        images.push({ path: imagePath, mediaType: inferImageMediaType(imagePath), title: 'image' });
+        let effectiveImagePath = imagePath;
+        if (!existsSync(effectiveImagePath) && looksLikeScreenshotPath(effectiveImagePath)) {
+          const recovered = recoverScreenshotPath(effectiveImagePath);
+          if (recovered) {
+            recoveredImageNote = `requested image path "${imagePath}" did not exist; recovered and sent the latest screenshot "${recovered}" instead.`;
+            effectiveImagePath = recovered;
+          }
+        }
+        images.push({ path: effectiveImagePath, mediaType: inferImageMediaType(effectiveImagePath), title: 'image' });
       } else if (imageArtifactId) {
         const artifact = artifactServiceInstance.getArtifact?.(imageArtifactId) || null;
         if (!artifact) {
@@ -128,7 +203,8 @@ export function createMessagingToolHandlers({
           : {}),
         ...(wantsImage && !imageSupported && text
           ? { note: `channel "${channel}" does not support images yet — only the text was delivered. Image-capable channels: ${[...IMAGE_CAPABLE_CHANNELS].join(', ')}.` }
-          : {})
+          : {}),
+        ...(recoveredImageNote ? { note: recoveredImageNote } : {})
       };
     }
   };

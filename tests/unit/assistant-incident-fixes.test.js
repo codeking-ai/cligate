@@ -1,7 +1,7 @@
 import '../test-env.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, utimesSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -117,6 +117,90 @@ test('reports not-delivered when the channel has no provider (delivery-sender re
   });
   assert.equal(res.delivered, false);
   assert.ok(res.error && /no delivery provider/.test(res.error));
+});
+
+// --- screenshot path recovery ----------------------------------------------
+// The supervisor sometimes passes a fabricated/approximate screenshot path
+// (wrong dir and/or filename) instead of the exact path desktop_capture_window
+// returned — so send_message_to_channel recovers from the canonical desktop
+// screenshots dir (DESKTOP_CONTROL_DIR/screenshots).
+
+function withDesktopControlDir(base, fn) {
+  const prev = process.env.DESKTOP_CONTROL_DIR;
+  process.env.DESKTOP_CONTROL_DIR = base;
+  return Promise.resolve()
+    .then(fn)
+    .finally(() => {
+      if (prev === undefined) delete process.env.DESKTOP_CONTROL_DIR;
+      else process.env.DESKTOP_CONTROL_DIR = prev;
+    });
+}
+
+test('screenshot send recovers from a fabricated path by sending the latest screenshot', async () => {
+  const base = mkdtempSync(join(tmpdir(), 'cligate-desktop-ctl-'));
+  const shotsDir = join(base, 'screenshots');
+  mkdirSync(shotsDir, { recursive: true });
+  const older = join(shotsDir, 'screen-region-20260601-174133-134811.png');
+  const newest = join(shotsDir, 'screen-region-20260601-174743-628786.png');
+  writeFileSync(older, 'older');
+  writeFileSync(newest, 'newest');
+  // Force a strictly-later mtime on the newest so selection is deterministic.
+  utimesSync(older, new Date('2026-06-01T17:41:33Z'), new Date('2026-06-01T17:41:33Z'));
+  utimesSync(newest, new Date('2026-06-01T17:47:43Z'), new Date('2026-06-01T17:47:43Z'));
+
+  await withDesktopControlDir(base, async () => {
+    const { handlers, sent } = makeHandler({ conversations: { 'c-ding': dingtalkConv } });
+    const res = await handlers.sendMessageToChannel({
+      // Exactly the fabricated path from the incident: wrong base + capture_* name.
+      input: { text: '截图', imagePath: 'D:\\.tmp\\desktop-control-agent\\screenshots\\capture_20260601_174742_389.png' },
+      context: { conversation: dingtalkConv }
+    });
+    assert.equal(res.delivered, true);
+    assert.equal(res.imageDelivered, true);
+    assert.ok(res.note && /recovered/.test(res.note));
+    assert.equal(sent.length, 1);
+    assert.equal(sent[0].message.images[0].path, newest);
+  });
+});
+
+test('screenshot send prefers an exact basename match over the newest file', async () => {
+  const base = mkdtempSync(join(tmpdir(), 'cligate-desktop-ctl-'));
+  const shotsDir = join(base, 'screenshots');
+  mkdirSync(shotsDir, { recursive: true });
+  const wanted = join(shotsDir, 'screen-region-20260601-174133-134811.png');
+  const newer = join(shotsDir, 'screen-region-20260601-180000-000000.png');
+  writeFileSync(wanted, 'wanted');
+  writeFileSync(newer, 'newer');
+  utimesSync(wanted, new Date('2026-06-01T17:41:33Z'), new Date('2026-06-01T17:41:33Z'));
+  utimesSync(newer, new Date('2026-06-01T18:00:00Z'), new Date('2026-06-01T18:00:00Z'));
+
+  await withDesktopControlDir(base, async () => {
+    const { handlers, sent } = makeHandler({ conversations: { 'c-ding': dingtalkConv } });
+    const res = await handlers.sendMessageToChannel({
+      // Right filename, wrong directory — basename match should win over newest.
+      input: { imagePath: 'D:\\wrong\\dir\\screen-region-20260601-174133-134811.png' },
+      context: { conversation: dingtalkConv }
+    });
+    assert.equal(res.imageDelivered, true);
+    assert.equal(sent[0].message.images[0].path, wanted);
+  });
+});
+
+test('a missing NON-screenshot image path is left untouched (no latest-screenshot hijack)', async () => {
+  const base = mkdtempSync(join(tmpdir(), 'cligate-desktop-ctl-'));
+  const shotsDir = join(base, 'screenshots');
+  mkdirSync(shotsDir, { recursive: true });
+  writeFileSync(join(shotsDir, 'screen-region-20260601-174743-628786.png'), 'shot');
+
+  await withDesktopControlDir(base, async () => {
+    const { handlers, sent } = makeHandler({ conversations: { 'c-ding': dingtalkConv } });
+    const res = await handlers.sendMessageToChannel({
+      input: { imagePath: 'D:\\Downloads\\report-cover.png' },
+      context: { conversation: dingtalkConv }
+    });
+    assert.ok(!res.note || !/recovered/.test(res.note));
+    assert.equal(sent[0].message.images[0].path, 'D:\\Downloads\\report-cover.png');
+  });
 });
 
 // --- stale-run hygiene ------------------------------------------------------
