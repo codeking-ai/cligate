@@ -1180,30 +1180,42 @@ export class DingTalkChannelProvider {
 
     const textChunks = splitDingTalkText(textWithActions);
     let result = null;
+    let textSentViaWebhook = false;
 
     // Prefer the sessionWebhook path when it's still fresh — it's cheap and
     // works for inbound-reply windows. If DingTalk rejects (consumed / session
     // closed server-side), fall through to App API instead of failing.
+    //
+    // CRITICAL: the sessionWebhook (robot/sendBySession) can ONLY carry text —
+    // it has no image message type. So we must NOT `return` here when there are
+    // images still to deliver; the image has to go out via the App API
+    // (sendOneImage) below. Returning early after the text send silently drops
+    // the image while every layer above reports success.
     if (sessionWebhook && (!expiredAt || expiredAt > now + 15_000)) {
       try {
         for (const chunk of textChunks) {
           result = await this.sendViaSessionWebhook(sessionWebhook, chunk);
         }
-        return result;
+        if (sendableImages.length === 0) {
+          return result;
+        }
+        textSentViaWebhook = true;
       } catch (err) {
         // sessionWebhook may already be consumed/expired on DingTalk's side
         // even though `expiredAt` says otherwise. Fall through to App API.
       }
     }
 
-    for (const chunk of textChunks) {
-      result = await this.sendViaAppApi({
-        conversationId: conversation?.externalConversationId,
-        text: chunk,
-        robotCode: channelContext.robotCode || '',
-        conversationType: channelContext.conversationType || '',
-        senderStaffId: channelContext.senderStaffId || ''
-      });
+    if (!textSentViaWebhook) {
+      for (const chunk of textChunks) {
+        result = await this.sendViaAppApi({
+          conversationId: conversation?.externalConversationId,
+          text: chunk,
+          robotCode: channelContext.robotCode || '',
+          conversationType: channelContext.conversationType || '',
+          senderStaffId: channelContext.senderStaffId || ''
+        });
+      }
     }
 
     if (sendableImages.length > 0) {

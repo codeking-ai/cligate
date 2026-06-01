@@ -930,6 +930,94 @@ test('AgentChannelRouter treats affirmative replies as assistant pending-action 
   assert.equal(assistantPendingActionStore.findLatestByConversationId(conversation.id), null);
 });
 
+test('AgentChannelRouter defers execution-tool approvals to the supervisor instead of re-routing an empty message', async () => {
+  // Regression: a send_message_to_channel approval is an *execution-tool* pending
+  // action (input has the tool args, no task/message). The old shortcut consumed
+  // it and re-routed `input.task || input.message` => '' , so the assistant saw a
+  // blank message ("我只看到一个空消息"). It must instead reach the supervisor
+  // (maybeHandleMessage) with the ORIGINAL text so the LLM can resolve it via
+  // resolve_assistant_confirmation.
+  const conversationStore = new AgentChannelConversationStore({
+    configDir: createTempDir('cligate-agent-channels-exec-confirm-conv-')
+  });
+  const deliveryStore = new AgentChannelDeliveryStore({
+    configDir: createTempDir('cligate-agent-channels-exec-confirm-delivery-')
+  });
+  const pairingStore = new AgentChannelPairingStore({
+    configDir: createTempDir('cligate-agent-channels-exec-confirm-pairing-')
+  });
+
+  const routeUserMessageCalls = [];
+  const maybeHandleCalls = [];
+  const router = new AgentChannelRouter({
+    conversationStore,
+    deliveryStore,
+    pairingStore,
+    messageService: {
+      runtimeSessionManager: { getSession() { return null; } },
+      async routeUserMessage({ message }) {
+        routeUserMessageCalls.push({ text: message?.text || '' });
+        return { type: 'runtime_started', session: { id: 'session_exec_1', provider: 'codex', status: 'starting' } };
+      },
+      getRuntimeSession() { return null; },
+      supervisorTaskStore: { get() { return null; }, listByConversationId() { return []; }, save(record) { return record; } },
+      listPendingApprovals() { return []; },
+      listPendingQuestions() { return []; }
+    },
+    assistantModeService: {
+      async maybeHandleMessage({ text }) {
+        maybeHandleCalls.push({ text: String(text || '') });
+        return { type: 'assistant_response', message: '已确认并发送。' };
+      }
+    }
+  });
+
+  const conversation = conversationStore.findOrCreateByExternal({
+    channel: 'dingtalk',
+    accountId: 'default',
+    externalConversationId: 'dtalk-exec-confirm-1',
+    externalUserId: 'user-1',
+    title: 'tester / dingtalk',
+    metadata: { assistantCore: { mode: 'assistant' } }
+  });
+  assistantPendingActionStore.create({
+    conversationId: conversation.id,
+    assistantRunId: 'assistant-run-exec-1',
+    toolName: 'send_message_to_channel',
+    input: {
+      imagePath: 'D:\\postman.png',
+      targetConversationId: conversation.id
+    },
+    title: '需要确认后继续执行'
+  });
+
+  const result = await router.routeInboundMessage({
+    channel: 'dingtalk',
+    accountId: 'default',
+    externalConversationId: 'dtalk-exec-confirm-1',
+    externalUserId: 'user-1',
+    externalUserName: 'tester',
+    externalMessageId: 'msg-exec-confirm-1',
+    text: '同意',
+    messageType: 'text'
+  }, {
+    defaultRuntimeProvider: 'codex'
+  });
+
+  // The shortcut must NOT have fired: the supervisor sees the original "同意",
+  // not an empty re-routed message, and the pending action is left intact for
+  // resolve_assistant_confirmation to consume.
+  assert.equal(maybeHandleCalls.length, 1);
+  assert.equal(maybeHandleCalls[0].text, '同意');
+  assert.equal(routeUserMessageCalls.length, 0);
+  assert.equal(result.type, 'assistant_response');
+  assert.ok(assistantPendingActionStore.findLatestByConversationId(conversation.id));
+
+  assistantPendingActionStore.dismiss(
+    assistantPendingActionStore.findLatestByConversationId(conversation.id)?.confirmToken
+  );
+});
+
 test('AgentChannelRouter stores fresh-session inbound messages under the new runtime session', async () => {
   const runtimeSessionManager = createRuntimeManager();
   const conversationStore = new AgentChannelConversationStore({

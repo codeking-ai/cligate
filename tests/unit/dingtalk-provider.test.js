@@ -286,6 +286,70 @@ test('DingTalk provider sendMessage sends text first and then image when text an
   assert.equal(lastCall, imageCall);
 });
 
+test('DingTalk provider sendMessage still delivers image when a fresh sessionWebhook carries the text', async () => {
+  // Regression: in DingTalk stream mode every inbound message ships a fresh
+  // sessionWebhook. When the assistant sends text + image together, the text
+  // went out via the (text-only) sessionWebhook and the method returned early,
+  // silently dropping the image while reporting success. The image must still
+  // be uploaded and sent via the App API.
+  const calls = [];
+  const provider = new DingTalkChannelProvider({
+    fetchImpl: createFetchStub(async (url, options) => {
+      calls.push({ url, options });
+      if (url.includes('/oauth2/accessToken')) {
+        return { json: { accessToken: 'token-webhook-mix' } };
+      }
+      if (url.includes('/robot/sendBySession')) {
+        return { json: { errcode: 0, processQueryKey: 'webhook-text' } };
+      }
+      return { json: { processQueryKey: 'app-image' } };
+    })
+  });
+  provider.settings = {
+    clientId: 'app-key',
+    clientSecret: 'app-secret',
+    robotCode: 'robot-code'
+  };
+
+  const result = await provider.sendMessage({
+    conversation: {
+      externalConversationId: 'conv-webhook-mix',
+      metadata: {
+        channelContext: {
+          robotCode: 'robot-code',
+          conversationType: '1',
+          senderStaffId: 'staff-webhook-mix',
+          sessionWebhook: 'https://oapi.dingtalk.com/robot/sendBySession?session=fresh-session',
+          sessionWebhookExpiredTime: String(Date.now() + 5 * 60 * 1000)
+        }
+      }
+    },
+    text: '按你的要求，把图片发回给你。',
+    images: [{
+      imageUrl: 'https://example.com/postman.png'
+    }]
+  });
+
+  const webhookCall = calls.find((entry) => entry.url.includes('/robot/sendBySession'));
+  const imageCall = calls.find((entry) => (
+    entry.url.includes('/robot/oToMessages/batchSend')
+    && String(entry.options.body || '').includes('sampleImageMsg')
+  ));
+  assert.ok(webhookCall, 'text should be delivered via the fresh sessionWebhook');
+  assert.match(String(webhookCall.options.body || ''), /把图片发回给你/);
+  assert.ok(imageCall, 'image must still be sent via the App API and not dropped');
+  const imageBody = JSON.parse(String(imageCall.options.body || '{}'));
+  assert.equal(imageBody.msgKey, 'sampleImageMsg');
+  assert.match(String(imageBody.msgParam || ''), /postman\.png/);
+  // The text must NOT be re-sent through the App API once the webhook accepted it.
+  const appTextCall = calls.find((entry) => (
+    entry.url.includes('/robot/oToMessages/batchSend')
+    && String(entry.options.body || '').includes('sampleText')
+  ));
+  assert.equal(appTextCall, undefined, 'text should not be duplicated via the App API');
+  assert.equal(result.messageId, 'app-image');
+});
+
 test('DingTalk provider sendMessage sends multiple http images sequentially when no text is present', async () => {
   const calls = [];
   const provider = new DingTalkChannelProvider({

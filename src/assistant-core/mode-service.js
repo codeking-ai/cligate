@@ -14,6 +14,7 @@ import {
 } from '../assistant-agent/tool-result.js';
 import { buildAssistantCoreDeliveryState } from '../agent-channels/conversation-delivery-arbiter.js';
 import { getAssistantControlMode } from './assistant-state.js';
+import { isTransientUpstreamError } from '../utils/transient-error.js';
 import { buildSupervisorBrief } from '../agent-orchestrator/supervisor-brief.js';
 import { syncTaskFromRuntimeResult } from '../agent-core/task-service.js';
 import agentTaskStore from '../agent-core/task-store.js';
@@ -763,15 +764,34 @@ export class AssistantModeService {
       }
     });
 
+    // When the whole model chain failed because the network to the model
+    // service was reset/unreachable (ECONNRESET, "fetch failed", timeouts),
+    // don't bounce the raw transport error back to the user — show a friendly,
+    // localized "transient network problem, retry" message instead. The real
+    // error is still kept verbatim in the run summary / metadata / run events
+    // above for diagnostics.
+    const userFacingMessage = isTransientUpstreamError(error)
+      ? this.transientNetworkFailureMessage(runText)
+      : (error.message || 'Assistant run failed');
+
     return {
       type: 'assistant_response',
-      message: error.message || 'Assistant run failed',
+      message: userFacingMessage,
       isError: true,
       assistantSession,
       assistantRun: failedRun,
       observability: buildAssistantRunObservability(failedRun),
       conversation: nextConversation
     };
+  }
+
+  // Friendly, language-matched notice for transient upstream/network failures.
+  // Mirrors runAcceptedMessage's CJK detection so the reply matches the
+  // language the user wrote in.
+  transientNetworkFailureMessage(text) {
+    return /[㐀-鿿]/.test(String(text || ''))
+      ? '⚠️ 连接模型服务的网络暂时中断（连接被重置），这条消息没能处理成功。请稍后再发一次试试。'
+      : '⚠️ The network connection to the model service was interrupted (connection reset), so this message could not be processed. Please try again in a moment.';
   }
 
   runAcceptedMessage(text) {

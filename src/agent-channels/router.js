@@ -41,6 +41,24 @@ function isAffirmativeConfirmation(text = '') {
   ].some((pattern) => pattern.test(normalized));
 }
 
+// An *execution-tool* pending action (e.g. send_message_to_channel) carries the
+// tool's own args as `input` and has no task/message. Unlike a runtime-start
+// confirmation (delegate_to_runtime, which has input.task), it cannot be
+// resolved by re-routing its text — doing so produced an empty message that the
+// assistant saw as "I only got a blank message". Detect it so the router defers
+// such approvals to the supervisor, which surfaces pending_assistant_confirmation
+// and resolves free-text approvals ("同意 / 非常同意 / 继续 …") via
+// resolve_assistant_confirmation. Mirrors isExecutionToolPendingAction in
+// assistant-confirmation-service.js / chat-ui-route.js.
+function isExecutionToolPendingAction(action = {}) {
+  return Boolean(
+    action?.toolName
+    && action?.input
+    && !action?.input?.task
+    && !action?.input?.message
+  );
+}
+
 function collectAssistantRunArtifactRefs(run = null) {
   const refs = new Set();
   const toolResults = Array.isArray(run?.metadata?.toolResults) ? run.metadata.toolResults : [];
@@ -161,7 +179,17 @@ export class AgentChannelRouter {
     const latestAssistantPendingAction = conversation?.id
       ? assistantPendingActionStore.findLatestByConversationId(conversation.id)
       : null;
-    if (latestAssistantPendingAction && isAffirmativeConfirmation(message.text)) {
+    // Only resolve runtime-start confirmations (input.task/message) by re-routing
+    // here. Execution-tool approvals have no task/message and must be left for the
+    // supervisor — it understands natural-language approvals and calls
+    // resolve_assistant_confirmation, which actually re-executes the approved tool
+    // (e.g. send_message_to_channel). Re-routing them here only ever produced an
+    // empty message.
+    if (
+      latestAssistantPendingAction
+      && isAffirmativeConfirmation(message.text)
+      && !isExecutionToolPendingAction(latestAssistantPendingAction)
+    ) {
       const consumedAction = assistantPendingActionStore.consume(latestAssistantPendingAction.confirmToken);
       if (consumedAction) {
         const routeResult = await this.routeInboundMessage({
