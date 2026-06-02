@@ -108,6 +108,48 @@ test('cancel_assistant_run rejects missing runId input', async () => {
   );
 });
 
+test('cancel_assistant_run refuses to cancel the calling run itself (CANNOT_CANCEL_SELF)', async () => {
+  // The 2026-06-02 incident: the supervisor passed its own runId here, thinking
+  // it was a duplicate, and cancelled the very loop issuing the call.
+  const runStore = makeFakeRunStore([
+    makeRun({ id: 'run-self-1', status: ASSISTANT_RUN_STATUS.RUNNING })
+  ]);
+  const eventStore = makeFakeEventStore();
+  const handlers = createAssistantRunToolHandlers({ runStore, runEventStore: eventStore });
+
+  const result = await handlers.cancelAssistantRun({
+    input: { runId: 'run-self-1', reason: 'thought it was a duplicate' },
+    context: { run: { id: 'run-self-1' } }
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.code, 'CANNOT_CANCEL_SELF');
+  // The run must be untouched — no status flip, no cancellation event.
+  assert.equal(runStore.get('run-self-1').status, ASSISTANT_RUN_STATUS.RUNNING);
+  assert.equal(eventStore.events.length, 0);
+});
+
+test('cancel_assistant_run still cancels a DIFFERENT run when context.run differs', async () => {
+  const runStore = makeFakeRunStore([
+    makeRun({ id: 'run-caller', status: ASSISTANT_RUN_STATUS.RUNNING }),
+    makeRun({ id: 'run-other', status: ASSISTANT_RUN_STATUS.RUNNING })
+  ]);
+  const eventStore = makeFakeEventStore();
+  const handlers = createAssistantRunToolHandlers({ runStore, runEventStore: eventStore });
+
+  const result = await handlers.cancelAssistantRun({
+    input: { runId: 'run-other', reason: 'user asked to stop the other task' },
+    context: { run: { id: 'run-caller' } }
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.status, ASSISTANT_RUN_STATUS.CANCELLED);
+  assert.equal(runStore.get('run-other').status, ASSISTANT_RUN_STATUS.CANCELLED);
+  // Caller is untouched.
+  assert.equal(runStore.get('run-caller').status, ASSISTANT_RUN_STATUS.RUNNING);
+  assert.equal(eventStore.events.length, 1);
+});
+
 test('desktop_wait_for_file returns matched as soon as the file appears', async () => {
   const tmp = mkdtempSync(join(tmpdir(), 'wait-file-'));
   const target = join(tmp, 'expected.bin');

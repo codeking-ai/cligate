@@ -1,6 +1,8 @@
 import path from 'node:path';
-import { ASSISTANT_RUN_STATUS } from '../assistant-core/models.js';
+import { ASSISTANT_RUN_STATUS, ASSISTANT_RUN_CLOSURE_STATE } from '../assistant-core/models.js';
 import { createAssistantRunCheckpoint } from '../assistant-core/models.js';
+import assistantRunStore from '../assistant-core/run-store.js';
+import runResourceRegistry, { DESKTOP_INPUT_TOOLS, DESKTOP_RESOURCE } from '../assistant-core/run-resource-registry.js';
 import { buildAnthropicToolDefinitions } from './tool-schema.js';
 import { buildInitialAnthropicMessages } from './prompt-builder.js';
 import { deriveAssistantRunStopState } from './stop-policy.js';
@@ -28,6 +30,16 @@ function nowIso() {
 function isChineseText(text) {
   return /[\u3400-\u9fff]/.test(String(text || ''));
 }
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// How long a desktop-class tool call will queue behind another run that holds
+// the desktop before giving up and handing a "busy" result back to the LLM so
+// it can decide what to do next (ask the user, do non-desktop work, etc.).
+const DESKTOP_LEASE_WAIT_MS = 5 * 60 * 1000;
+const DESKTOP_LEASE_POLL_MS = 1500;
 
 function appendAssistantToolMessage(messages, completion) {
   const content = [];
@@ -143,12 +155,14 @@ export class AssistantReactEngine {
     toolExecutor,
     reflectionService = assistantReflectionService,
     runEventStore = null,
+    runStore = assistantRunStore,
     maxIterations = resolveDefaultMaxIterations()
   } = {}) {
     this.llmClient = llmClient;
     this.toolRegistry = toolRegistry;
     this.toolExecutor = toolExecutor;
     this.runEventStore = runEventStore;
+    this.runStore = runStore;
     this.reflectionService = reflectionService instanceof AssistantReflectionService
       ? reflectionService
       : reflectionService;
@@ -158,6 +172,66 @@ export class AssistantReactEngine {
   emitTrace(runId, event = {}) {
     if (!this.runEventStore?.append || !runId) return null;
     return this.runEventStore.append(runId, event);
+  }
+
+  // Read the run's *persisted* status. workingRun is a local copy that stays
+  // RUNNING for the whole loop, so the only authoritative signal that a
+  // supervisor tool / the user cancelled this run mid-flight lives in the
+  // store record (the same source the wait-tools poll). Fail-open: if the
+  // store read throws, report "not cancelled" so a flaky read never wedges a
+  // healthy run.
+  isRunCancelled(runId) {
+    if (!runId || !this.runStore?.get) return false;
+    try {
+      const record = this.runStore.get(runId);
+      return String(record?.status || '').trim() === ASSISTANT_RUN_STATUS.CANCELLED;
+    } catch {
+      return false;
+    }
+  }
+
+  // Ensure this run holds the desktop lease before it drives the mouse/keyboard.
+  // Independent (non-desktop) work never reaches this — only the input-grabbing
+  // desktop tools do. If another run holds the desktop, this queues (event-driven
+  // poll, cancellable) until released, then proceeds — realizing "second desktop
+  // task waits and auto-starts when the first finishes". If it can't acquire
+  // within the window (or the run is cancelled), it returns ok:false so the
+  // caller hands a structured "busy" result back to the LLM to decide.
+  async ensureDesktopLease(workingRun, conversation, runId) {
+    const info = {
+      title: String(workingRun?.triggerText || '').slice(0, 80),
+      conversationId: String(conversation?.id || '')
+    };
+    const first = runResourceRegistry.tryAcquire(DESKTOP_RESOURCE, runId, info);
+    if (first.ok) return { ok: true, waitedMs: 0 };
+
+    // Held by another run — tell the user (once) that we're queued behind it.
+    this.emitTrace(workingRun.id, {
+      type: 'assistant.resource.queued',
+      phase: 'tool',
+      status: 'running',
+      title: 'Waiting for desktop',
+      summary: `Desktop is in use by another task (run ${String(first.holder?.runId || '').slice(0, 8)}); queued behind it.`,
+      payload: { resource: DESKTOP_RESOURCE, holder: first.holder || null },
+      visibility: 'compact'
+    });
+
+    const startedAt = Date.now();
+    const deadline = startedAt + DESKTOP_LEASE_WAIT_MS;
+    while (Date.now() <= deadline) {
+      if (this.isRunCancelled(runId)) {
+        return { ok: false, reason: 'cancelled' };
+      }
+      await sleep(DESKTOP_LEASE_POLL_MS);
+      const acq = runResourceRegistry.tryAcquire(DESKTOP_RESOURCE, runId, info);
+      if (acq.ok) return { ok: true, waitedMs: Date.now() - startedAt };
+    }
+    return {
+      ok: false,
+      reason: 'timeout',
+      waitedMs: Date.now() - startedAt,
+      holder: runResourceRegistry.getHolder(DESKTOP_RESOURCE)
+    };
   }
 
   async run({
@@ -263,8 +337,20 @@ export class AssistantReactEngine {
     });
 
     let llmFailure = null;
+    let cancelledMidRun = false;
     for (let iteration = 0; iteration < this.maxIterations; iteration += 1) {
       const iterationNumber = iteration + 1;
+
+      // Cancellation enforcement at the loop boundary. If a supervisor tool or
+      // the user flipped this run's persisted status to CANCELLED, unwind
+      // cleanly before spending another LLM turn or issuing more tool calls.
+      // (Before this guard the loop ran ~10 more iterations after a cancel and
+      // only a wait-tool happened to notice — the 2026-06-02 incident.)
+      if (this.isRunCancelled(run?.id)) {
+        cancelledMidRun = true;
+        maxIterationsReached = false;
+        break;
+      }
 
       // Truncation-recovery inner loop. The supervisor LLM can hit the model's
       // max_output_tokens while still inside a tool_use's arguments JSON; the
@@ -485,16 +571,44 @@ export class AssistantReactEngine {
           },
           visibility: 'compact'
         });
-        const result = await this.toolExecutor.executeToolCall({
-          toolName: toolCall.name,
-          input: toolCall.input || {}
-        }, {
-          run: workingRun,
-          conversation,
-          cwd,
-          autoApproveAll,
-          extraReadRoots
-        });
+        // Desktop input tools must hold the single physical mouse/keyboard.
+        // Acquire (or queue for) the desktop lease first; only hand the call to
+        // the executor once this run owns the device. If the lease can't be had,
+        // synthesize a recoverable "busy" result so the LLM can decide what to do
+        // — instead of two runs fighting over the desktop.
+        let result = null;
+        if (DESKTOP_INPUT_TOOLS.has(toolCall.name)) {
+          const gate = await this.ensureDesktopLease(workingRun, conversation, run?.id);
+          if (!gate.ok) {
+            const busyText = gate.reason === 'cancelled'
+              ? 'Desktop wait aborted: this run was cancelled.'
+              : `Desktop is still held by another task after waiting ${Math.round((gate.waitedMs || 0) / 1000)}s. `
+                + 'It was NOT touched. Tell the user it is still busy, or do non-desktop work and retry later.';
+            result = {
+              status: 'failed',
+              content: [{ type: 'text', text: busyText }],
+              structured: {
+                kind: 'resource_busy',
+                resource: DESKTOP_RESOURCE,
+                reason: gate.reason || 'busy',
+                holder: gate.holder || null
+              },
+              metadata: { recoverable: true, resourceGate: true }
+            };
+          }
+        }
+        if (!result) {
+          result = await this.toolExecutor.executeToolCall({
+            toolName: toolCall.name,
+            input: toolCall.input || {}
+          }, {
+            run: workingRun,
+            conversation,
+            cwd,
+            autoApproveAll,
+            extraReadRoots
+          });
+        }
         const recordedResult = {
           ...result,
           toolName: toolCall.name,
@@ -583,12 +697,21 @@ export class AssistantReactEngine {
       }
     }
 
-    const stopState = deriveAssistantRunStopState({
-      toolResults,
-      assistantText: finalText,
-      maxIterationsReached,
-      llmFailure
-    });
+    // A mid-loop cancellation wins over whatever the stop policy would infer:
+    // a cancelled run must finalize as CANCELLED, not be overwritten with
+    // "completed" (which previously let a cancelled run deliver a result).
+    const stopState = cancelledMidRun
+      ? {
+          status: ASSISTANT_RUN_STATUS.CANCELLED,
+          reason: 'assistant_run_cancelled',
+          closure: ASSISTANT_RUN_CLOSURE_STATE.CANCELLED
+        }
+      : deriveAssistantRunStopState({
+          toolResults,
+          assistantText: finalText,
+          maxIterationsReached,
+          llmFailure
+        });
     const finalStatus = stopState.status;
     const reply = composeAssistantReply({
       language,
@@ -627,7 +750,11 @@ export class AssistantReactEngine {
     };
 
     this.emitTrace(workingRun.id, {
-      type: finalStatus === ASSISTANT_RUN_STATUS.FAILED ? 'assistant.run.failed' : 'assistant.run.completed',
+      type: finalStatus === ASSISTANT_RUN_STATUS.FAILED
+        ? 'assistant.run.failed'
+        : finalStatus === ASSISTANT_RUN_STATUS.CANCELLED
+          ? 'assistant.run.cancelled'
+          : 'assistant.run.completed',
       phase: 'finish',
       status: finalStatus,
       title: reply.summary || 'Assistant run finished',
@@ -641,6 +768,11 @@ export class AssistantReactEngine {
       },
       visibility: 'compact'
     });
+
+    // This run is finishing — free any exclusive resource it held (e.g. the
+    // desktop) so a queued run can proceed immediately. The registry's
+    // stale-reclaim is the backstop if this is ever skipped (e.g. a throw).
+    runResourceRegistry.releaseAllForRun(run?.id);
 
     return {
       run: workingRun,

@@ -7,6 +7,7 @@ import assistantPolicyService from './policy-service.js';
 import assistantWorkspaceStore from './workspace-store.js';
 import assistantClarificationStore from './clarification-store.js';
 import assistantRunStore from './run-store.js';
+import runResourceRegistry from './run-resource-registry.js';
 import artifactServiceSingleton from './artifact-service.js';
 import assistantDomainTaskStore from './domain/task-store.js';
 import assistantDomainExecutionStore from './domain/execution-store.js';
@@ -63,11 +64,17 @@ function summarizeActiveAssistantRunEvent(event = {}) {
   };
 }
 
-function buildActiveAssistantRunsSummary(runs = [], runEventStore = assistantRunEventStore, perRunEventLimit = 5, maxAgeMs = ACTIVE_RUN_PROMPT_MAX_AGE_MS) {
+export function buildActiveAssistantRunsSummary(runs = [], runEventStore = assistantRunEventStore, perRunEventLimit = 5, maxAgeMs = ACTIVE_RUN_PROMPT_MAX_AGE_MS, { excludeRunId = '' } = {}) {
   if (!Array.isArray(runs) || runs.length === 0) return [];
   const now = Date.now();
+  const selfId = String(excludeRunId || '').trim();
   return runs
     .filter((entry) => entry
+      // Never show the supervisor its own run. The current run is still
+      // "queued"/"running" in the store while it reasons, and listing it here
+      // made the LLM treat itself as a concurrent "duplicate" and cancel
+      // itself (the 2026-06-02 self-cancel incident).
+      && !(selfId && String(entry.id || '').trim() === selfId)
       && ACTIVE_ASSISTANT_RUN_STATUSES.has(String(entry.status || '').trim())
       && assistantRunEffectiveAgeMs(entry, now) <= maxAgeMs)
     .map((entry) => {
@@ -87,6 +94,18 @@ function buildActiveAssistantRunsSummary(runs = [], runEventStore = assistantRun
         recentEvents
       };
     });
+}
+
+// Drop any resource whose holder is the current run, so the supervisor only
+// ever sees conflicts with *other* runs.
+function filterResourceHoldersExcludingSelf(holders = {}, excludeRunId = '') {
+  const selfId = String(excludeRunId || '').trim();
+  const out = {};
+  for (const [key, holder] of Object.entries(holders || {})) {
+    if (selfId && String(holder?.runId || '').trim() === selfId) continue;
+    out[key] = holder;
+  }
+  return out;
 }
 
 function providerLabel(providerId) {
@@ -790,7 +809,7 @@ export class AssistantObservationService {
       .slice(0, Math.max(1, limit));
   }
 
-  getConversationContext(conversationId, { deliveryLimit = 20 } = {}) {
+  getConversationContext(conversationId, { deliveryLimit = 20, excludeRunId = '' } = {}) {
     const conversation = this.conversationStore.get(String(conversationId || ''));
     if (!conversation) return null;
 
@@ -980,7 +999,12 @@ export class AssistantObservationService {
       // Each entry carries the run's triggerText plus the last few events so
       // the model has enough context to answer "where are we" / "switch to
       // 64-bit" / "stop" without itself having to call diagnostic tools.
-      activeAssistantRuns: buildActiveAssistantRunsSummary(recentRuns, this.runEventStore, 5),
+      activeAssistantRuns: buildActiveAssistantRunsSummary(recentRuns, this.runEventStore, 5, undefined, { excludeRunId }),
+      // Truthful, real-time view of exclusive physical resources held by OTHER
+      // runs (e.g. the desktop). The supervisor uses this to decide whether a new
+      // task can run in parallel or must queue behind the holder — it never lists
+      // the current run itself (no "I'm holding it against myself" confusion).
+      resourceHolders: filterResourceHoldersExcludingSelf(runResourceRegistry.describe(), excludeRunId),
       policy
     };
   }

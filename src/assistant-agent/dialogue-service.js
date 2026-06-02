@@ -1,5 +1,6 @@
 import AssistantRunner from '../assistant-core/runner.js';
 import { ASSISTANT_RUN_STATUS } from '../assistant-core/models.js';
+import runResourceRegistry from '../assistant-core/run-resource-registry.js';
 import createDefaultAssistantToolRegistry from '../assistant-core/tool-registry.js';
 import AssistantToolExecutor from '../assistant-core/tool-executor.js';
 import createBuiltinAssistantToolRegistry, {
@@ -90,7 +91,10 @@ export class AssistantDialogueService {
       llmClient: this.llmClient,
       toolRegistry: this.toolRegistry,
       toolExecutor: this.toolExecutor,
-      runEventStore: this.runEventStore
+      runEventStore: this.runEventStore,
+      // Keep the loop's cancellation check reading the same store the rest of
+      // the pipeline writes to (defaults to the shared singleton when unset).
+      runStore: this.runStore
     });
     this.fallbackRunner = fallbackRunner || new AssistantRunner({
       runStore,
@@ -319,7 +323,10 @@ export class AssistantDialogueService {
       : null;
     const conversationContext = conversation?.id
       ? this.observationService.getConversationContext(conversation.id, {
-          deliveryLimit: 8
+          deliveryLimit: 8,
+          // Exclude this very run from <active_assistant_runs> so the supervisor
+          // never mistakes itself for a concurrent duplicate and cancels itself.
+          excludeRunId: run?.id || ''
       })
       : null;
     const workspaceContext = this.observationService.getWorkspaceContext({
@@ -401,6 +408,10 @@ export class AssistantDialogueService {
         cwd,
         model
       });
+    } finally {
+      // Backstop release: if the ReAct engine threw before its own release ran,
+      // free any exclusive resource (desktop) this run held so it can't leak.
+      runResourceRegistry.releaseAllForRun(run?.id);
     }
   }
 }

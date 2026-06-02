@@ -11,6 +11,8 @@ export function createCancelAssistantRunToolDefinition({ handlers }) {
       '',
       'WHEN NOT TO USE: the user is only asking for status ("where are we" / "how long left") or chatting about something unrelated. In that case answer using the recentEvents summary from <active_assistant_runs>; do NOT cancel.',
       '',
+      'NEVER cancel your own run. <active_assistant_runs> only lists OTHER runs — it does not contain the run you are executing in. There is no "duplicate of myself" to cancel; if you think there is, you are misreading the context. The system will reject a self-cancel with CANNOT_CANCEL_SELF.',
+      '',
       'This call is idempotent: cancelling a run that already finished returns ok:true with alreadyTerminal:true and does nothing destructive. Pass the runId from <active_assistant_runs>[].id. Provide a short `reason` string (the user-visible motivation) so the cancellation event captures why.'
     ].join('\n'),
     inputSchema: {

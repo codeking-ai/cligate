@@ -8,6 +8,9 @@ import { join } from 'node:path';
 import createMessagingToolHandlers from '../../src/assistant-tools/handlers/messaging.js';
 import createSendMessageToChannelToolDefinition from '../../src/assistant-tools/definitions/send-message-to-channel.js';
 import { AssistantRunStore } from '../../src/assistant-core/run-store.js';
+import { buildActiveAssistantRunsSummary } from '../../src/assistant-core/observation-service.js';
+import { ASSISTANT_RUN_STATUS } from '../../src/assistant-core/models.js';
+import AssistantReactEngine from '../../src/assistant-agent/react-engine.js';
 
 // --- send_message_to_channel tool ------------------------------------------
 
@@ -235,4 +238,64 @@ test('failStaleNonTerminalRuns is idempotent (second sweep retires nothing new)'
   store.save({ id: 'z', conversationId: 'c', status: 'waiting_runtime', createdAt: new Date(now - 48 * 3600 * 1000).toISOString() });
   assert.equal(store.failStaleNonTerminalRuns({ now }), 1);
   assert.equal(store.failStaleNonTerminalRuns({ now }), 0);
+});
+
+// --- self-listing fix (the 2026-06-02 self-cancel root cause) --------------
+
+const noEvents = { list: () => [] };
+
+test('buildActiveAssistantRunsSummary excludes the current run (no self-listing)', () => {
+  // The supervisor's own run is still queued/running while it reasons. Listing
+  // it back to the LLM is what made it cancel itself.
+  const runs = [
+    { id: 'run-self', status: ASSISTANT_RUN_STATUS.QUEUED },
+    { id: 'run-other', status: ASSISTANT_RUN_STATUS.RUNNING }
+  ];
+  const summary = buildActiveAssistantRunsSummary(runs, noEvents, 5, undefined, { excludeRunId: 'run-self' });
+  assert.deepEqual(summary.map((entry) => entry.id), ['run-other']);
+});
+
+test('buildActiveAssistantRunsSummary lists all active runs when no excludeRunId is given', () => {
+  const runs = [
+    { id: 'run-a', status: ASSISTANT_RUN_STATUS.QUEUED },
+    { id: 'run-b', status: ASSISTANT_RUN_STATUS.RUNNING }
+  ];
+  const summary = buildActiveAssistantRunsSummary(runs, noEvents, 5);
+  assert.deepEqual(summary.map((entry) => entry.id).sort(), ['run-a', 'run-b']);
+});
+
+// --- ReAct loop cancellation enforcement + terminal consistency ------------
+
+test('react loop halts before any LLM turn when the run is already cancelled, and finalizes as cancelled', async () => {
+  const emptyCwd = mkdtempSync(join(tmpdir(), 'cligate-react-cwd-'));
+  let completeCalls = 0;
+  const engine = new AssistantReactEngine({
+    llmClient: { complete: async () => { completeCalls += 1; return { text: '', toolCalls: [], source: {} }; } },
+    toolRegistry: { list: () => [] },
+    toolExecutor: { executeToolCall: async () => ({ status: 'completed', content: [], structured: null, metadata: {} }) },
+    runEventStore: null,
+    runStore: { get: (id) => (id === 'run-cancel-loop' ? { id, status: ASSISTANT_RUN_STATUS.CANCELLED } : null) }
+  });
+
+  const executed = await engine.run({
+    run: { id: 'run-cancel-loop', status: ASSISTANT_RUN_STATUS.QUEUED, metadata: {} },
+    conversation: { id: 'c-cancel' },
+    text: 'open chrome and log in',
+    cwd: emptyCwd
+  });
+
+  // The loop must not spend an LLM turn or any tool call once cancelled, and the
+  // run must finalize as CANCELLED — not be overwritten with "completed".
+  assert.equal(completeCalls, 0, 'LLM must not be called once the run is cancelled');
+  assert.equal(executed.run.status, ASSISTANT_RUN_STATUS.CANCELLED);
+});
+
+test('isRunCancelled is fail-open: a throwing store read reports not-cancelled', () => {
+  const engine = new AssistantReactEngine({
+    llmClient: {},
+    toolRegistry: { list: () => [] },
+    toolExecutor: {},
+    runStore: { get: () => { throw new Error('store boom'); } }
+  });
+  assert.equal(engine.isRunCancelled('whatever'), false);
 });

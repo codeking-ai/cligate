@@ -25,7 +25,7 @@ export function createAssistantRunToolHandlers({
   runEventStore = assistantRunEventStore
 } = {}) {
   return {
-    cancelAssistantRun: async ({ input = {} } = {}) => {
+    cancelAssistantRun: async ({ input = {}, context = {} } = {}) => {
       const runId = normalizeText(input?.runId);
       if (!runId) {
         const error = new Error('cancel_assistant_run requires runId');
@@ -33,6 +33,22 @@ export function createAssistantRunToolHandlers({
         throw error;
       }
       const reason = normalizeText(input?.reason) || 'cancelled by supervisor';
+
+      // Self-cancellation guard. The supervisor's own run appears as a live run
+      // in the conversation; if the LLM mistakes it for a "duplicate" and passes
+      // its own runId here, cancelling it would abort the very loop issuing the
+      // call (this is exactly the 2026-06-02 DingTalk self-cancel incident).
+      // Refuse it loudly instead of silently committing suicide.
+      const callerRunId = normalizeText(context?.run?.id);
+      if (callerRunId && runId === callerRunId) {
+        return {
+          ok: false,
+          code: 'CANNOT_CANCEL_SELF',
+          runId,
+          error: `cannot cancel run ${runId}: it is the run you are currently executing in. `
+            + 'You are not a duplicate of yourself — proceed with the task instead of cancelling.'
+        };
+      }
 
       const run = runStore.get(runId);
       if (!run) {
