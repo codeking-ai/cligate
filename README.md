@@ -9,40 +9,39 @@
 
 **[English](./README.md) | [中文](./README_CN.md)**
 
-CliGate is a local AI gateway for CLI tools, agent runtimes, and channel-based workflows.
+CliGate is a local AI control plane built around two core capabilities:
 
-It lets you run **Claude Code**, **Codex CLI**, **Gemini CLI**, and **OpenClaw** through one local control plane with account pooling, API key routing, local runtimes, channel gateways, a dashboard, and one-click configuration.
+- **Assistant**: a resident private assistant that stays available in the background, understands user tasks, remembers context, uses tools, schedules work, operates channels, and can execute actions through MCP, skills, desktop automation, shell/file tools, or delegated runtimes.
+- **Model Proxy**: one local API and model-routing layer for Claude Code, Codex CLI, Gemini CLI, OpenClaw, and API-compatible clients, with unified accounts, API keys, model mapping, logs, usage, and cost visibility.
+
+It keeps both layers local-first on `localhost`: the assistant acts like a personal operator for real tasks, while the proxy owns provider access, routing, credentials, unified model names, and observability.
 
 ## Why CliGate
 
-- One local entry point for multiple AI coding tools
-- Account pools and API keys can coexist in the same routing layer
-- Web dashboard for setup, testing, routing, logs, usage, and operations
-- Runtime session orchestration for web chat and mobile channels
-- Local-first deployment on `localhost` without a hosted relay
+- One local dashboard for a resident private assistant and unified model routing
+- Assistant tasks with memory, approvals, follow-ups, scheduled work, channels, and tool execution
+- Account pools, API keys, local runtimes, app routing, and model mapping in one proxy layer
+- Channels for Telegram, Feishu, and DingTalk workflows
+- Local-first deployment without a hosted relay
 
 ## What It Includes
 
-### Protocol and tool compatibility
+### Assistant
 
-- `POST /v1/messages` for Claude Code and Anthropic-compatible clients
-- `POST /v1/responses` and `POST /backend-api/codex/responses` for Codex flows
-- `POST /v1beta/models/*` for Gemini CLI
-- OpenClaw configuration helpers for Anthropic/OpenAI-style providers
+- Dashboard chat and Assistant Tasks for personal task execution
+- A persistent assistant agent with task records, memory, policies, approvals, and resumable executions
+- Tool execution through skills, MCP, shell/file tools, scheduled tasks, channels, and optional desktop automation
+- Optional delegation to Codex / Claude Code runtime sessions when a task needs an external coding agent
+- Telegram, Feishu, and DingTalk channel workflows
 
-### Routing and credentials
+### Model Proxy
 
+- Anthropic Messages, OpenAI Chat Completions, OpenAI Responses, Codex, and Gemini-compatible endpoints
+- One-click configuration for Claude Code, Codex CLI, Gemini CLI, and OpenClaw
 - ChatGPT, Claude, and Antigravity account pools
 - API key pools for OpenAI, Azure OpenAI, Anthropic, Gemini, Vertex AI, MiniMax, Moonshot, and ZhipuAI
 - Routing priority, app-level bindings, provider model mapping, and free-model routing
 - Optional local model routing through Ollama-style runtimes
-
-### Runtime and channel operations
-
-- Dashboard chat for direct testing and product-assistant flows
-- Codex and Claude Code runtime sessions in the dashboard
-- Telegram and Feishu channel gateways
-- Conversation records, approvals, pending questions, and task continuity
 
 ### Observability and operations
 
@@ -79,7 +78,11 @@ Use the dashboard:
 - `API Keys` for provider keys
 - `Local Models` for on-device runtimes
 
-### 3. Point your tool to CliGate
+### 3. Choose your first path
+
+For Assistant use, open `Chat` or `Assistant Tasks` and tell the private assistant what you want done.
+
+For Model Proxy use, point a CLI tool or API-compatible client to CliGate.
 
 Claude Code:
 
@@ -97,21 +100,21 @@ chatgpt_base_url = "http://localhost:8081/backend-api/"
 openai_base_url = "http://localhost:8081"
 ```
 
-Gemini CLI and OpenClaw can be configured from the dashboard.
+Gemini CLI and OpenClaw can also be configured from the dashboard.
 
 ## User Paths
 
-### CLI users
+### Assistant users
 
-Start the service, add one credential, run one-click config, and send your first request.
+Use `Chat`, `Assistant Tasks`, `Conversation Records`, `Scheduled`, `Skills`, `MCP`, and channels to ask the resident assistant to execute real tasks, remember context, use tools, send follow-ups, and keep working in the background.
+
+### Model Proxy users
+
+Start the service, add one credential, run one-click config, and send your first proxied request from Claude Code, Codex CLI, Gemini CLI, OpenClaw, or an API-compatible client.
 
 ### Dashboard operators
 
-Use the dashboard to manage accounts, API keys, routing priority, model mapping, local runtimes, pricing, request logs, and usage.
-
-### Runtime and channel users
-
-Use `Chat`, `Assistant Tasks`, `Conversation Records`, and `Channels` to run Codex or Claude Code sessions from the web UI or Telegram / Feishu.
+Use the dashboard to manage accounts, API keys, routing priority, model mapping, local runtimes, pricing, request logs, usage, channel settings, skills, MCP, and desktop-agent settings.
 
 ## Screenshots
 
@@ -155,16 +158,21 @@ After the server starts, a lightweight product guide is also available at:
 ## Local Architecture
 
 ```text
-Clients and Channels
-  Claude Code / Codex CLI / Gemini CLI / OpenClaw / Web Chat / Telegram / Feishu
+Assistant Surfaces
+  Web Chat / Assistant Tasks / Telegram / Feishu / DingTalk / Scheduled Tasks
+           |
+           v
+Private Assistant and Tools
+  Memory / Policies / Skills / MCP / Desktop Agent / Shell + File Tools / Optional Codex + Claude Code Delegation
            |
            v
 CliGate Local Control Plane (localhost:8081)
-  - Protocol translation
-  - Account and API key routing
-  - App-level bindings and model mapping
-  - Agent runtime orchestration
-  - Dashboard, logs, usage, and operations
+           |
+           +--> Model Proxy
+           |    - Protocol translation
+           |    - Account and API key routing
+           |    - App-level bindings and model mapping
+           |    - Local model routing
            |
            v
 Upstream Providers and Local Runtimes
@@ -182,6 +190,10 @@ Upstream Providers and Local Runtimes
 | `POST /v1beta/models/*` | Gemini CLI proxy |
 | `GET /api/agent-runtimes/providers` | Runtime provider catalog |
 | `GET /api/agent-channels/conversations` | Channel conversation records |
+| `GET /api/assistant/tasks` | Assistant task records |
+| `GET /api/assistant/mcp/servers` | MCP server management |
+| `GET /api/assistant/skills` | Assistant skill management |
+| `GET /api/desktop-agent/status` | Desktop-agent status |
 | `GET /api/local-runtimes` | Local runtime status |
 | `GET /api/resources` | Resource catalog |
 | `GET /health` | Health and version |

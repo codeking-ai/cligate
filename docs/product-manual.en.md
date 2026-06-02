@@ -2,18 +2,14 @@
 
 ## Overview
 
-CliGate is a local AI gateway that sits between developer tools, agent runtimes, channel workflows, and upstream model providers.
+CliGate is a local AI control plane with two heavyweight capabilities:
 
-It currently combines these capability groups:
+1. **Assistant** is a resident private assistant that stays available in the background, understands user tasks, remembers context, uses tools, schedules work, operates channels, and can execute actions through MCP, skills, desktop automation, shell/file tools, or delegated runtimes.
+2. **Model Proxy** provides one local API and model-routing layer for AI coding tools and API-compatible clients, backed by local credentials, provider mappings, logs, usage, and cost controls.
 
-- protocol translation for Claude Code, Codex CLI, Gemini CLI, and OpenClaw
-- account pools and API key routing
-- app-level routing and model mapping
-- dashboard chat and product-assistant flows
-- Codex and Claude Code runtime sessions in the dashboard
-- Telegram and Feishu channel gateways
-- request logs, usage, pricing, API exploration, and tool setup
-- optional local runtime routing for on-device models
+The Assistant side includes dashboard chat, Assistant Tasks, task records, executions, memory, policies, approvals, clarifications, channel conversations, scheduled work, skills, MCP tools, shell/file tools, optional desktop-agent tools, and optional delegation to Codex / Claude Code runtime sessions.
+
+The Model Proxy side includes protocol translation for Claude Code, Codex CLI, Gemini CLI, OpenClaw, and API-compatible clients; ChatGPT / Claude / Antigravity account pools; API key routing; app-level bindings; model mapping; free-model routing; local runtime routing; request logs; usage; pricing; API exploration; and one-click tool setup.
 
 CliGate runs locally by default. In the common path, you start the service, add one usable credential, configure one client, and verify behavior from the dashboard.
 
@@ -36,8 +32,9 @@ The default dashboard address is:
 2. Open the dashboard.
 3. Add at least one working account, API key, or local runtime.
 4. Open `Chat` and verify a model.
-5. Open `Settings` and use one-click config for the CLI tool you want to proxy.
-6. If you use Telegram or Feishu, configure `Channels` after the core path is working.
+5. For Assistant use, open `Chat` or `Assistant Tasks` and tell the private assistant what you want done.
+6. For Model Proxy use, open `Settings` and use one-click config for the CLI tool you want to proxy.
+7. If you use Telegram, Feishu, or DingTalk, configure `Channels` after the core path is working.
 
 ## Dashboard Navigation
 
@@ -56,12 +53,12 @@ Use `Dashboard` for a high-level readiness view:
 
 #### Chat
 
-`Chat` is the main interactive verification surface.
+`Chat` is the main interactive surface for both the resident Assistant and Model Proxy verification.
 
 You can use it in two modes:
 
-- assistant chat mode for routed model testing
-- agent runtime mode for Codex or Claude Code runtime sessions
+- model chat mode for routed model testing
+- smart assistant mode for asking the resident assistant to plan, use tools, run tasks, or delegate work
 
 Key controls include:
 
@@ -69,20 +66,20 @@ Key controls include:
 - `Model`
 - `System Prompt`
 - `Product Assistant`
-- runtime provider selection when agent runtime mode is enabled
+- assistant routing and runtime controls when smart assistant mode is enabled
 
 `Product Assistant` prioritizes this manual for product-usage questions. It does not silently rewrite your global routing configuration. Configuration changes still require an explicit action and confirmation path.
 
 #### Assistant Tasks
 
-`Assistant Tasks` is the task-level operational view for runtime work launched through the dashboard.
+`Assistant Tasks` is the task-level operational view for work owned by the resident Assistant, whether it was launched through the dashboard, channels, scheduled tasks, or an internal handoff.
 
 Use it to inspect:
 
 - task state
 - pending clarifications
 - pending approvals
-- task outputs
+- task outputs and execution history
 - resume and follow-up paths
 
 #### Conversation Records
@@ -91,15 +88,15 @@ Use it to inspect:
 
 Use it when you need to understand:
 
-- what happened in a Telegram or Feishu conversation
-- which runtime provider was involved
+- what happened in a Telegram, Feishu, or DingTalk conversation
+- which assistant task or runtime provider was involved
 - whether a task is still active, blocked, or complete
 
 ### Assistant
 
 #### Assistant Agent
 
-`Assistant Agent` is the binding and policy area for the assistant-side runtime behavior.
+`Assistant Agent` is the binding and policy area for the resident Assistant.
 
 Use it to inspect:
 
@@ -107,6 +104,28 @@ Use it to inspect:
 - which credential source is bound
 - fallback behavior
 - circuit-breaker state
+- autonomy, confirmation, and execution boundaries
+
+#### Skills
+
+`Skills` manages local assistant skills.
+
+Use it to:
+
+- inspect discovered skills
+- enable or disable skills
+- create, import, edit, or remove writable skills
+
+#### MCP
+
+`MCP` manages assistant-side MCP servers, tools, and resources.
+
+Use it to:
+
+- configure MCP servers
+- enable, reload, or remove servers
+- inspect server tools and resources
+- call MCP tools or read MCP resources through the local control plane
 
 ### CLI Tools
 
@@ -169,7 +188,7 @@ Use it to:
 
 #### Channels
 
-`Channels` configures Telegram and Feishu providers.
+`Channels` configures Telegram, Feishu, and DingTalk providers.
 
 Typical settings include:
 
@@ -178,6 +197,17 @@ Typical settings include:
 - default runtime provider
 - working directory
 - pairing or approval behavior
+
+#### Scheduled Tasks
+
+`Scheduled` manages one-shot and recurring work for the resident Assistant.
+
+Scheduled tasks can:
+
+- deliver reminder messages to a selected conversation
+- wake the Assistant with an instruction
+- optionally run with a working directory
+- keep each run fresh or share context across runs
 
 #### Routing
 
@@ -201,6 +231,7 @@ The most common use is:
 - configure Codex CLI for proxy mode
 - configure Gemini CLI for proxy mode
 - configure OpenClaw for proxy mode
+- inspect or manage desktop-agent settings when desktop automation is enabled
 
 ### Monitoring
 
@@ -278,16 +309,19 @@ That usually means at least one of:
 
 If none of these are available, routed requests will fail.
 
-## Chat and Product Assistant
+## Assistant
 
-### When to use Chat
+### When to use Assistant
 
-Use `Chat` when you want to:
+Use the Assistant side when you want to:
 
-- confirm that a credential works
-- test a model name
-- try a system prompt
-- verify that routing is going where you expect
+- ask a resident private assistant to execute a real task
+- keep task context alive across follow-ups, approvals, clarifications, and channels
+- inspect task records, executions, and transcripts
+- use skills, MCP tools, shell/file tools, or desktop automation in a controlled local workflow
+- schedule one-shot or recurring assistant work
+- use channel conversations for mobile or team workflows
+- delegate to Codex / Claude Code only when that is the right way to complete a coding task
 - ask product-usage questions through `Product Assistant`
 
 ### What Product Assistant does
@@ -299,11 +333,38 @@ When `Product Assistant` is enabled, CliGate prioritizes this manual while answe
 - what routing mode means
 - how to disable proxy mode for a tool
 
+Product Assistant is only one mode of the broader Assistant. The broader Assistant is task-oriented: it can create tasks, use tools, remember context, ask for missing information, wait for approval, resume work, and deliver results through the dashboard or channels.
+
 ### What Product Assistant does not do
 
 - It does not change tool configuration just because you asked a question.
 - It does not silently rewrite routing or account settings.
 - It does not replace the actual runtime provider you selected for normal chat.
+
+## Model Proxy
+
+### When to use Model Proxy
+
+Use the Model Proxy side when you want to:
+
+- make Claude Code, Codex CLI, Gemini CLI, OpenClaw, or an API-compatible client use local routing
+- share provider access across accounts, API keys, and local runtimes
+- bind different apps to different credentials
+- map requested model names to upstream model names
+- inspect request logs, usage, pricing, and provider failures
+
+### What Model Proxy does
+
+Model Proxy accepts the protocol shape that the client already speaks and resolves where the request should go.
+
+Typical proxy surfaces include:
+
+- Anthropic Messages for Claude Code and compatible clients
+- OpenAI Chat Completions
+- OpenAI Responses and Codex-compatible endpoints
+- Gemini-compatible routes
+
+The client does not need to own your provider strategy. CliGate handles routing, credentials, fallback, logging, and cost visibility locally.
 
 ## Tool Configuration
 
@@ -353,7 +414,7 @@ You can inspect current state through:
 
 ### Supported channel workflows
 
-CliGate supports Telegram and Feishu channel workflows through the `Channels` area and corresponding API routes.
+CliGate supports Telegram, Feishu, and DingTalk channel workflows through the `Channels` area and corresponding API routes.
 
 ### Runtime session behavior
 
@@ -425,6 +486,10 @@ Common API surfaces include:
 - `POST /v1beta/models/*`
 - `GET /api/agent-runtimes/providers`
 - `GET /api/agent-channels/conversations`
+- `GET /api/assistant/tasks`
+- `GET /api/assistant/mcp/servers`
+- `GET /api/assistant/skills`
+- `GET /api/desktop-agent/status`
 - `GET /api/resources`
 - `GET /health`
 
@@ -439,6 +504,14 @@ Use `API Explorer`, `Request Logs`, and `Logs` together when debugging route beh
 3. Select a source.
 4. Enter a model.
 5. Send a simple prompt.
+
+### I want the Assistant to execute a task
+
+1. Add a credential, local runtime, or tool path that can support the task.
+2. Open `Chat` or `Assistant Tasks`.
+3. Tell the Assistant what outcome you want.
+4. Set a working directory if the task needs project files.
+5. Watch approvals, clarifications, tool calls, runtime delegation, and results from the dashboard.
 
 ### I want Claude Code to use the local proxy
 
@@ -459,7 +532,7 @@ Use `API Explorer`, `Request Logs`, and `Logs` together when debugging route beh
 
 1. Confirm your core routing works from the dashboard first.
 2. Open `Channels`.
-3. Configure Telegram or Feishu.
+3. Configure Telegram, Feishu, or DingTalk.
 4. Set the default runtime provider and working directory.
 5. Use `Conversation Records` to inspect ongoing execution.
 
@@ -496,5 +569,5 @@ Product Assistant answers from the product manual context. If something is not s
 ## Important Notes
 
 1. Product Assistant is guidance, not an implicit execution path.
-2. Runtime workflows and assistant workflows are not the same as ordinary chat completions.
+2. Assistant task workflows are not the same as ordinary model proxy completions.
 3. Dashboard documentation, repository docs, and screenshots should be kept in sync when the UI changes.

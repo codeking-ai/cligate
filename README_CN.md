@@ -9,40 +9,39 @@
 
 **[English](./README.md) | 中文**
 
-CliGate 是一个本地 AI gateway，面向 CLI 工具、运行时编排和渠道工作流。
+CliGate 是一个本地 AI 控制平面，重点围绕两大能力：
 
-它把 **Claude Code**、**Codex CLI**、**Gemini CLI**、**OpenClaw** 接到同一个本地控制平面里，统一处理账户池、API Key 路由、本地运行时、渠道网关、可视化仪表盘和一键配置。
+- **Assistant**：一个常驻后端的私人助手 / 私人管家，能理解用户任务、记住上下文、使用工具、安排定时工作、接入渠道，并通过 MCP、Skills、桌面自动化、Shell / 文件工具或委派运行时自己执行事情。
+- **Model Proxy**：为 Claude Code、Codex CLI、Gemini CLI、OpenClaw 以及 API 兼容客户端提供统一本地 API 和模型路由层，集中管理账户、API Key、模型映射、日志、用量和成本。
+
+这两层都默认运行在 `localhost`：Assistant 像个人任务执行者一样长期驻守；Model Proxy 负责 provider 接入、路由、凭证、统一模型名和可观测性。
 
 ## 为什么是 CliGate
 
-- 一个本地入口承接多种 AI 编程工具
-- 账户池和 API Key 可以共存于同一套路由层
-- Web 仪表盘统一做配置、测试、路由、日志、用量和运维
-- Web Chat 与移动端渠道可共享运行时会话编排
-- 默认运行在 `localhost`，无需托管中转服务
+- 一个本地仪表盘同时承接私人助手和统一模型路由
+- Assistant 任务支持记忆、审批、追问、定时工作、渠道接入和工具执行
+- 账户池、API Key、本地运行时、应用路由和模型映射集中在同一代理层
+- Telegram、飞书、钉钉渠道可以接入运行时工作流
+- 默认本地部署，无需托管中转服务
 
 ## 当前能力
 
-### 协议与工具兼容
+### Assistant
 
-- `POST /v1/messages`，支持 Claude Code 和 Anthropic 兼容客户端
-- `POST /v1/responses` 与 `POST /backend-api/codex/responses`，支持 Codex 相关流量
-- `POST /v1beta/models/*`，支持 Gemini CLI
-- OpenClaw 的 Anthropic/OpenAI 风格配置接入
+- Dashboard Chat 与 Assistant Tasks，用于个人任务执行
+- 常驻 Assistant Agent，支持任务记录、记忆、策略、审批和可恢复执行
+- 通过 Skills、MCP、Shell / 文件工具、定时任务、渠道和可选桌面自动化执行动作
+- 在任务需要外部编程代理时，可选择委派给 Codex / Claude Code runtime session
+- Telegram、飞书、钉钉渠道工作流
 
-### 路由与凭证管理
+### Model Proxy
 
+- Anthropic Messages、OpenAI Chat Completions、OpenAI Responses、Codex、Gemini 兼容端点
+- Claude Code、Codex CLI、Gemini CLI、OpenClaw 的一键配置
 - ChatGPT、Claude、Antigravity 账户池
 - OpenAI、Azure OpenAI、Anthropic、Gemini、Vertex AI、MiniMax、Moonshot、ZhipuAI 等 API Key 池
 - 路由优先级、按应用绑定、模型映射、免费模型路由
 - 可选本地模型路由，例如 Ollama
-
-### 运行时与渠道能力
-
-- Web Chat 与 Product Assistant
-- 仪表盘里的 Codex / Claude Code runtime session
-- Telegram / 飞书渠道网关
-- 会话记录、审批、追问和任务连续性管理
 
 ### 观测与运维
 
@@ -79,7 +78,11 @@ cligate start
 - `API Keys` 添加各类 provider key
 - `Local Models` 配置本地运行时
 
-### 3. 让 CLI 工具接入 CliGate
+### 3. 选择第一条路径
+
+如果要使用 Assistant，打开 `Chat` 或 `Assistant Tasks`，直接告诉私人助手你想完成什么。
+
+如果要使用 Model Proxy，让 CLI 工具或 API 兼容客户端接入 CliGate。
 
 Claude Code：
 
@@ -97,21 +100,21 @@ chatgpt_base_url = "http://localhost:8081/backend-api/"
 openai_base_url = "http://localhost:8081"
 ```
 
-Gemini CLI 和 OpenClaw 可直接在仪表盘完成配置。
+Gemini CLI 和 OpenClaw 也可以直接在仪表盘完成配置。
 
 ## 用户入口
 
-### CLI 用户
+### Assistant 用户
 
-启动服务，添加一个凭证，执行一键配置，然后发出第一条请求。
+通过 `Chat`、`Assistant Tasks`、`Conversation Records`、`Scheduled`、`Skills`、`MCP` 和渠道，让常驻助手执行真实任务、记住上下文、使用工具、发送追问并在后台持续工作。
+
+### Model Proxy 用户
+
+启动服务，添加一个凭证，执行一键配置，然后从 Claude Code、Codex CLI、Gemini CLI、OpenClaw 或 API 兼容客户端发出第一条代理请求。
 
 ### 仪表盘运维用户
 
-通过仪表盘管理账户、API Key、路由优先级、模型映射、本地运行时、定价、请求日志和用量。
-
-### Runtime / 渠道用户
-
-通过 `Chat`、`Assistant Tasks`、`Conversation Records`、`Channels` 在 Web 或 Telegram / 飞书中运行 Codex 或 Claude Code 会话。
+通过仪表盘管理账户、API Key、路由优先级、模型映射、本地运行时、定价、请求日志、用量、渠道设置、Skills、MCP 和桌面代理设置。
 
 ## 界面预览
 
@@ -155,16 +158,21 @@ Gemini CLI 和 OpenClaw 可直接在仪表盘完成配置。
 ## 本地架构
 
 ```text
-客户端与渠道
-  Claude Code / Codex CLI / Gemini CLI / OpenClaw / Web Chat / Telegram / 飞书
+Assistant 入口
+  Web Chat / Assistant Tasks / Telegram / 飞书 / 钉钉 / 定时任务
+           |
+           v
+私人助手与工具
+  Memory / Policies / Skills / MCP / Desktop Agent / Shell + File Tools / 可选 Codex + Claude Code 委派
            |
            v
 CliGate 本地控制平面 (localhost:8081)
-  - 协议转换
-  - 账户与 API Key 路由
-  - 应用绑定与模型映射
-  - Agent Runtime 编排
-  - 仪表盘、日志、用量与运维
+           |
+           +--> Model Proxy
+           |    - 协议转换
+           |    - 账户与 API Key 路由
+           |    - 应用绑定与模型映射
+           |    - 本地模型路由
            |
            v
 上游 Provider 与本地运行时
@@ -182,6 +190,10 @@ CliGate 本地控制平面 (localhost:8081)
 | `POST /v1beta/models/*` | Gemini CLI 代理 |
 | `GET /api/agent-runtimes/providers` | Runtime provider 列表 |
 | `GET /api/agent-channels/conversations` | 渠道会话记录 |
+| `GET /api/assistant/tasks` | Assistant 任务记录 |
+| `GET /api/assistant/mcp/servers` | MCP server 管理 |
+| `GET /api/assistant/skills` | Assistant Skills 管理 |
+| `GET /api/desktop-agent/status` | Desktop Agent 状态 |
 | `GET /api/local-runtimes` | 本地运行时状态 |
 | `GET /api/resources` | 资源目录 |
 | `GET /health` | 健康检查和版本 |

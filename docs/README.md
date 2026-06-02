@@ -25,6 +25,14 @@ This directory contains the project documentation used by both repository reader
 - [OpenClaw Integration](./OPENCLAW.md)
 - [Screenshot Guide](./SCREENSHOTS.md)
 
+### Assistant users
+
+- [Product Manual (English)](./product-manual.en.md)
+- [Product Manual (Chinese)](./product-manual.zh-CN.md)
+- [Channel Gateway API](./channel-gateway-api.md)
+- [Agent Runtime Session Continuity](./agent-runtime-session-continuity.md)
+- [Assistant Architecture](./cligate-assistant-architecture.md)
+
 ### Integrators and operators
 
 - [API Reference](./API.md)
@@ -34,6 +42,14 @@ This directory contains the project documentation used by both repository reader
 - [Channel Gateway API](./channel-gateway-api.md)
 - [Releasing](./RELEASING.md)
 - [Community](./COMMUNITY.md)
+
+### Model Proxy users
+
+- [API Reference](./API.md)
+- [App Routing](./APP_ROUTING.md)
+- [Accounts](./ACCOUNTS.md)
+- [OpenClaw Integration](./OPENCLAW.md)
+- [Translator Capability Matrix](./TRANSLATOR_CAPABILITY_MATRIX.md)
 
 ### Contributors
 

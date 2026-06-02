@@ -12,8 +12,8 @@ const I18N = {
         pageSubtle: 'This is the in-product quick manual. For full reference, use the complete product manuals.',
         back: 'Back to Dashboard',
         heroWhatLabel: 'What it is',
-        heroWhatTitle: 'One local gateway for coding tools and runtime workflows',
-        heroWhatText: 'CliGate connects Claude Code, Codex CLI, Gemini CLI, OpenClaw, dashboard chat, local runtimes, and channel workflows through one local control plane.',
+        heroWhatTitle: 'One local control plane for a private Assistant and Model Proxy',
+        heroWhatText: 'CliGate keeps a resident private assistant available for real task execution, while Model Proxy gives Claude Code, Codex CLI, Gemini CLI, OpenClaw, local runtimes, and API-compatible clients one local API and model-routing layer.',
         heroAddressLabel: 'Default address',
         heroAddressText: 'Start the service, open the dashboard, add one usable credential, and then configure the client you want to proxy.',
         quickstartLabel: 'Quick Start',
@@ -21,15 +21,15 @@ const I18N = {
         quickstartItems: [
             'Run `npx cligate@latest start` or `cligate start`.',
             'Add a ChatGPT account, Claude account, Antigravity account, API key, or local runtime.',
-            'Use the dashboard to configure Claude Code, Codex CLI, Gemini CLI, or OpenClaw.'
+            'Ask the private Assistant to do a task from Chat / Assistant Tasks, or configure Claude Code, Codex CLI, Gemini CLI, or OpenClaw for Model Proxy.'
         ],
         areasLabel: 'Core Areas',
         areasTitle: 'Where to go in the dashboard',
         areasItems: [
             '`Accounts / API Keys`: add credentials and check availability.',
-            '`Routing / Settings`: set priority, app bindings, model mapping, and CLI config.',
-            '`Chat / Assistant Tasks`: test prompts and inspect runtime execution.',
-            '`Channels / Conversation Records`: operate Telegram or Feishu runtime workflows.',
+            '`Routing / Settings`: set proxy priority, app bindings, model mapping, and CLI config.',
+            '`Chat / Assistant Tasks`: ask the private assistant to execute tasks and inspect its work.',
+            '`Channels / Conversation Records`: operate Telegram, Feishu, or DingTalk runtime workflows.',
             '`Usage / Logs / API Explorer`: verify behavior and debug issues.'
         ],
         configLabel: 'CLI Examples',
@@ -41,15 +41,16 @@ ANTHROPIC_API_KEY=any-key
 Codex CLI
 chatgpt_base_url = "http://localhost:8081/backend-api/"
 openai_base_url = "http://localhost:8081"`,
-        routingLabel: 'Routing Model',
-        routingTitle: 'How requests are resolved',
-        routingText: 'CliGate can route through account pools, API keys, or local runtimes. You can keep automatic routing or bind specific apps to specific credentials.',
+        routingLabel: 'Model Proxy',
+        routingTitle: 'How model requests are resolved',
+        routingText: 'CliGate can route model traffic through account pools, API keys, or local runtimes. You can keep automatic routing or bind specific apps to specific credentials.',
         verifyLabel: 'Verify',
         verifyTitle: 'How to confirm it works',
         verifyItems: [
             'Open `Accounts`, `API Keys`, or `Local Models` and confirm at least one source is usable.',
             'Send a test request from `Chat` and confirm the response arrives.',
-            'Use `Request Logs` or `Usage` to verify which source and model handled the request.'
+            'Use `Request Logs` or `Usage` to verify which source and model handled the request.',
+            'Use `Assistant Tasks` or `Conversation Records` to inspect assistant task execution.'
         ],
         nextLabel: 'Need More Detail',
         nextTitle: 'Full documentation',
@@ -73,8 +74,8 @@ openai_base_url = "http://localhost:8081"`,
         pageSubtle: '这是产品内快速手册。完整说明请查看正式产品说明书。',
         back: '返回仪表盘',
         heroWhatLabel: '它是什么',
-        heroWhatTitle: '一个面向编码工具与运行时工作流的本地网关',
-        heroWhatText: 'CliGate 把 Claude Code、Codex CLI、Gemini CLI、OpenClaw、网页聊天、本地运行时和频道工作流统一到一个本地控制平面里。',
+        heroWhatTitle: '一个同时承接私人 Assistant 和 Model Proxy 的本地控制平面',
+        heroWhatText: 'CliGate 让一个常驻私人助手负责真实任务执行，同时让 Claude Code、Codex CLI、Gemini CLI、OpenClaw、本地运行时和 API 兼容客户端统一走本地 API 和模型路由层。',
         heroAddressLabel: '默认地址',
         heroAddressText: '启动服务，打开仪表盘，添加一个可用凭据，然后配置你要接入代理的客户端。',
         quickstartLabel: '快速开始',
@@ -82,15 +83,15 @@ openai_base_url = "http://localhost:8081"`,
         quickstartItems: [
             '运行 `npx cligate@latest start` 或 `cligate start`。',
             '添加 ChatGPT 账号、Claude 账号、Antigravity 账号、API Key 或本地模型运行时。',
-            '在仪表盘中配置 Claude Code、Codex CLI、Gemini CLI 或 OpenClaw。'
+            '从 Chat / Assistant Tasks 让私人 Assistant 执行任务，或把 Claude Code、Codex CLI、Gemini CLI、OpenClaw 配到 Model Proxy。'
         ],
         areasLabel: '核心区域',
         areasTitle: '仪表盘里该看哪里',
         areasItems: [
             '`账户 / API 密钥`：添加凭据并检查可用性。',
-            '`路由 / 设置`：设置优先级、应用绑定、模型映射和 CLI 配置。',
-            '`聊天 / Assistant Tasks`：测试请求并查看运行时执行情况。',
-            '`频道 / 会话记录`：管理 Telegram 或飞书等运行时工作流。',
+            '`路由 / 设置`：设置代理优先级、应用绑定、模型映射和 CLI 配置。',
+            '`聊天 / Assistant Tasks`：让私人助手执行任务并查看执行过程。',
+            '`频道 / 会话记录`：管理 Telegram、飞书或钉钉等运行时工作流。',
             '`用量 / 日志 / API Explorer`：验证行为并排查问题。'
         ],
         configLabel: 'CLI 示例',
@@ -102,15 +103,16 @@ ANTHROPIC_API_KEY=any-key
 Codex CLI
 chatgpt_base_url = "http://localhost:8081/backend-api/"
 openai_base_url = "http://localhost:8081"`,
-        routingLabel: '路由模型',
-        routingTitle: '请求如何被解析',
-        routingText: 'CliGate 可以通过账号池、API Key 或本地运行时进行路由。你可以保留自动路由，也可以把特定应用绑定到特定凭据。',
+        routingLabel: 'Model Proxy',
+        routingTitle: '模型请求如何被解析',
+        routingText: 'CliGate 可以将模型流量路由到账号池、API Key 或本地运行时。你可以保留自动路由，也可以把特定应用绑定到特定凭据。',
         verifyLabel: '验证',
         verifyTitle: '如何确认已经生效',
         verifyItems: [
             '打开 `账户`、`API 密钥` 或 `本地模型`，确认至少有一个来源可用。',
             '在 `聊天` 页面发送一次测试请求，确认能正常返回响应。',
-            '在 `请求日志` 或 `用量` 页面确认实际命中了哪个来源和模型。'
+            '在 `请求日志` 或 `用量` 页面确认实际命中了哪个来源和模型。',
+            '在 `Assistant Tasks` 或 `会话记录` 中查看助手任务执行。'
         ],
         nextLabel: '需要更多细节',
         nextTitle: '完整文档',

@@ -1,7 +1,7 @@
 {
   "name": "cligate",
   "version": "1.2.2",
-  "description": "Multi-protocol AI API proxy server with account pooling, API key management, and visual dashboard. Supports Claude Code, Codex CLI, Gemini CLI, and OpenClaw.",
+  "description": "Local AI control plane with a resident private assistant for task execution and a unified model proxy API for Claude Code, Codex CLI, Gemini CLI, OpenClaw, accounts, API keys, logs, and usage.",
   "type": "module",
   "main": "electron-main.cjs",
   "bin": {
@@ -135,6 +135,16 @@
     "oauth",
     "free-ai",
     "model-routing",
+    "ai-control-plane",
+    "agent-runtime",
+    "ai-agent",
+    "mcp",
+    "desktop-automation",
+    "telegram-bot",
+    "feishu",
+    "dingtalk",
+    "local-first",
+    "credential-management",
     "developer-tools",
     "coding-assistant"
   ],
