@@ -14,6 +14,9 @@ import {
 } from './schedule-helpers.js';
 import { buildSkillAwareRuntimeInput } from '../skills/index.js';
 import { resolveAssistantConfirmation } from './assistant-confirmation-service.js';
+import assistantMemoryStore, { matchMemories, MEMORY_KINDS, MEMORY_RECALL_MODES } from '../agent-core/memory/index.js';
+import { saveSkill } from '../skills/writer.js';
+import { skillManager } from '../skills/index.js';
 
 function normalizeText(value) {
   return String(value || '').trim();
@@ -1301,6 +1304,228 @@ export function createDefaultAssistantToolRegistry({
     name: 'search_project_memory',
     description: 'Deprecated alias for search_task_and_conversation_memory.',
     execute: async ({ input = {} } = {}) => registry.get('search_task_and_conversation_memory').execute({ input })
+  });
+
+  // --- Self-evolving assistant memory (file-based, keyword recall) ----------
+  // remember / recall_memory / search_memory back the "remember anything and
+  // recall how I did it next time" capability. Memories are plain markdown files
+  // (no vectors); the supervisor decides relevance from the <memory_index> cues.
+
+  registry.register({
+    name: 'remember',
+    description: [
+      'Save (or reinforce) a memory so you can recall it in future conversations — this is how you "remember anything the user asks you to".',
+      'Use when: the user explicitly says "记住/remember this", OR you just succeeded at a multi-step procedure worth reusing.',
+      'kind: "procedure" (a how-to: ordered steps + gotchas — e.g. how to publish on a site), "fact" (a piece of knowledge — e.g. the test env URL), "directive" (a standing rule — e.g. always reply in Chinese), "reference" (a pointer — e.g. where a doc lives).',
+      'recall: "on-match" (default — surfaced only when a future request matches its keywords) or "always" (a standing directive/fact injected every turn, like a rule).',
+      'WRITE GOOD keywords: include synonyms/aliases the user might phrase it as (e.g. ["发文","推送","发表","publish"]) — recall is keyword-based, so aliases widen recall.',
+      'For a procedure, put the concrete reusable steps + gotchas in `body` (Markdown). NEVER store passwords/secrets.',
+      'Re-saving the same kind+topic+title updates the existing memory in place (reinforces it), it does not create duplicates.'
+    ].join('\n'),
+    inputSchema: {
+      type: 'object',
+      required: ['title', 'body'],
+      properties: {
+        title: { type: 'string', description: 'Short title, e.g. "微信公众平台发文".' },
+        kind: { type: 'string', enum: [...MEMORY_KINDS], description: 'procedure | fact | directive | reference (default fact).' },
+        recall: { type: 'string', enum: [...MEMORY_RECALL_MODES], description: 'on-match (default) | always.' },
+        keywords: { type: 'array', items: { type: 'string' }, description: 'Trigger words incl. synonyms/aliases.' },
+        topic: { type: 'string', description: 'Structured key: site/app/domain/project, e.g. "mp.weixin.qq.com". Optional but improves recall precision.' },
+        scope: { type: 'string', description: 'global (default) | project:<path> | person.' },
+        confidence: { type: 'string', enum: ['high', 'medium', 'low'], description: 'How sure you are this is correct/current.' },
+        body: { type: 'string', description: 'The memory content as Markdown (steps + gotchas for a procedure; the fact/rule/pointer otherwise). No secrets.' }
+      }
+    },
+    outputSchema: { type: 'object' },
+    visibility: 'direct',
+    mutating: false,
+    requiresApproval: false,
+    parallelSafe: false,
+    source: 'hosted',
+    execute: async ({ input = {}, context = {} } = {}) => {
+      try {
+        const cwd = String(context?.cwd || '').trim();
+        const scope = normalizeText(input.scope) || (cwd ? `project:${cwd}` : 'global');
+        const saved = assistantMemoryStore.upsert({
+          title: input.title,
+          kind: input.kind,
+          recall: input.recall,
+          keywords: Array.isArray(input.keywords) ? input.keywords : [],
+          topic: input.topic,
+          scope,
+          confidence: input.confidence,
+          body: input.body,
+          source: 'user-pinned'
+        });
+        return {
+          ok: true,
+          id: saved.id,
+          title: saved.title,
+          kind: saved.kind,
+          recall: saved.recall,
+          message: `已记住「${saved.title}」（${saved.kind}），下次同类请求会自动提示，可用 recall_memory("${saved.id}") 取回。`
+        };
+      } catch (err) {
+        return { ok: false, error: String(err?.message || err), recoverable: true };
+      }
+    }
+  });
+
+  registry.register({
+    name: 'recall_memory',
+    description: [
+      'Read the full body of a stored memory by id, after a <memory_index> cue (or search_memory) tells you one looks relevant.',
+      'This is your "recollection": pull the remembered steps/facts so you can act on them instead of re-exploring from scratch.',
+      'For a procedure memory, the result includes a freshness note — TRY the remembered steps but verify each one (the UI/environment may have changed); fall back to exploration if a step no longer works.'
+    ].join('\n'),
+    inputSchema: {
+      type: 'object',
+      required: ['id'],
+      properties: { id: { type: 'string', description: 'The memory id from <memory_index>[].id or search_memory.' } }
+    },
+    outputSchema: { type: 'object' },
+    execute: async ({ input = {} } = {}) => {
+      const id = normalizeText(input.id);
+      if (!assistantMemoryStore.get(id)) {
+        return { ok: false, error: `memory ${id} not found`, code: 'MEMORY_NOT_FOUND' };
+      }
+      // markUsed returns the post-increment record (it mutates the stored object
+      // in place), so read usedCount from it directly — do NOT add another +1, or
+      // the count shown to the model double-counts this recall.
+      const record = assistantMemoryStore.markUsed(id);
+      const freshnessNote = record.kind === 'procedure'
+        ? `已用 ${record.usedCount} 次，最近验证：${record.lastVerified || '未知'}。按这些步骤做，但逐步核对——界面/环境可能已变，某步失效就退回探索并据实更新。`
+        : null;
+      return {
+        ok: true,
+        id: record.id,
+        title: record.title,
+        kind: record.kind,
+        topic: record.topic,
+        confidence: record.confidence,
+        usedCount: record.usedCount,
+        body: record.body,
+        freshnessNote
+      };
+    }
+  });
+
+  registry.register({
+    name: 'search_memory',
+    description: 'Keyword-search stored memories and return matching headers (no body). Use to proactively look for a relevant past memory when the <memory_index> cue is empty but you suspect you have done something similar before. Then recall_memory(id) to read the chosen one.',
+    inputSchema: {
+      type: 'object',
+      required: ['query'],
+      properties: {
+        query: { type: 'string', description: 'Free-text describing the task/topic.' },
+        limit: { type: 'integer', description: 'Max results (default 5).' }
+      }
+    },
+    outputSchema: { type: 'object' },
+    execute: async ({ input = {} } = {}) => {
+      const query = normalizeText(input.query);
+      const limit = Math.min(Math.max(Number(input.limit || 5), 1), 20);
+      const matches = matchMemories(query, assistantMemoryStore.catalog(), { limit });
+      return { count: matches.length, matches };
+    }
+  });
+
+  // --- Skill authoring (Phase C) --------------------------------------------
+  // save_skill is the single low-level "materialize a skill to disk" primitive;
+  // both entry points (promote a memory, or author from a dialogue) funnel
+  // through it so format/validation/registration live in one place. EXPLICIT
+  // user request only — the assistant never auto-creates skills.
+
+  registry.register({
+    name: 'save_skill',
+    description: [
+      'Write a reusable skill to disk (a SKILL.md the assistant can later auto-match and activate). Use ONLY when the user explicitly asks to create/save a skill.',
+      'This is the low-level writer for BOTH ways of making a skill: (1) promoting a memory — prefer promote_memory_to_skill for that; (2) authoring from a conversation — gather the details with the user (what it does, when it should trigger, the steps), then call this.',
+      'WRITE A GOOD SKILL: name is a short kebab identifier; description is the PRIMARY trigger — say what it does AND when to use it, and lean slightly "pushy" so it triggers when relevant; body is Markdown with concrete, imperative steps (and gotchas). Keep it focused. NEVER include passwords/secrets.',
+      'It validates the document and refuses to overwrite an existing skill unless overwrite:true.'
+    ].join('\n'),
+    inputSchema: {
+      type: 'object',
+      required: ['name', 'description', 'body'],
+      properties: {
+        name: { type: 'string', description: 'Short kebab-case skill name, e.g. "wechat-publish".' },
+        description: { type: 'string', description: 'What it does + when to trigger (the primary triggering mechanism). Slightly pushy.' },
+        whenToUse: { type: 'string', description: 'Optional extra trigger phrasing/contexts.' },
+        tags: { type: 'array', items: { type: 'string' }, description: 'Optional tags.' },
+        body: { type: 'string', description: 'Skill instructions as Markdown (imperative steps + gotchas). No secrets.' },
+        overwrite: { type: 'boolean', description: 'Replace an existing skill of the same name (default false).' }
+      }
+    },
+    outputSchema: { type: 'object' },
+    visibility: 'direct',
+    mutating: true,
+    requiresApproval: false,
+    parallelSafe: false,
+    source: 'hosted',
+    execute: async ({ input = {} } = {}) => {
+      const res = saveSkill({
+        name: input.name,
+        description: input.description,
+        whenToUse: input.whenToUse,
+        tags: input.tags,
+        body: input.body,
+        overwrite: input.overwrite === true
+      });
+      if (res.ok) {
+        try { skillManager.clearCache(); } catch { /* refresh is best-effort */ }
+      }
+      return res;
+    }
+  });
+
+  registry.register({
+    name: 'promote_memory_to_skill',
+    description: 'Crystallize an EXISTING stored memory into a reusable skill (file). Use ONLY when the user explicitly asks to "save this as a skill / 把这套存成技能". Deterministic: it reuses the memory\'s steps + keywords (no re-authoring). Pass the memory id from <memory_index> / recall_memory.',
+    inputSchema: {
+      type: 'object',
+      required: ['memoryId'],
+      properties: {
+        memoryId: { type: 'string', description: 'The memory id to crystallize.' },
+        name: { type: 'string', description: 'Optional skill name override (defaults to the memory title).' },
+        overwrite: { type: 'boolean', description: 'Replace an existing skill of the same name (default false).' }
+      }
+    },
+    outputSchema: { type: 'object' },
+    visibility: 'direct',
+    mutating: true,
+    requiresApproval: false,
+    parallelSafe: false,
+    source: 'hosted',
+    execute: async ({ input = {} } = {}) => {
+      const record = assistantMemoryStore.get(normalizeText(input.memoryId));
+      if (!record) {
+        return { ok: false, code: 'MEMORY_NOT_FOUND', error: `memory ${input.memoryId} not found` };
+      }
+      const name = normalizeText(input.name) || record.title;
+      const keywords = Array.isArray(record.keywords) ? record.keywords : [];
+      const description = `${record.title}。`
+        + (record.topic ? `面向 ${record.topic}。` : '')
+        + `当用户需要做「${record.title}」这类任务时使用`
+        + (keywords.length ? `（常见触发：${keywords.join('、')}）` : '')
+        + '。';
+      const whenToUse = keywords.length
+        ? `用户提到：${keywords.join('、')}${record.topic ? `，或目标是 ${record.topic}` : ''}`
+        : '';
+      const body = String(record.body || '').trim() || `# ${record.title}\n\n（无详细步骤）`;
+      const res = saveSkill({
+        name,
+        description,
+        whenToUse,
+        tags: ['memory-derived', record.kind],
+        body,
+        overwrite: input.overwrite === true
+      });
+      if (res.ok) {
+        try { skillManager.clearCache(); } catch { /* best-effort */ }
+        return { ...res, fromMemoryId: record.id, message: `已把记忆「${record.title}」固化为技能（${res.dir}），现在可被自动匹配/激活。` };
+      }
+      return res;
+    }
   });
 
   return registry;

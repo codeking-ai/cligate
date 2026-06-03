@@ -228,6 +228,9 @@ export class AssistantPolicyService {
       'list_project_artifacts',
       'search_task_and_conversation_memory',
       'search_project_memory',
+      // Self-evolving memory recall — read-only lookups (Phase A).
+      'recall_memory',
+      'search_memory',
       // Read-only inspection / lookup tools registered in tool-registry.js.
       // Previously omitted, which caused every call to trip the default-deny
       // gate and collapse the dialogue into the fallback runner.
@@ -318,6 +321,19 @@ export class AssistantPolicyService {
         allowed: hasConversation,
         reason: hasConversation ? 'conversation_scope_available' : 'conversation_scope_required',
         riskLevel: normalizedTool === 'create_scheduled_task' ? 'medium' : 'low'
+      });
+    }
+
+    // Self-evolving memory / skill writes (remember, save_skill,
+    // promote_memory_to_skill). These are agent-internal persistence to the
+    // local config dir — not user-data mutations — and the supervisor only
+    // invokes them on explicit user intent. Allow without a confirmation gate
+    // (a confirmation prompt every time the assistant remembers would be noise).
+    if (['remember', 'save_skill', 'promote_memory_to_skill'].includes(normalizedTool)) {
+      return buildPolicyDecision({
+        allowed: true,
+        reason: 'assistant_memory_write',
+        riskLevel: 'low'
       });
     }
 

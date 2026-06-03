@@ -35,20 +35,33 @@ function buildPendingActionFromRun(run = null, conversation = null, {
   }
 
   const toolResults = Array.isArray(run?.metadata?.toolResults) ? run.metadata.toolResults : [];
-  const block = toolResults.find((entry) => isToolResultConfirmationRequired(entry));
-  if (!block) {
+  // Capture EVERY tool call that the run paused on, not just the first. A single
+  // supervisor turn frequently batches several mutating calls (e.g. five
+  // send_message_to_channel calls to deliver five images); the old `.find()`
+  // recorded only the first as the pending action, so on approval only that one
+  // re-executed and the rest were silently dropped — the user kept getting the
+  // same first image and the supervisor lost track of what it had sent.
+  const blocks = toolResults
+    .filter((entry) => isToolResultConfirmationRequired(entry))
+    .map((entry) => normalizeAssistantToolResultEntry(entry))
+    .filter((entry) => entry.toolName);
+  if (!blocks.length) {
     return null;
   }
 
-  const normalized = normalizeAssistantToolResultEntry(block);
-  if (!normalized.toolName) {
-    return null;
-  }
+  const normalized = blocks[0];
+  const batch = blocks.map((entry) => ({
+    toolName: entry.toolName,
+    input: entry.input || {}
+  }));
 
   const requestedPath = getRequestedPath(normalized);
-  const summary = normalizeText(normalized.summary)
-    || (requestedPath ? `Target scope: ${requestedPath}` : '');
   const runText = normalizeText(run?.triggerText);
+  const baseSummary = normalizeText(normalized.summary)
+    || (requestedPath ? `Target scope: ${requestedPath}` : '');
+  const summary = batch.length > 1
+    ? `${batch.length} actions pending confirmation${baseSummary ? `: ${baseSummary}` : ''}`
+    : baseSummary;
 
   return pendingActionStore.create({
     confirmToken: normalizeText(confirmToken),
@@ -62,9 +75,38 @@ function buildPendingActionFromRun(run = null, conversation = null, {
     summary,
     metadata: {
       reason: normalizeText(normalized?.payload?.reason),
-      requestedPath
+      requestedPath,
+      // The full set of batched tool calls this confirmation covers. Consumers
+      // (assistant-confirmation-service) execute ALL of them on a single
+      // approve. `toolName`/`input` above stay the first entry for back-compat.
+      batch,
+      batchCount: batch.length
     }
   });
+}
+
+/**
+ * Expand a pending action into the list of tool invocations to execute on
+ * approval. Returns the captured batch when present, otherwise the single
+ * top-level tool call (back-compat). Always returns an array.
+ */
+export function buildPendingActionInvocations(action = {}) {
+  const batch = Array.isArray(action?.metadata?.batch) ? action.metadata.batch : [];
+  const normalizedBatch = batch
+    .map((entry) => ({
+      toolName: normalizeText(entry?.toolName),
+      input: (entry?.input && typeof entry.input === 'object') ? entry.input : {}
+    }))
+    .filter((entry) => entry.toolName);
+  if (normalizedBatch.length) {
+    return normalizedBatch;
+  }
+  const toolName = normalizeText(action?.toolName);
+  if (!toolName) return [];
+  return [{
+    toolName,
+    input: (action?.input && typeof action.input === 'object') ? action.input : {}
+  }];
 }
 
 function clearStalePendingTokenInMetadata(conversation, conversationStore) {

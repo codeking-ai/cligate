@@ -21,6 +21,13 @@ import {
   buildAssistantCoreDeliveryState
 } from './conversation-delivery-arbiter.js';
 import agentChannelDeliverySender, { AgentChannelDeliverySender } from './delivery-sender.js';
+import {
+  parseAssistantPermissionCommand,
+  hasStickyApprovalPhrase,
+  getAutoApproveToolsState,
+  buildAutoApproveToolsMetadata,
+  buildAutoApproveAcknowledgement
+} from '../assistant-core/auto-approve.js';
 
 function buildInboundKey(message) {
   return [
@@ -126,7 +133,7 @@ export class AgentChannelRouter {
     }
     this.deliveryStore.markInboundProcessed(inboundKey);
 
-    const conversation = this.conversationStore.findOrCreateByExternal({
+    let conversation = this.conversationStore.findOrCreateByExternal({
       channel: message.channel,
       accountId: message.accountId,
       externalConversationId: message.externalConversationId,
@@ -173,6 +180,59 @@ export class AgentChannelRouter {
         conversation,
         pairing
       };
+    }
+
+    // Conversation-level auto-approve ("yolo") controls — mirrored from the web
+    // chat route via the shared matchers so DingTalk/Feishu/Telegram users can
+    // ALSO stop the per-tool confirmation prompts. Without this the sticky-
+    // approval phrase + /yolo /safe commands only worked on the dashboard, so a
+    // channel user was stuck confirming every single mutating tool call.
+    const permissionCommand = parseAssistantPermissionCommand(message.text);
+    if (permissionCommand) {
+      const enable = permissionCommand.command === 'yolo';
+      conversation = this.conversationStore.patch(conversation.id, {
+        metadata: buildAutoApproveToolsMetadata(conversation, enable, { now: new Date().toISOString() })
+      }) || conversation;
+      const ackText = buildAutoApproveAcknowledgement({ enabled: enable, reason: 'slash', zh: true });
+      await this.deliverySender.send({
+        conversation,
+        channel: message.channel,
+        payload: {
+          text: ackText,
+          kind: 'assistant-permission-mode',
+          sourceType: 'assistant_permission_mode'
+        },
+        message: { text: ackText }
+      });
+      this.deliveryStore.saveInbound({
+        channel: message.channel,
+        conversationId: conversation.id,
+        sessionId: conversation.activeRuntimeSessionId || null,
+        externalMessageId: message.externalMessageId || '',
+        status: 'sent',
+        payload: {
+          text: message.text || '',
+          messageType: message.messageType || 'text',
+          externalUserId: message.externalUserId || '',
+          externalUserName: message.externalUserName || '',
+          ts: message.ts || null
+        }
+      });
+      return {
+        type: 'assistant_permission_mode',
+        enabled: enable,
+        message: ackText,
+        conversation
+      };
+    }
+
+    // A blanket-consent phrase ("以后别问我 / 同意所有操作") flips the gate ON but
+    // we still let the supervisor handle the same message in this turn, so
+    // "把这些发给我，以后都别问" both enables auto-approve AND runs the request.
+    if (!getAutoApproveToolsState(conversation) && hasStickyApprovalPhrase(message.text)) {
+      conversation = this.conversationStore.patch(conversation.id, {
+        metadata: buildAutoApproveToolsMetadata(conversation, true, { now: new Date().toISOString() })
+      }) || conversation;
     }
 
     const previousSessionId = conversation.activeRuntimeSessionId || null;

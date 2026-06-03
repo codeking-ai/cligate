@@ -33,7 +33,7 @@ import chatUiConversationService from '../chat-ui/conversation-service.js';
 import chatUiConversationStore from '../chat-ui/conversation-store.js';
 import assistantRunStore from '../assistant-core/run-store.js';
 import artifactService from '../assistant-core/artifact-service.js';
-import { ensurePendingAssistantAction } from '../assistant-core/pending-action-resolver.js';
+import { ensurePendingAssistantAction, buildPendingActionInvocations } from '../assistant-core/pending-action-resolver.js';
 import { resolveEnabledMcpService } from '../assistant-core/mcp-service-resolver.js';
 
 function listPersistedUiChatMessages(conversation) {
@@ -197,26 +197,54 @@ async function executeConfirmedExecutionToolAction(action = {}, { conversation =
       allowMutatingTools: true
     })
   });
-  const toolResult = await executor.executeToolCall({
-    toolName: String(action.toolName || '').trim(),
-    input: action.input || {},
-    metadata: {
-      approved: true
+  // A single confirmation can cover a BATCH of queued tool calls (e.g. several
+  // send_message_to_channel calls). Execute ALL of them on this one approve —
+  // historically only the first ran, dropping the rest (same root cause as the
+  // DingTalk image-send incident).
+  const invocations = buildPendingActionInvocations(action);
+  const autoApproveAll = getAutoApproveToolsState(conversation);
+  const results = [];
+  for (const invocation of invocations) {
+    let toolResult;
+    try {
+      toolResult = await executor.executeToolCall({
+        toolName: String(invocation.toolName || '').trim(),
+        input: invocation.input || {},
+        metadata: { approved: true }
+      }, {
+        cwd: workspaceRoot,
+        autoApproveAll,
+        extraReadRoots: [],
+        conversation
+      });
+    } catch (error) {
+      toolResult = {
+        status: 'failed',
+        content: [{ type: 'text', text: String(error?.message || error || 'tool execution failed') }]
+      };
     }
-  }, {
-    cwd: workspaceRoot,
-    autoApproveAll: getAutoApproveToolsState(conversation),
-    extraReadRoots: []
-  });
+    results.push({ toolName: invocation.toolName, toolResult });
+  }
+
+  const completedCount = results.filter((entry) => entry?.toolResult?.status === 'completed').length;
+  const allCompleted = results.length > 0 && completedCount === results.length;
+  const lastResult = results.length ? results[results.length - 1].toolResult : null;
+  const message = results.length <= 1
+    ? (String(lastResult?.content?.[0]?.text || '').trim() || `Confirmed and executed ${action.toolName}.`)
+    : `Confirmed and executed ${completedCount}/${results.length} actions:\n${results
+        .map((entry, index) => `${index + 1}. ${String(entry?.toolResult?.content?.[0]?.text || '').trim()
+          || `${entry.toolName} ${entry?.toolResult?.status || 'finished'}`}`)
+        .join('\n')}`;
   return {
     type: 'assistant_execution_tool_confirmed',
-    message: String(toolResult?.content?.[0]?.text || '').trim() || `Confirmed and executed ${action.toolName}.`,
-    toolResult,
+    message,
+    toolResult: lastResult,
+    toolResults: results.map((entry) => entry.toolResult),
     assistantRun: {
       id: String(action.assistantRunId || '').trim(),
-      status: toolResult?.status === 'completed' ? 'completed' : 'failed',
-      result: String(toolResult?.content?.[0]?.text || '').trim(),
-      summary: String(toolResult?.content?.[0]?.text || '').trim()
+      status: allCompleted ? 'completed' : 'failed',
+      result: message,
+      summary: message
     },
     pendingAction: null
   };

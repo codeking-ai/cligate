@@ -19,6 +19,20 @@ function isDesktopTool(tool = null) {
   return String(tool?.name || '').startsWith('desktop_');
 }
 
+// send_message_to_channel delivers text/an image to a chat conversation. When it
+// targets the CURRENT conversation (no targetConversationId, or one equal to the
+// conversation the user is talking on), there is no trust boundary crossed — the
+// recipient is the very user driving the assistant — so a per-call confirmation
+// prompt is pure friction (the DingTalk "确认每一次发送" complaint). A delivery
+// aimed at a DIFFERENT conversation is NOT exempt and keeps the approval gate.
+function isCurrentConversationDelivery(tool = null, input = {}, context = {}) {
+  if (String(tool?.name || '') !== 'send_message_to_channel') return false;
+  const target = String(input?.targetConversationId || '').trim();
+  if (!target) return true;
+  const current = String(context?.conversation?.id || '').trim();
+  return Boolean(current) && target === current;
+}
+
 export class AssistantToolPolicyService {
   constructor({
     workspaceGuard = new WorkspaceGuard(),
@@ -80,7 +94,8 @@ export class AssistantToolPolicyService {
     // because the user's workspace is on a different drive. We still skip the
     // approval prompt for them (line below), and the desktop-agent token / OS
     // UAC gate provide the actual security boundary.
-    const skipPathCheck = isDesktopTool(tool);
+    const skipPathCheck = isDesktopTool(tool)
+      || isCurrentConversationDelivery(tool, input, context);
 
     if (!skipPathCheck) {
       for (const rawPath of collectPathInputs(input)) {
@@ -164,7 +179,12 @@ export class AssistantToolPolicyService {
       };
     }
 
-    if ((tool.requiresApproval || tool.mutating) && !effectiveApproved && !isDesktopTool(tool)) {
+    if (
+      (tool.requiresApproval || tool.mutating)
+      && !effectiveApproved
+      && !isDesktopTool(tool)
+      && !isCurrentConversationDelivery(tool, input, context)
+    ) {
       return {
         ...decision,
         requiresApproval: true,

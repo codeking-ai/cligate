@@ -326,7 +326,11 @@ export class AssistantDialogueService {
           deliveryLimit: 8,
           // Exclude this very run from <active_assistant_runs> so the supervisor
           // never mistakes itself for a concurrent duplicate and cancels itself.
-          excludeRunId: run?.id || ''
+          excludeRunId: run?.id || '',
+          // Drive memory recall (<memory_index> keyword cues) off the user's text,
+          // and scope-filter project memories against the current cwd.
+          queryText: String(text || ''),
+          cwd: String(cwd || '')
       })
       : null;
     const workspaceContext = this.observationService.getWorkspaceContext({

@@ -7,6 +7,7 @@ import AssistantRunner from './runner.js';
 import agentOrchestratorMessageService from '../agent-orchestrator/message-service.js';
 import assistantTaskViewService from './task-view-service.js';
 import AssistantDialogueService from '../assistant-agent/dialogue-service.js';
+import { maybeFormFromRun as maybeFormMemoryFromRun } from '../agent-core/memory/memory-distiller.js';
 import { resolveEnabledMcpService } from './mcp-service-resolver.js';
 import {
   isToolResultConfirmationRequired,
@@ -519,6 +520,12 @@ export class AssistantModeService {
       this.messageService,
       nextConversation
     );
+
+    // Self-evolution (Phase B): after a successful run, asynchronously distill it
+    // into a reusable memory. Fire-and-forget + fail-safe inside the distiller —
+    // it never blocks the reply, and is gated to successful *procedural* runs.
+    maybeFormMemoryFromRun({ run: persistedRun, conversation: nextConversation, runText })
+      .catch(() => {});
 
     return {
       type: 'assistant_response',

@@ -763,3 +763,52 @@ test('createBuiltinAssistantToolRegistry includes desktop read-only tools', () =
   assert.ok(toolNames.includes('desktop_wait_for_process'));
   assert.ok(toolNames.includes('desktop_wait_for_window'));
 });
+
+test('AssistantToolPolicyService auto-approves send_message_to_channel to the current conversation', () => {
+  const workspaceRoot = path.resolve('D:/tmp/policy-workspace');
+  const workspaceGuard = new WorkspaceGuard({ workspaceRoot });
+  const policy = new AssistantToolPolicyService({ workspaceGuard, allowMutatingTools: true });
+  const sendTool = { name: 'send_message_to_channel', mutating: true, requiresApproval: false };
+  const context = { cwd: workspaceRoot, conversation: { id: 'conv-1' } };
+
+  // No targetConversationId → defaults to the current conversation → no prompt.
+  const defaultTarget = policy.evaluateToolCall({
+    tool: sendTool,
+    invocation: { input: { text: 'hi', imagePath: 'D:\\git.png' } },
+    context
+  });
+  assert.equal(defaultTarget.allowed, true);
+  assert.equal(defaultTarget.requiresApproval, false, 'delivery to current conversation needs no approval');
+
+  // Explicit targetConversationId === current conversation → no prompt.
+  const sameTarget = policy.evaluateToolCall({
+    tool: sendTool,
+    invocation: { input: { imagePath: 'D:\\github.jpg', targetConversationId: 'conv-1' } },
+    context
+  });
+  assert.equal(sameTarget.requiresApproval, false);
+
+  // Delivery to a DIFFERENT conversation still requires confirmation.
+  const otherTarget = policy.evaluateToolCall({
+    tool: sendTool,
+    invocation: { input: { text: 'leak', targetConversationId: 'conv-OTHER' } },
+    context
+  });
+  assert.equal(otherTarget.allowed, true);
+  assert.equal(otherTarget.requiresApproval, true, 'cross-conversation delivery is still gated');
+  assert.equal(otherTarget.reason, 'mutating_tool_requires_confirmation');
+});
+
+test('AssistantToolPolicyService still gates other mutating tools after the delivery exemption', () => {
+  const workspaceRoot = path.resolve('D:/tmp/policy-workspace');
+  const workspaceGuard = new WorkspaceGuard({ workspaceRoot });
+  const policy = new AssistantToolPolicyService({ workspaceGuard, allowMutatingTools: true });
+
+  const writeDecision = policy.evaluateToolCall({
+    tool: { name: 'write_file', mutating: true },
+    invocation: { input: { path: 'notes.txt' } },
+    context: { cwd: workspaceRoot, conversation: { id: 'conv-1' } }
+  });
+  assert.equal(writeDecision.allowed, true);
+  assert.equal(writeDecision.requiresApproval, true, 'write_file remains gated');
+});

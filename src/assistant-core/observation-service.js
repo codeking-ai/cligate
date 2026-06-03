@@ -8,6 +8,7 @@ import assistantWorkspaceStore from './workspace-store.js';
 import assistantClarificationStore from './clarification-store.js';
 import assistantRunStore from './run-store.js';
 import runResourceRegistry from './run-resource-registry.js';
+import { buildMemoryRecallContext } from '../agent-core/memory/index.js';
 import artifactServiceSingleton from './artifact-service.js';
 import assistantDomainTaskStore from './domain/task-store.js';
 import assistantDomainExecutionStore from './domain/execution-store.js';
@@ -809,7 +810,7 @@ export class AssistantObservationService {
       .slice(0, Math.max(1, limit));
   }
 
-  getConversationContext(conversationId, { deliveryLimit = 20, excludeRunId = '' } = {}) {
+  getConversationContext(conversationId, { deliveryLimit = 20, excludeRunId = '', queryText = '', cwd = '' } = {}) {
     const conversation = this.conversationStore.get(String(conversationId || ''));
     if (!conversation) return null;
 
@@ -1005,6 +1006,12 @@ export class AssistantObservationService {
       // task can run in parallel or must queue behind the holder — it never lists
       // the current run itself (no "I'm holding it against myself" confusion).
       resourceHolders: filterResourceHoldersExcludingSelf(runResourceRegistry.describe(), excludeRunId),
+      // Self-evolving memory recall (file-based, keyword — no vectors):
+      //  - standingMemory: `always` directives/facts, injected every turn.
+      //  - memoryIndex: keyword-shortlisted `on-match` memory headers (cues) for
+      //    THIS request; the supervisor pulls bodies via recall_memory(id).
+      // Fail-safe: empty blocks if the memory layer errors.
+      ...buildMemoryRecallContext(queryText, { cwd }),
       policy
     };
   }

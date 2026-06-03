@@ -1,6 +1,6 @@
 import assistantPendingActionStore from './pending-action-store.js';
 import assistantRunStore from './run-store.js';
-import { ensurePendingAssistantAction } from './pending-action-resolver.js';
+import { ensurePendingAssistantAction, buildPendingActionInvocations } from './pending-action-resolver.js';
 import createBuiltinAssistantToolRegistry, {
   AssistantToolPolicyService,
   AssistantToolsExecutor
@@ -44,33 +44,81 @@ function clearPendingToken(conversationStore, conversation = null) {
   }) || conversation;
 }
 
-async function executeBuiltinPendingAction(action = {}, { mcpService = null } = {}) {
-  const workspaceRoot = resolveWorkspaceRoot(action);
+function defaultBuiltinExecutorFactory({ workspaceRoot, mcpService } = {}) {
   const { registry, workspaceGuard } = createBuiltinAssistantToolRegistry({
     workspaceRoot,
     mcpService
   });
-  const executor = new AssistantToolsExecutor({
+  return new AssistantToolsExecutor({
     toolRegistry: registry,
     policyService: new AssistantToolPolicyService({
       workspaceGuard,
       allowMutatingTools: true
     })
   });
-  const toolResult = await executor.executeToolCall({
-    toolName: normalizeText(action.toolName),
-    input: action.input || {},
-    metadata: {
-      approved: true
+}
+
+async function executeBuiltinPendingAction(action = {}, {
+  mcpService = null,
+  conversation = null,
+  executorFactory = defaultBuiltinExecutorFactory
+} = {}) {
+  const workspaceRoot = resolveWorkspaceRoot(action);
+  const executor = executorFactory({ workspaceRoot, mcpService });
+
+  // A single pending confirmation can cover a BATCH of tool calls (e.g. five
+  // send_message_to_channel calls queued in one supervisor turn). Execute every
+  // captured invocation on this one approve — historically only the first ran,
+  // which silently dropped the rest. Each is guarded so one failure does not
+  // abort the others.
+  const invocations = buildPendingActionInvocations(action);
+  const results = [];
+  for (const invocation of invocations) {
+    let toolResult;
+    try {
+      toolResult = await executor.executeToolCall({
+        toolName: normalizeText(invocation.toolName),
+        input: invocation.input || {},
+        metadata: { approved: true }
+      }, {
+        cwd: workspaceRoot,
+        // Pass the resolved conversation so delivery tools without an explicit
+        // targetConversationId still land on the originating channel.
+        conversation
+      });
+    } catch (error) {
+      toolResult = {
+        status: 'failed',
+        content: [{ type: 'text', text: String(error?.message || error || 'tool execution failed') }]
+      };
     }
-  }, {
-    cwd: workspaceRoot
-  });
+    results.push({ toolName: invocation.toolName, toolResult });
+  }
+
+  const completedCount = results.filter((entry) => entry?.toolResult?.status === 'completed').length;
+  const allCompleted = results.length > 0 && completedCount === results.length;
+  const status = allCompleted ? 'approved' : (completedCount > 0 ? 'partial' : 'failed');
+  const lastResult = results.length ? results[results.length - 1].toolResult : null;
+
+  let message;
+  if (results.length <= 1) {
+    message = normalizeText(lastResult?.content?.[0]?.text)
+      || `Confirmed and executed ${normalizeText(action.toolName) || 'the action'}.`;
+  } else {
+    const lines = results.map((entry, index) => {
+      const text = normalizeText(entry?.toolResult?.content?.[0]?.text)
+        || `${entry.toolName} ${entry?.toolResult?.status || 'finished'}`;
+      return `${index + 1}. ${text}`;
+    });
+    message = `Confirmed and executed ${completedCount}/${results.length} actions:\n${lines.join('\n')}`;
+  }
+
   return {
-    status: toolResult?.status === 'completed' ? 'approved' : 'failed',
+    status,
     decision: 'approve',
-    message: normalizeText(toolResult?.content?.[0]?.text) || `Confirmed and executed ${action.toolName}.`,
-    toolResult,
+    message,
+    toolResult: lastResult,
+    toolResults: results.map((entry) => entry.toolResult),
     pendingAction: null
   };
 }
@@ -84,7 +132,8 @@ export async function resolveAssistantConfirmation({
   assistantToolRegistry = null,
   assistantToolContext = {},
   mcpService = null,
-  mcpServiceResolver = resolveEnabledMcpService
+  mcpServiceResolver = resolveEnabledMcpService,
+  executorFactory = defaultBuiltinExecutorFactory
 } = {}) {
   const normalizedDecision = normalizeText(decision).toLowerCase();
   if (!['approve', 'deny'].includes(normalizedDecision)) {
@@ -123,7 +172,9 @@ export async function resolveAssistantConfirmation({
 
   if (isExecutionToolPendingAction(action)) {
     const result = await executeBuiltinPendingAction(action, {
-      mcpService: mcpService || mcpServiceResolver?.() || null
+      mcpService: mcpService || mcpServiceResolver?.() || null,
+      conversation: clearedConversation || latestConversation || conversation,
+      executorFactory
     });
     return {
       ...result,
