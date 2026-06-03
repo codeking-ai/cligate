@@ -55,10 +55,74 @@ function collectPolicyBlockContext(toolResults = []) {
       summary: normalized.summary,
       hint: String(result?.hint || '').trim(),
       reason: String(result?.reason || '').trim(),
-      requestedPath: String(normalized.input?.cwd || normalized.input?.workspaceRef || normalized.input?.workspaceId || '').trim()
+      requestedPath: String(normalized.input?.cwd || normalized.input?.workspaceRef || normalized.input?.workspaceId || '').trim(),
+      input: (normalized.input && typeof normalized.input === 'object') ? normalized.input : {}
     };
   }
   return null;
+}
+
+// Human-readable labels for the tools that can hit the confirmation gate, so
+// the user sees "I'm about to run a system command (higher risk)…" with the
+// actual command/path — instead of the opaque `mutating_tool_requires_confirmation`
+// code. Unknown tools fall back to a generic-but-named explanation.
+const CONFIRMATION_TOOL_LABELS = {
+  'zh-CN': {
+    run_shell_command: { what: '执行一条系统命令', risk: '较高风险：可读写文件、调用系统程序' },
+    write_file: { what: '写入文件', risk: '会改动磁盘上的文件内容' },
+    edit_file: { what: '修改文件', risk: '会改动磁盘上的文件内容' },
+    create_file: { what: '新建文件', risk: '会在磁盘上创建文件' },
+    append_file: { what: '向文件追加内容', risk: '会改动磁盘上的文件内容' },
+    delete_path: { what: '删除文件或目录', risk: '删除后通常不可恢复' },
+    move_path: { what: '移动 / 重命名文件', risk: '会改动磁盘上的文件位置' },
+    send_message_to_channel: { what: '向其它会话发送消息 / 图片', risk: '会把内容发到一个并非当前对话的会话' }
+  },
+  en: {
+    run_shell_command: { what: 'run a system command', risk: 'higher risk: it can read/write files and invoke programs' },
+    write_file: { what: 'write a file', risk: 'it changes file contents on disk' },
+    edit_file: { what: 'edit a file', risk: 'it changes file contents on disk' },
+    create_file: { what: 'create a file', risk: 'it creates a file on disk' },
+    append_file: { what: 'append to a file', risk: 'it changes file contents on disk' },
+    delete_path: { what: 'delete a file or directory', risk: 'deletion is usually irreversible' },
+    move_path: { what: 'move / rename a file', risk: 'it changes where files live on disk' },
+    send_message_to_channel: { what: 'send a message / image to another conversation', risk: 'it delivers to a conversation other than this one' }
+  }
+};
+
+// Build a friendly, localized explanation of the action awaiting confirmation:
+// what the tool does, why it is gated, the concrete args, and how to proceed /
+// stop being asked.
+function describeConfirmationAction(policyBlock = {}, language = 'en') {
+  const zh = language === 'zh-CN';
+  const toolName = String(policyBlock.toolName || '').trim();
+  const input = policyBlock.input || {};
+  const labels = CONFIRMATION_TOOL_LABELS[zh ? 'zh-CN' : 'en'] || {};
+  const label = labels[toolName] || null;
+
+  const command = String(input.command || '').trim();
+  const filePath = String(
+    input.path || input.file || input.filePath || input.targetPath || input.dest || ''
+  ).trim();
+  const cwd = String(input.cwd || policyBlock.requestedPath || '').trim();
+  const target = String(input.targetConversationId || '').trim();
+  const outsideWorkspace = String(policyBlock.reason || '').includes('path_outside_workspace');
+
+  const what = label?.what || (zh ? `执行 ${toolName || '一个工具'}` : `run ${toolName || 'a tool'}`);
+  const risk = label?.risk || (zh ? '会修改文件或系统状态' : 'it changes files or system state');
+
+  const lines = [];
+  lines.push(zh ? `我准备${what}（${risk}），需要你确认。` : `I'm about to ${what} (${risk}) — please confirm.`);
+  if (command) lines.push(zh ? `命令：${truncate(command, 300)}` : `Command: ${truncate(command, 300)}`);
+  if (filePath) lines.push(zh ? `目标文件：${filePath}` : `Target file: ${filePath}`);
+  if (cwd && !filePath) lines.push(zh ? `目标/工作目录：${cwd}` : `Working directory: ${cwd}`);
+  if (target) lines.push(zh ? `目标会话：${target}` : `Target conversation: ${target}`);
+  if (outsideWorkspace && (cwd || filePath)) {
+    lines.push(zh ? '（该路径在工作区之外，所以需要确认。）' : '(This path is outside the workspace, hence the confirmation.)');
+  }
+  lines.push(zh
+    ? '回复「同意 / 确认」我就继续；如果不想本会话以后每一步都问，回复「全部同意」或发送 /yolo（之后用 /safe 可恢复逐次确认）。'
+    : 'Reply "approve / yes" and I will continue. To stop being asked for the rest of this conversation, say "approve all" or send /yolo (use /safe to re-enable prompts).');
+  return lines.join('\n');
 }
 
 function extractLlmFailureMessage(stopReason = '') {
@@ -108,27 +172,13 @@ export function composeAssistantReply({
     };
   }
   if (stopReason === 'assistant_confirmation_required' && policyBlock) {
-    if (language === 'zh-CN') {
-      const detail = policyBlock.requestedPath
-        ? `目标范围：${policyBlock.requestedPath}`
-        : (policyBlock.summary || policyBlock.hint || '');
-      return {
-        message: [
-          '这一步需要你确认后我才能继续。',
-          detail ? `\n${detail}` : ''
-        ].join(''),
-        summary: '等待确认'
-      };
-    }
-    const detail = policyBlock.requestedPath
-      ? `Requested scope: ${policyBlock.requestedPath}`
-      : (policyBlock.summary || policyBlock.hint || '');
+    // Explain WHAT needs confirming, WHY (risk), and HOW to proceed — instead of
+    // surfacing the opaque `mutating_tool_requires_confirmation` reason code,
+    // which left the user with no idea what they were approving.
+    const description = describeConfirmationAction(policyBlock, language === 'zh-CN' ? 'zh-CN' : 'en');
     return {
-      message: [
-        'I need your confirmation before I can continue with this action.',
-        detail ? `\n\n${detail}` : ''
-      ].join(''),
-      summary: 'Waiting for confirmation'
+      message: description,
+      summary: language === 'zh-CN' ? '等待确认' : 'Waiting for confirmation'
     };
   }
 
