@@ -1,3 +1,5 @@
+import path from 'node:path';
+
 // Single source of truth for the conversation-level "auto-approve / yolo" gate.
 //
 // When the user grants blanket consent, the supervisor's per-tool confirmation
@@ -62,6 +64,101 @@ export function getAutoApproveToolsState(conversation = null) {
   return Boolean(conversation?.metadata?.assistantCore?.autoApproveTools);
 }
 
+// ---------------------------------------------------------------------------
+// Prompt-driven sticky READ grants.
+//
+// The user model: file access outside the workspace (and outside .cligate,
+// which is always read+write) is granted in natural language, not via per-call
+// approval cards. Saying "默认可读C盘" makes the whole C: drive readable for the
+// rest of the conversation with no further prompts. This grants READ ONLY —
+// writes outside the workspace/.cligate still go through the confirmation gate,
+// because "需要写的时候又需要请求权限".
+//
+// Detection is deliberately conservative: a message must contain BOTH a read/
+// access-intent verb AND an explicit drive ("C盘") or absolute path, and must
+// not be a denial, to avoid accidentally widening the read surface.
+
+const READ_GRANT_INTENT_PATTERNS = Object.freeze([
+  /(默认\s*)?(可以|可)?\s*(读取|读|访问|查看)\s*(权限)?/,
+  /\b(read|access)\b/i
+]);
+
+const READ_GRANT_DENY_PATTERNS = Object.freeze([
+  /(不\s*(可|能|要|允许|准)?\s*(读取|读|访问|查看))/,
+  /(别|禁止|不准)\s*(读取|读|访问|查看)/,
+  /\b(do\s+not|don'?t|never)\s+(read|access)\b/i
+]);
+
+// "C盘" / "c 盘" → C:\ ; tolerate a leading non-letter so "读C盘" matches.
+const DRIVE_GRANT_PATTERN = /(?:^|[^a-zA-Z])([a-zA-Z])\s*盘/g;
+// Windows ("C:\foo", "D:/bar") or POSIX ("/home/x") absolute paths. Stops at
+// whitespace and common CJK/ASCII punctuation so trailing words aren't swallowed.
+const ABSOLUTE_PATH_PATTERN = /([a-zA-Z]:[\\/][^\s，。；、,;："'）)]*|\/[a-zA-Z0-9._\-/]+)/g;
+
+export function parseGrantedReadRoots(text = '') {
+  const normalized = String(text || '').trim();
+  if (!normalized) return [];
+  if (!READ_GRANT_INTENT_PATTERNS.some((pattern) => pattern.test(normalized))) {
+    return [];
+  }
+  if (READ_GRANT_DENY_PATTERNS.some((pattern) => pattern.test(normalized))) {
+    return [];
+  }
+
+  const roots = new Set();
+
+  const absMatcher = new RegExp(ABSOLUTE_PATH_PATTERN);
+  let absMatch;
+  while ((absMatch = absMatcher.exec(normalized)) !== null) {
+    const candidate = String(absMatch[1] || '').trim();
+    if (candidate.length >= 3) {
+      roots.add(path.resolve(candidate));
+    }
+  }
+
+  const driveMatcher = new RegExp(DRIVE_GRANT_PATTERN);
+  let driveMatch;
+  while ((driveMatch = driveMatcher.exec(normalized)) !== null) {
+    const letter = String(driveMatch[1] || '').trim().toUpperCase();
+    if (letter) {
+      roots.add(path.resolve(`${letter}:\\`));
+    }
+  }
+
+  return [...roots];
+}
+
+// Pure metadata builder — merges newly granted read roots into the persisted
+// conversation-level list (dedup, store-agnostic). Mirrors
+// buildAutoApproveToolsMetadata so the caller owns the store.
+export function buildGrantedReadRootsMetadata(conversation = null, newRoots = []) {
+  const current = (conversation?.metadata && typeof conversation.metadata === 'object')
+    ? conversation.metadata
+    : {};
+  const currentAssistantCore = (current.assistantCore && typeof current.assistantCore === 'object')
+    ? current.assistantCore
+    : {};
+  const existing = Array.isArray(currentAssistantCore.grantedReadRoots)
+    ? currentAssistantCore.grantedReadRoots
+    : [];
+  const merged = [...new Set([
+    ...existing.map((entry) => String(entry || '').trim()).filter(Boolean),
+    ...(Array.isArray(newRoots) ? newRoots : []).map((entry) => String(entry || '').trim()).filter(Boolean)
+  ])];
+  return {
+    ...current,
+    assistantCore: {
+      ...currentAssistantCore,
+      grantedReadRoots: merged
+    }
+  };
+}
+
+export function getGrantedReadRoots(conversation = null) {
+  const roots = conversation?.metadata?.assistantCore?.grantedReadRoots;
+  return Array.isArray(roots) ? roots.map((entry) => String(entry || '').trim()).filter(Boolean) : [];
+}
+
 // Pure metadata builder — returns the merged `metadata` object to persist. The
 // caller owns the store (chat-ui vs channel conversation store), so this stays
 // store-agnostic and side-effect free.
@@ -103,5 +200,8 @@ export default {
   parseAssistantPermissionCommand,
   getAutoApproveToolsState,
   buildAutoApproveToolsMetadata,
-  buildAutoApproveAcknowledgement
+  buildAutoApproveAcknowledgement,
+  parseGrantedReadRoots,
+  buildGrantedReadRootsMetadata,
+  getGrantedReadRoots
 };

@@ -548,12 +548,21 @@ export class AssistantReactEngine {
       //     (editing.md, pptxgenjs.md, scripts/) even when the workspace cwd
       //     lives on a different drive than ~/.cligate/skills/<name>/.
       const autoApproveAll = conversation?.metadata?.assistantCore?.autoApproveTools === true;
-      const extraReadRoots = (workingRun?.metadata?.skills?.active || [])
+      const activeSkillReadRoots = (workingRun?.metadata?.skills?.active || [])
         .map((skill) => {
           const skillPath = String(skill?.pathToSkillMd || '').trim();
           return skillPath ? path.dirname(skillPath) : '';
         })
         .filter(Boolean);
+      // Sticky read roots the user granted in natural language ("可读C盘") earlier
+      // in this conversation. Persisted on the conversation, applied to every
+      // run so the grant survives short follow-ups and fresh runs.
+      const grantedReadRoots = Array.isArray(conversation?.metadata?.assistantCore?.grantedReadRoots)
+        ? conversation.metadata.assistantCore.grantedReadRoots
+            .map((entry) => String(entry || '').trim())
+            .filter(Boolean)
+        : [];
+      const extraReadRoots = [...new Set([...activeSkillReadRoots, ...grantedReadRoots])];
 
       for (const toolCall of completion.toolCalls) {
         const toolStartedAt = Date.now();

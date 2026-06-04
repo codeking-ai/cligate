@@ -97,6 +97,12 @@ export class AssistantToolPolicyService {
     const skipPathCheck = isDesktopTool(tool)
       || isCurrentConversationDelivery(tool, input, context);
 
+    // Track whether a mutating call targets ONLY the always-writable extra
+    // roots (.cligate). Those are the software's own dir — writes there need no
+    // per-call confirmation, mirroring "默认可读可写可操作".
+    let mutatingPathCount = 0;
+    let autoWritablePathCount = 0;
+
     if (!skipPathCheck) {
       for (const rawPath of collectPathInputs(input)) {
         let resolved;
@@ -165,11 +171,21 @@ export class AssistantToolPolicyService {
         }
         if (tool.mutating) {
           decision.grantedPermissions.write.push(resolved);
+          mutatingPathCount += 1;
+          if (this.workspaceGuard.isPathWithinExtraWriteRoot(resolved)) {
+            autoWritablePathCount += 1;
+          }
         } else {
           decision.grantedPermissions.read.push(resolved);
         }
       }
     }
+
+    // A mutating call whose every path lands inside an always-writable extra
+    // root (.cligate) is pre-authorized — skip the confirmation gate below.
+    const writeIsAutoApproved = tool.mutating
+      && mutatingPathCount > 0
+      && mutatingPathCount === autoWritablePathCount;
 
     if (tool.mutating && !this.allowMutatingTools) {
       return {
@@ -182,6 +198,7 @@ export class AssistantToolPolicyService {
     if (
       (tool.requiresApproval || tool.mutating)
       && !effectiveApproved
+      && !writeIsAutoApproved
       && !isDesktopTool(tool)
       && !isCurrentConversationDelivery(tool, input, context)
     ) {

@@ -30,6 +30,7 @@ import { bindConversationToRuntimeStart } from './conversation-runtime-binding.j
 import assistantPendingActionStore from './pending-action-store.js';
 import { ensurePendingAssistantAction } from './pending-action-resolver.js';
 import assistantRunEventStore from './run-event-store.js';
+import { parseGrantedReadRoots, buildGrantedReadRootsMetadata } from './auto-approve.js';
 
 // CliGate Assistant mainline entry.
 // /cligate, assistant runs, async closure, and observability should converge on assistant-core + assistant-agent.
@@ -865,6 +866,21 @@ export class AssistantModeService {
         conversation: nextConversation,
         assistantSession
       };
+    }
+
+    // Prompt-driven sticky READ grants: "默认可读C盘" / "可以读取 D:\\data" widen the
+    // assistant's read surface for the rest of this conversation without any
+    // per-call approval. Detect here (the single chokepoint for chat-ui,
+    // channels AND scheduled runs), persist onto the conversation, and let the
+    // ReAct engine fold them into extraReadRoots. Writes stay gated.
+    const grantedReadRoots = parseGrantedReadRoots(runText);
+    if (grantedReadRoots.length > 0) {
+      const patchedConversation = this.patchConversation(conversation, {
+        metadata: buildGrantedReadRootsMetadata(conversation, grantedReadRoots)
+      });
+      if (patchedConversation) {
+        conversation = patchedConversation;
+      }
     }
 
     // Skill stickiness: each new assistant run starts with empty metadata, which

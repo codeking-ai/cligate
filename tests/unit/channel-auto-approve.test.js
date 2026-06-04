@@ -5,11 +5,15 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
+import { resolve } from 'node:path';
 import {
   hasStickyApprovalPhrase,
   parseAssistantPermissionCommand,
   getAutoApproveToolsState,
-  buildAutoApproveToolsMetadata
+  buildAutoApproveToolsMetadata,
+  parseGrantedReadRoots,
+  buildGrantedReadRootsMetadata,
+  getGrantedReadRoots
 } from '../../src/assistant-core/auto-approve.js';
 import { AgentChannelConversationStore } from '../../src/agent-channels/conversation-store.js';
 import { AgentChannelDeliveryStore } from '../../src/agent-channels/delivery-store.js';
@@ -31,6 +35,32 @@ test('hasStickyApprovalPhrase matches blanket-consent phrasing and rejects denia
   assert.equal(hasStickyApprovalPhrase('继续'), false);
   // Explicit denial wins.
   assert.equal(hasStickyApprovalPhrase('我不同意所有这些'), false);
+});
+
+test('parseGrantedReadRoots extracts drive + absolute path grants from natural language', () => {
+  // Drive phrasing → whole-drive read root.
+  assert.deepEqual(parseGrantedReadRoots('默认可读C盘目录'), [resolve('C:\\')]);
+  assert.deepEqual(parseGrantedReadRoots('以后可以读 D盘'), [resolve('D:\\')]);
+  // Absolute path grant.
+  assert.deepEqual(parseGrantedReadRoots('允许访问 D:\\data\\reports'), [resolve('D:\\data\\reports')]);
+  // No read-intent verb → no grant (avoids over-widening on incidental paths).
+  assert.deepEqual(parseGrantedReadRoots('文章内容来自 D:\\github\\proxypool-hub'), []);
+  // Denial must never grant.
+  assert.deepEqual(parseGrantedReadRoots('不允许读取C盘'), []);
+  // Empty / irrelevant.
+  assert.deepEqual(parseGrantedReadRoots('继续执行'), []);
+});
+
+test('buildGrantedReadRootsMetadata merges + dedups granted roots onto the conversation', () => {
+  const conv = { metadata: { assistantCore: { grantedReadRoots: [resolve('C:\\')] } } };
+  const metadata = buildGrantedReadRootsMetadata(conv, [resolve('C:\\'), resolve('D:\\data')]);
+  assert.deepEqual(metadata.assistantCore.grantedReadRoots, [resolve('C:\\'), resolve('D:\\data')]);
+  // Preserves other assistantCore fields and outer metadata.
+  const conv2 = { metadata: { foo: 1, assistantCore: { autoApproveTools: true } } };
+  const metadata2 = buildGrantedReadRootsMetadata(conv2, [resolve('E:\\x')]);
+  assert.equal(metadata2.foo, 1);
+  assert.equal(metadata2.assistantCore.autoApproveTools, true);
+  assert.deepEqual(getGrantedReadRoots({ metadata: metadata2 }), [resolve('E:\\x')]);
 });
 
 test('parseAssistantPermissionCommand recognises /yolo and /safe', () => {

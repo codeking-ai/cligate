@@ -1241,7 +1241,8 @@ export class AgentOrchestratorMessageService {
     runId,
     title,
     bodyText,
-    isFailure = false
+    isFailure = false,
+    needsAttention = false
   } = {}) {
     const targets = this._resolveScheduledTaskNotifyTargets(scheduledTask);
     if (targets.length === 0) {
@@ -1250,7 +1251,9 @@ export class AgentOrchestratorMessageService {
     const isZh = /[㐀-鿿]/.test(String(bodyText || title || ''));
     const header = isFailure
       ? (isZh ? `⚠️ 定时任务失败：${title}` : `⚠️ Scheduled task failed: ${title}`)
-      : (isZh ? `⏰ 定时任务：${title}` : `⏰ Scheduled task: ${title}`);
+      : (needsAttention
+          ? (isZh ? `⏳ 定时任务待处理：${title}` : `⏳ Scheduled task needs you: ${title}`)
+          : (isZh ? `⏰ 定时任务：${title}` : `⏰ Scheduled task: ${title}`));
     const text = `${header}\n\n${String(bodyText || '').trim()}`;
 
     const results = [];
@@ -1285,6 +1288,7 @@ export class AgentOrchestratorMessageService {
                   scheduledTaskId: scheduledTask.id,
                   scheduledTaskRunId: runId,
                   isFailure: Boolean(isFailure),
+                  needsAttention: Boolean(needsAttention),
                   createdAt: new Date().toISOString()
                 }
               ]
@@ -1313,7 +1317,8 @@ export class AgentOrchestratorMessageService {
             sourceType: 'scheduled_task',
             scheduledTaskId: scheduledTask.id,
             scheduledTaskRunId: runId,
-            isFailure: Boolean(isFailure)
+            isFailure: Boolean(isFailure),
+            needsAttention: Boolean(needsAttention)
           },
           message: { text }
         });
@@ -1385,13 +1390,24 @@ export class AgentOrchestratorMessageService {
       // mode (defaults to 'direct-runtime'), so seed it here. The scope
       // conversation is the assistant's dedicated home for this task, so
       // 'assistant' is always the correct mode.
-      if (getAssistantControlMode(scopeConv) !== ASSISTANT_CONTROL_MODE.ASSISTANT) {
-        const assistantCore = {
-          ...(scopeConv.metadata?.assistantCore || {}),
-          controlMode: ASSISTANT_CONTROL_MODE.ASSISTANT
-        };
+      // The scope conversation is the assistant's dedicated, unattended home for
+      // this task — there is no human watching it to click "确认" on a write.
+      // Force ASSISTANT control mode AND auto-approve so the run does not park
+      // at waiting_user on the first mutating tool (the昨晚 failure: it stopped
+      // at write_file article.md and silently sat there). This honors the
+      // task's own intent ("你拥有所有的权限…默认通过，不必问我"). Workspace-/
+      // .cligate-external WRITES that the policy can't satisfy still surface as
+      // needs-attention notifications below.
+      const desiredAssistantCore = {
+        ...(scopeConv.metadata?.assistantCore || {}),
+        controlMode: ASSISTANT_CONTROL_MODE.ASSISTANT,
+        autoApproveTools: true
+      };
+      const needsModeSeed = getAssistantControlMode(scopeConv) !== ASSISTANT_CONTROL_MODE.ASSISTANT
+        || scopeConv.metadata?.assistantCore?.autoApproveTools !== true;
+      if (needsModeSeed) {
         scopeConv = this.conversationStore.patch(scopeConv.id, {
-          metadata: { ...(scopeConv.metadata || {}), assistantCore }
+          metadata: { ...(scopeConv.metadata || {}), assistantCore: desiredAssistantCore }
         }) || scopeConv;
       }
 
@@ -1440,11 +1456,20 @@ export class AgentOrchestratorMessageService {
       }
 
       const immediateMessage = String(assistantResult?.message || '').trim();
+      // A run that ends parked at waiting_user/waiting_approval is NOT done — it
+      // is blocked on the user. Previously this was reported to the scheduler as
+      // a plain success (rescheduled for the next day, lastError=""), so a stuck
+      // task looked finished and the user got no actionable ping. Flag it so the
+      // notification header reads "待处理" and the scheduler records it as needing
+      // attention rather than silently succeeding.
+      const runStatus = String(assistantResult?.assistantRun?.status || '').trim();
+      const needsAttention = runStatus === 'waiting_user' || runStatus === 'waiting_approval';
       await this._deliverScheduledTaskNotifications({
         scheduledTask,
         runId,
         title: scheduledTask.title,
-        bodyText: immediateMessage || (assistantResult?.type ? `[${assistantResult.type}]` : '(no reply)')
+        bodyText: immediateMessage || (assistantResult?.type ? `[${assistantResult.type}]` : '(no reply)'),
+        needsAttention
       });
 
       return {
@@ -1453,7 +1478,10 @@ export class AgentOrchestratorMessageService {
         scheduledTaskRunId: runId,
         scopeConversationId: scopeConv.id,
         assistantRunId: assistantResult?.assistantRun?.id || '',
-        summary: `assistant invoked: ${userText.slice(0, 80)}`,
+        needsAttention,
+        summary: needsAttention
+          ? `assistant paused (needs user): ${userText.slice(0, 64)}`
+          : `assistant invoked: ${userText.slice(0, 80)}`,
         result: immediateMessage || `assistant ${assistantResult?.type || 'invoked'}`
       };
     }

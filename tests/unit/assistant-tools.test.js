@@ -43,6 +43,55 @@ test('WorkspaceGuard resolves relative paths and blocks workspace escape', () =>
   assert.throws(() => guard.resolvePath('../outside.txt'), /outside the workspace/i);
 });
 
+test('WorkspaceGuard treats extraWriteRoots (.cligate) as always read+write', () => {
+  const workspaceRoot = path.resolve('D:/tmp/ws');
+  const configDir = path.resolve('C:/Users/test/.cligate');
+  const guard = new WorkspaceGuard({ workspaceRoot, extraWriteRoots: [configDir] });
+
+  const skillFile = path.join(configDir, 'skills', 'demo', 'SKILL.md');
+  // Read AND write both resolve inside the config dir even though it is on a
+  // different drive than the workspace.
+  assert.equal(guard.resolvePath(skillFile, { readOnly: true }), skillFile);
+  assert.equal(guard.resolvePath(skillFile), skillFile);
+  assert.equal(guard.isPathWithinExtraWriteRoot(skillFile), true);
+  assert.equal(guard.isPathWithinExtraWriteRoot(path.join(workspaceRoot, 'a.txt')), false);
+  // A path outside both workspace and config dir is still blocked.
+  assert.throws(() => guard.resolvePath('C:/Windows/system32/x.dll'), /outside the workspace/i);
+});
+
+test('AssistantToolPolicyService auto-approves mutating writes inside .cligate but still gates other writes', () => {
+  const workspaceRoot = path.resolve('D:/tmp/cligate-policy-ws');
+  const configDir = path.resolve('C:/Users/test/.cligate');
+  const workspaceGuard = new WorkspaceGuard({ workspaceRoot, extraWriteRoots: [configDir] });
+  const policy = new AssistantToolPolicyService({ workspaceGuard, allowMutatingTools: true });
+
+  // Writing a skill file under .cligate needs NO confirmation.
+  const cligateWrite = policy.evaluateToolCall({
+    tool: { name: 'write_file', mutating: true },
+    invocation: { input: { path: path.join(configDir, 'skills', 'demo', 'article.md') } },
+    context: { cwd: workspaceRoot }
+  });
+  assert.equal(cligateWrite.allowed, true);
+  assert.equal(cligateWrite.requiresApproval, false);
+
+  // Writing inside the workspace still requires per-call confirmation.
+  const workspaceWrite = policy.evaluateToolCall({
+    tool: { name: 'write_file', mutating: true },
+    invocation: { input: { path: 'article.md' } },
+    context: { cwd: workspaceRoot }
+  });
+  assert.equal(workspaceWrite.requiresApproval, true);
+
+  // Reading a granted root passed via context.extraReadRoots passes without approval.
+  const grantedRead = policy.evaluateToolCall({
+    tool: { name: 'read_file', mutating: false },
+    invocation: { input: { path: 'C:/granted/notes.txt' } },
+    context: { cwd: workspaceRoot, extraReadRoots: [path.resolve('C:/granted')] }
+  });
+  assert.equal(grantedRead.allowed, true);
+  assert.equal(grantedRead.requiresApproval, false);
+});
+
 test('AssistantToolPolicyService denies outside-workspace paths and requires approval for mutating tools', () => {
   const workspaceRoot = path.resolve('D:/tmp/policy-workspace');
   const workspaceGuard = new WorkspaceGuard({ workspaceRoot });
