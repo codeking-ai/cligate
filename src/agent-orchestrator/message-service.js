@@ -17,6 +17,13 @@ import { listSupervisorTaskRecords } from './supervisor-task-memory.js';
 import stateCoordinator from '../assistant-core/domain/state-coordinator.js';
 import agentChannelConversationStore from '../agent-channels/conversation-store.js';
 import agentChannelDeliverySender from '../agent-channels/delivery-sender.js';
+import {
+  listPendingScheduledPrompts,
+  addPendingScheduledPrompt,
+  removePendingScheduledPrompt,
+  buildPendingScheduledPromptsMetadata,
+  selectScheduledPromptForReply
+} from './scheduled-task-prompts.js';
 
 function parseLeadingCommand(input) {
   const text = String(input || '').trim();
@@ -1208,6 +1215,202 @@ export class AgentOrchestratorMessageService {
     return store.listByConversation(String(conversationId || '').trim(), { limit, states });
   }
 
+  // Lazily build (and cache) the AssistantModeService used to drive scheduled
+  // `invoke_assistant` runs in their scope conversation. We import dynamically
+  // to avoid a static import cycle (mode-service statically imports this
+  // service), and INSTANTIATE it (the default export is the class). Tests may
+  // pre-set `_scheduledAssistantModeService` to inject a stub. Shared by
+  // runScheduledTask AND the resume bridge so both drive the SAME instance.
+  async _getScheduledAssistantModeService() {
+    if (!this._scheduledAssistantModeService) {
+      const { default: AssistantModeService } = await import('../assistant-core/mode-service.js');
+      this._scheduledAssistantModeService = new AssistantModeService({
+        conversationStore: this.conversationStore,
+        messageService: this
+      });
+    }
+    return this._scheduledAssistantModeService;
+  }
+
+  // Is the scope conversation's most recent assistant run still parked waiting
+  // on the user? Used to prune stale resume bindings so a reply can never
+  // accidentally kick off a fresh execution of an already-finished task.
+  async _isScopeRunWaiting(scopeConversation = null) {
+    const lastRunId = String(scopeConversation?.metadata?.assistantCore?.lastRunId || '').trim();
+    if (!lastRunId) return false;
+    try {
+      const service = await this._getScheduledAssistantModeService();
+      const run = service?.assistantRunStore?.get?.(lastRunId) || null;
+      const status = String(run?.status || '').trim();
+      return status === 'waiting_user' || status === 'waiting_approval';
+    } catch {
+      return false;
+    }
+  }
+
+  // Persist the resume binding on every notify-target conversation when a
+  // scheduled run pauses on the user (needsAttention), or clear it once the run
+  // is no longer waiting. Keyed by scheduledTaskId so re-fires replace cleanly.
+  _syncScheduledTaskPromptBinding(scheduledTask = {}, { scopeConversationId = '', runId = '', waiting = false } = {}) {
+    const targets = this._resolveScheduledTaskNotifyTargets(scheduledTask);
+    for (const target of targets) {
+      const conversation = this.conversationStore?.get?.(target.conversationId) || null;
+      if (!conversation?.id) continue;
+      const metadata = waiting
+        ? addPendingScheduledPrompt(conversation, {
+            scheduledTaskId: scheduledTask.id,
+            scopeConversationId: String(scopeConversationId || '').trim(),
+            runId: String(runId || '').trim(),
+            title: String(scheduledTask.title || '').trim(),
+            createdAt: new Date().toISOString()
+          })
+        : removePendingScheduledPrompt(conversation, scheduledTask.id);
+      try {
+        this.conversationStore.patch(conversation.id, { metadata });
+      } catch {
+        // best-effort — a failed binding write must not break the run/notify path
+      }
+    }
+  }
+
+  /**
+   * Scheduled-task RESUME BRIDGE.
+   *
+   * A scheduled `invoke_assistant` run lives in a hidden scope conversation. If
+   * it pauses on the user (waiting_user/approval), we recorded a binding on the
+   * notify conversation. When the user replies there, route that reply back to
+   * the paused run in its scope conversation — NOT to the notify conversation's
+   * own focus task (the昨晚 mis-route).
+   *
+   * Safety rules (the user's concern about concurrent tasks):
+   *  - prune bindings whose scope run is no longer waiting (never resurrect a
+   *    finished task into a fresh execution);
+   *  - exactly one waiting task → resume it;
+   *  - several waiting → require an unambiguous title match, otherwise ASK which
+   *    one (never guess, never blanket-resolve);
+   *  - resuming consumes/updates the binding based on the new run status.
+   *
+   * Returns a response object to short-circuit normal routing, or `null` when
+   * there is nothing to resume (caller proceeds with its usual handling).
+   */
+  async maybeResumeScheduledTaskFromReply({ conversation = null, text = '' } = {}) {
+    const notifyConv = conversation?.id
+      ? (this.conversationStore?.get?.(conversation.id) || conversation)
+      : conversation;
+    if (!notifyConv?.id) return null;
+    const reply = String(text || '').trim();
+    if (!reply) return null;
+
+    const prompts = listPendingScheduledPrompts(notifyConv);
+    if (prompts.length === 0) return null;
+
+    // Keep only bindings whose scope run is genuinely still waiting.
+    const live = [];
+    for (const prompt of prompts) {
+      const scopeConv = this.conversationStore?.get?.(prompt.scopeConversationId) || null;
+      if (scopeConv?.id && await this._isScopeRunWaiting(scopeConv)) {
+        live.push({ prompt, scopeConv });
+      }
+    }
+    if (live.length !== prompts.length) {
+      try {
+        this.conversationStore.patch(notifyConv.id, {
+          metadata: buildPendingScheduledPromptsMetadata(notifyConv, live.map((entry) => entry.prompt))
+        });
+      } catch {
+        // best-effort prune
+      }
+    }
+    if (live.length === 0) return null;
+
+    const selection = selectScheduledPromptForReply(live.map((entry) => entry.prompt), reply);
+    if (!selection.match) {
+      if (selection.ambiguous) {
+        const isZh = /[㐀-鿿]/.test(reply) || live.some((entry) => /[㐀-鿿]/.test(entry.prompt.title));
+        const lines = live.map((entry, index) => `${index + 1}. ${entry.prompt.title || entry.prompt.scheduledTaskId}`);
+        const message = isZh
+          ? `你有 ${live.length} 个定时任务正在等待你的回复。请带上任务名再回复一次：\n${lines.join('\n')}`
+          : `${live.length} scheduled tasks are waiting for your reply. Reply again and include the task title:\n${lines.join('\n')}`;
+        return {
+          type: 'scheduled_task_resume_clarify',
+          message,
+          conversation: notifyConv,
+          prompts: live.map((entry) => entry.prompt)
+        };
+      }
+      return null;
+    }
+
+    const target = live.find((entry) => entry.prompt.scheduledTaskId === selection.match.scheduledTaskId);
+    const scopeConv = target.scopeConv;
+    const scheduledTask = this.stateCoordinator?.scheduledTaskStore?.get?.(selection.match.scheduledTaskId)
+      || { id: selection.match.scheduledTaskId, title: selection.match.title, payload: {} };
+    const title = String(scheduledTask.title || target.prompt.title || selection.match.scheduledTaskId).trim();
+
+    const service = await this._getScheduledAssistantModeService();
+    let resumeResult = null;
+    let resumeError = null;
+    try {
+      resumeResult = await service.maybeHandleMessage({
+        conversation: scopeConv,
+        text: reply,
+        defaultRuntimeProvider: String(scheduledTask?.payload?.provider || 'codex').trim() || 'codex',
+        model: String(scheduledTask?.payload?.model || '').trim(),
+        executionMode: 'sync'
+      });
+    } catch (err) {
+      resumeError = err;
+    }
+
+    const newStatus = String(resumeResult?.assistantRun?.status || '').trim();
+    const stillWaiting = !resumeError && (newStatus === 'waiting_user' || newStatus === 'waiting_approval');
+    const latestNotifyConv = this.conversationStore?.get?.(notifyConv.id) || notifyConv;
+    const nextMetadata = stillWaiting
+      ? addPendingScheduledPrompt(latestNotifyConv, {
+          scheduledTaskId: selection.match.scheduledTaskId,
+          scopeConversationId: scopeConv.id,
+          runId: resumeResult?.assistantRun?.id || target.prompt.runId,
+          title,
+          createdAt: new Date().toISOString()
+        })
+      : removePendingScheduledPrompt(latestNotifyConv, selection.match.scheduledTaskId);
+    let updatedNotifyConv = latestNotifyConv;
+    try {
+      updatedNotifyConv = this.conversationStore.patch(notifyConv.id, { metadata: nextMetadata }) || latestNotifyConv;
+    } catch {
+      // best-effort binding update
+    }
+
+    const isZh = /[㐀-鿿]/.test(reply) || /[㐀-鿿]/.test(title);
+    if (resumeError) {
+      const message = isZh
+        ? `把你的回复转给定时任务「${title}」时出错：${String(resumeError?.message || resumeError).slice(0, 300)}`
+        : `Failed to forward your reply to scheduled task "${title}": ${String(resumeError?.message || resumeError).slice(0, 300)}`;
+      return {
+        type: 'scheduled_task_resume_failed',
+        message,
+        isError: true,
+        conversation: updatedNotifyConv,
+        scheduledTaskId: selection.match.scheduledTaskId
+      };
+    }
+
+    const body = String(resumeResult?.message || '').trim();
+    const header = isZh
+      ? `↩️ 已把你的回复转给定时任务「${title}」并继续：`
+      : `↩️ Forwarded your reply to scheduled task "${title}" and continued:`;
+    return {
+      type: 'scheduled_task_resumed',
+      message: body ? `${header}\n\n${body}` : header,
+      conversation: updatedNotifyConv,
+      scheduledTaskId: selection.match.scheduledTaskId,
+      scopeConversationId: scopeConv.id,
+      assistantRun: resumeResult?.assistantRun || null,
+      status: newStatus,
+      stillWaiting
+    };
+  }
+
   /**
    * Resolve the targets a scheduled-task push should fan out to. Honors the
    * new `notifyTargets[]` shape and migrates the legacy single
@@ -1422,14 +1625,7 @@ export class AgentOrchestratorMessageService {
       let assistantResult = null;
       let assistantError = null;
       try {
-        let assistantModeService = this._scheduledAssistantModeService;
-        if (!assistantModeService) {
-          const { default: AssistantModeService } = await import('../assistant-core/mode-service.js');
-          assistantModeService = this._scheduledAssistantModeService = new AssistantModeService({
-            conversationStore: this.conversationStore,
-            messageService: this
-          });
-        }
+        const assistantModeService = await this._getScheduledAssistantModeService();
         assistantResult = await assistantModeService.maybeHandleMessage({
           conversation: scopeConv,
           text: userText,
@@ -1443,6 +1639,13 @@ export class AgentOrchestratorMessageService {
       }
 
       if (assistantError) {
+        // A failed run is terminal — clear any prior resume binding so a later
+        // reply can't resurrect it.
+        this._syncScheduledTaskPromptBinding(scheduledTask, {
+          scopeConversationId: scopeConv.id,
+          runId,
+          waiting: false
+        });
         // Notify failure to all notifyTargets — the user should know.
         const failureBody = String(assistantError?.message || assistantError || 'unknown failure').slice(0, 500);
         await this._deliverScheduledTaskNotifications({
@@ -1464,6 +1667,14 @@ export class AgentOrchestratorMessageService {
       // attention rather than silently succeeding.
       const runStatus = String(assistantResult?.assistantRun?.status || '').trim();
       const needsAttention = runStatus === 'waiting_user' || runStatus === 'waiting_approval';
+      // Record (or clear) the resume binding on the notify conversation(s) so a
+      // reply there can be routed back to THIS paused run rather than the notify
+      // conversation's own focus task (the昨晚 mis-route).
+      this._syncScheduledTaskPromptBinding(scheduledTask, {
+        scopeConversationId: scopeConv.id,
+        runId: assistantResult?.assistantRun?.id || runId,
+        waiting: needsAttention
+      });
       await this._deliverScheduledTaskNotifications({
         scheduledTask,
         runId,

@@ -235,6 +235,49 @@ export class AgentChannelRouter {
       }) || conversation;
     }
 
+    // Scheduled-task RESUME BRIDGE. If this conversation is the notify target of
+    // a scheduled run that paused on the user, route this reply back to that
+    // paused run (in its hidden scope conversation) instead of letting it fall
+    // through to this conversation's own focus task — the昨晚 mis-route where
+    // "全部同意" resumed an unrelated stale task. Runs BEFORE the pending-action
+    // and assistant dispatch below. Returns null when nothing is waiting.
+    const scheduledResume = await agentOrchestratorMessageService.maybeResumeScheduledTaskFromReply({
+      conversation,
+      text: message.text
+    });
+    if (scheduledResume) {
+      conversation = scheduledResume.conversation || conversation;
+      const resumeText = String(scheduledResume.message || '').trim();
+      if (resumeText) {
+        await this.deliverySender.send({
+          conversation,
+          channel: message.channel,
+          payload: {
+            text: resumeText,
+            kind: 'scheduled_task_notification',
+            sourceType: 'scheduled_task',
+            scheduledTaskId: scheduledResume.scheduledTaskId || ''
+          },
+          message: { text: resumeText }
+        });
+      }
+      this.deliveryStore.saveInbound({
+        channel: message.channel,
+        conversationId: conversation.id,
+        sessionId: conversation.activeRuntimeSessionId || null,
+        externalMessageId: message.externalMessageId || '',
+        status: 'sent',
+        payload: {
+          text: message.text || '',
+          messageType: message.messageType || 'text',
+          externalUserId: message.externalUserId || '',
+          externalUserName: message.externalUserName || '',
+          ts: message.ts || null
+        }
+      });
+      return scheduledResume;
+    }
+
     const previousSessionId = conversation.activeRuntimeSessionId || null;
     const latestAssistantPendingAction = conversation?.id
       ? assistantPendingActionStore.findLatestByConversationId(conversation.id)
