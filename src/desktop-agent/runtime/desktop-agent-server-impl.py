@@ -310,6 +310,46 @@ def _is_rdp_session() -> bool:
         return False
 
 
+def _input_desktop_state() -> dict:
+    """Report the desktop currently receiving input. This is the #2 cause
+    (after RDP) of "click reports success but nothing happens": when the
+    session is LOCKED, sitting at the login/UAC secure desktop, or running a
+    screensaver, the input desktop is NOT 'Default' (it is 'Winlogon' or
+    'Screen-saver'). Synthetic mouse/keyboard we send to application windows on
+    the Default desktop is then never delivered. OpenInputDesktop also fails
+    outright when the secure desktop is active and we lack rights, which we
+    likewise treat as locked.
+
+    Returns {input_desktop, interactive, session_locked}. interactive=True only
+    when the input desktop is 'Default' — the one app windows live on."""
+    if not is_windows():
+        return {"input_desktop": "", "interactive": True, "session_locked": False}
+    try:
+        user32 = ctypes.windll.user32
+        DESKTOP_READOBJECTS = 0x0001
+        UOI_NAME = 2
+        user32.OpenInputDesktop.restype = ctypes.c_void_p
+        h_desk = user32.OpenInputDesktop(0, False, DESKTOP_READOBJECTS)
+        if not h_desk:
+            # Cannot open the input desktop — almost always the secure
+            # (Winlogon) desktop while locked / at login / during a UAC prompt.
+            return {"input_desktop": "", "interactive": False, "session_locked": True}
+        try:
+            buf = ctypes.create_unicode_buffer(256)
+            needed = ctypes.c_ulong(0)
+            ok = user32.GetUserObjectInformationW(
+                ctypes.c_void_p(h_desk), UOI_NAME, buf, ctypes.sizeof(buf), ctypes.byref(needed)
+            )
+            name = buf.value if ok else ""
+        finally:
+            user32.CloseDesktop(ctypes.c_void_p(h_desk))
+        interactive = name.lower() == "default"
+        return {"input_desktop": name, "interactive": interactive, "session_locked": not interactive}
+    except Exception:
+        # On any failure, don't block clicks — fall back to "looks usable".
+        return {"input_desktop": "", "interactive": True, "session_locked": False}
+
+
 def _process_integrity_level() -> str:
     """Best-effort string for the agent process's integrity level.
     Returns one of: 'high', 'medium', 'low', 'system', 'unknown'."""
@@ -1907,6 +1947,10 @@ class DesktopAgentHandler(BaseHTTPRequestHandler):
                 # client's pointer sync. The LLM should warn the user up
                 # front instead of blaming UIPI for every failed click.
                 "remote_session": _is_rdp_session(),
+                # session_locked / input_desktop: when the session is locked or
+                # at the secure desktop, clicks to app windows silently fail.
+                # interactive=True only on the 'Default' desktop.
+                **_input_desktop_state(),
             })
             return
         if path == "/active":
@@ -1986,6 +2030,16 @@ class DesktopAgentHandler(BaseHTTPRequestHandler):
                     if not move_status.get("moved", False):
                         skipped = True
                         skipped_reason = skipped_reason or "cursor_did_not_move"
+                    # If the input desktop is not the interactive 'Default'
+                    # desktop (session locked / login / UAC / screensaver),
+                    # synthetic clicks to app windows never land. Skip and say
+                    # so explicitly rather than reporting a hollow success — the
+                    # caller can then tell the user to unlock / restore the
+                    # console session instead of retrying forever.
+                    desk_state = _input_desktop_state()
+                    if desk_state.get("session_locked"):
+                        skipped = True
+                        skipped_reason = skipped_reason or "session_locked_or_secure_desktop"
                     button = str(payload.get("button") or "left")
                     if not skipped:
                         # Cursor was already moved+verified above; tell
@@ -2006,6 +2060,8 @@ class DesktopAgentHandler(BaseHTTPRequestHandler):
                         "moved": move_status.get("moved", False),
                         "moved_to_actual": move_status.get("actual"),
                         "setcursorpos_ok": move_status.get("setcursorpos_ok"),
+                        "input_desktop": desk_state.get("input_desktop"),
+                        "session_locked": desk_state.get("session_locked"),
                         "target": [int(x), int(y)],
                         **meta,
                     }, payload)
