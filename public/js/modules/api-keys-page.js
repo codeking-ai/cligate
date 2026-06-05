@@ -12,6 +12,7 @@ export function createApiKeysPageModule() {
       'zhipu': { name: 'My ZhipuAI Key', key: 'xxxxxxxx.xxxxxxxx', url: 'https://open.bigmodel.cn/api/paas/v4' }
     },
     apiKeysList: [],
+    presetProviders: [],
     apiKeyStats: { totalKeys: 0, activeKeys: 0, totalRequests: 0, totalCost: 0 },
     showAddKeyModal: false,
     newKeyType: 'openai',
@@ -50,7 +51,50 @@ export function createApiKeysPageModule() {
       return 'text-gray-500';
     },
 
+    // Load declarative provider presets (provider-presets.js) and merge them
+    // into the add-key form so new vendors need no frontend code — just data.
+    async loadProviderPresets() {
+      if (this.presetProviders.length) return;
+      const { ok, data } = await this.api('/api/providers/presets');
+      if (!ok || !Array.isArray(data?.presets)) return;
+      this.presetProviders = data.presets;
+      for (const p of data.presets) {
+        if (!this.keyPlaceholders[p.id]) {
+          this.keyPlaceholders[p.id] = {
+            name: `My ${this.providerLabel(p)} Key`,
+            key: p.keyHint || 'API Key',
+            url: p.baseUrl || ''
+          };
+        }
+      }
+    },
+
+    isPresetProvider(type) {
+      return this.presetProviders.some((p) => p.id === type);
+    },
+
+    // Localized provider display name. Accepts a preset object or a type id.
+    // Resolves the preset's i18n `labelKey` via t() (reactive on language
+    // switch), falling back to the neutral `label`.
+    providerLabel(p) {
+      const preset = typeof p === 'string' ? this.presetProviders.find((x) => x.id === p) : p;
+      if (!preset) return typeof p === 'string' ? p : '';
+      if (preset.labelKey) {
+        const translated = this.t(preset.labelKey);
+        if (translated && translated !== preset.labelKey) return translated;
+      }
+      return preset.label || preset.id || '';
+    },
+
+    apiKeyBadgeLabel(type) {
+      const preset = this.presetProviders.find((p) => p.id === type);
+      if (preset) return preset.badge || preset.label;
+      const legacy = { 'azure-openai': 'AZURE', deepseek: 'DEEPSEEK', 'vertex-ai': 'VERTEX', moonshot: 'KIMI', zhipu: 'GLM' };
+      return legacy[type] || String(type || '').toUpperCase();
+    },
+
     async loadApiKeys() {
+      await this.loadProviderPresets();
       const { ok, data } = await this.api('/api/keys');
       if (ok) {
         this.apiKeysList = (data.keys || []).map((key) => ({ ...key, _testing: false }));

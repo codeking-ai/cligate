@@ -1,6 +1,7 @@
 import { readFileSync, writeFileSync, existsSync } from 'fs';
 import { join } from 'path';
 import { CONFIG_DIR } from './account-manager.js';
+import { presetPricing } from './providers/provider-presets.js';
 
 const PRICING_FILE = join(CONFIG_DIR, 'model-pricing.json');
 
@@ -96,6 +97,12 @@ const DEFAULT_PRICING = {
         'deepseek-reasoner': { input: 2.00, output: 8.00, cacheRead: 0.50, cacheWrite: 0 }
     }
 };
+
+// Additively merge declarative preset pricing (provider-presets.js). Existing
+// provider tables are preserved; preset entries only fill in their own ids.
+for (const [provider, table] of Object.entries(presetPricing())) {
+    DEFAULT_PRICING[provider] = { ...(DEFAULT_PRICING[provider] || {}), ...table };
+}
 
 let overrideData = null;
 

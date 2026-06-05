@@ -16,6 +16,8 @@ import { MiniMaxProvider } from './providers/minimax.js';
 import { MoonshotProvider } from './providers/moonshot.js';
 import { ZhipuProvider } from './providers/zhipu.js';
 import { DeepSeekProvider } from './providers/deepseek.js';
+import { PROVIDER_PRESETS } from './providers/provider-presets.js';
+import { makeOpenAICompatibleProvider } from './providers/openai-compatible.js';
 
 const API_KEYS_FILE = join(CONFIG_DIR, 'api-keys.json');
 
@@ -30,6 +32,15 @@ const PROVIDER_CLASSES = {
     zhipu: ZhipuProvider,
     deepseek: DeepSeekProvider
 };
+
+// Additively register declarative presets (provider-presets.js). Presets that
+// name a `providerClass` are left to their bespoke class above; everything else
+// gets the generic OpenAI-compatible class. Never overrides an existing entry.
+for (const preset of PROVIDER_PRESETS) {
+    if (!PROVIDER_CLASSES[preset.id]) {
+        PROVIDER_CLASSES[preset.id] = makeOpenAICompatibleProvider(preset);
+    }
+}
 
 let keysData = null;
 let providerInstances = new Map();

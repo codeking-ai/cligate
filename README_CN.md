@@ -39,7 +39,7 @@ CliGate 是一个本地 AI 控制平面，重点围绕两大能力：
 - Anthropic Messages、OpenAI Chat Completions、OpenAI Responses、Codex、Gemini 兼容端点
 - Claude Code、Codex CLI、Gemini CLI、OpenClaw 的一键配置
 - ChatGPT、Claude、Antigravity 账户池
-- OpenAI、Azure OpenAI、Anthropic、Gemini、Vertex AI、MiniMax、Moonshot、ZhipuAI 等 API Key 池
+- OpenAI、Azure OpenAI、Anthropic、Gemini、Vertex AI、MiniMax、Moonshot、ZhipuAI、DeepSeek、通义千问、OpenRouter 等 API Key 池
 - 路由优先级、按应用绑定、模型映射、免费模型路由
 - 可选本地模型路由，例如 Ollama
 

@@ -1,10 +1,21 @@
 import { getServerSettings } from './server-settings.js';
 import { listAllCredentials, isCredentialAvailable } from './credential-registry.js';
 import { resolveAssignedCredentials } from './app-routing.js';
+import { presetIdsByFormat } from './providers/provider-presets.js';
 
 const OPENAI_CHAT_KEY_TYPES = new Set(['openai', 'azure-openai', 'gemini', 'vertex-ai', 'deepseek']);
 const OPENAI_RESPONSES_KEY_TYPES = new Set(['openai', 'azure-openai', 'gemini', 'vertex-ai', 'deepseek']);
 const ANTHROPIC_MESSAGE_KEY_TYPES = new Set(['anthropic', 'gemini', 'vertex-ai', 'minimax', 'moonshot', 'zhipu', 'deepseek']);
+
+// Declarative `openai_chat` presets (Qwen, OpenRouter) join all three protocol
+// surfaces: the OpenAI chat path directly, Codex via responses-route's generic
+// chat fallback, and Claude Code via the generic provider's sendAnthropicRequest
+// bridge — see docs/multi-provider-integration.zh-CN.md (方案 B).
+for (const id of presetIdsByFormat('openai_chat')) {
+  OPENAI_CHAT_KEY_TYPES.add(id);
+  OPENAI_RESPONSES_KEY_TYPES.add(id);
+  ANTHROPIC_MESSAGE_KEY_TYPES.add(id);
+}
 
 function protocolPreferences(protocol) {
   switch (protocol) {

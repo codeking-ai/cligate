@@ -11,6 +11,7 @@ import { selectKey, recordUsage, recordError, recordRateLimit } from '../api-key
 import { recordRequest } from '../usage-tracker.js';
 import { logger } from '../utils/logger.js';
 import { logRequest } from '../request-logger.js';
+import { presetIdsByFormat } from '../providers/provider-presets.js';
 
 const MAX_RETRIES = 3;
 
@@ -26,7 +27,7 @@ export async function handleGatewayChat(req, res) {
     // Try providers in order of preference
     const typesToTry = preferredType
         ? [preferredType]
-        : ['openai', 'azure-openai', 'gemini', 'vertex-ai', 'deepseek', 'minimax', 'moonshot', 'zhipu'];
+        : ['openai', 'azure-openai', 'gemini', 'vertex-ai', 'deepseek', 'minimax', 'moonshot', 'zhipu', ...presetIdsByFormat('openai_chat')];
 
     for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
         for (const type of typesToTry) {

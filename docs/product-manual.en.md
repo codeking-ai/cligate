@@ -170,6 +170,9 @@ Supported actions include:
 - MiniMax
 - Moonshot
 - ZhipuAI
+- DeepSeek
+- Qwen (DashScope)
+- OpenRouter
 
 Enabled keys can participate in routing and can also be selected directly in `Chat`.
 

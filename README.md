@@ -39,7 +39,7 @@ It keeps both layers local-first on `localhost`: the assistant acts like a perso
 - Anthropic Messages, OpenAI Chat Completions, OpenAI Responses, Codex, and Gemini-compatible endpoints
 - One-click configuration for Claude Code, Codex CLI, Gemini CLI, and OpenClaw
 - ChatGPT, Claude, and Antigravity account pools
-- API key pools for OpenAI, Azure OpenAI, Anthropic, Gemini, Vertex AI, MiniMax, Moonshot, and ZhipuAI
+- API key pools for OpenAI, Azure OpenAI, Anthropic, Gemini, Vertex AI, MiniMax, Moonshot, ZhipuAI, DeepSeek, Qwen, and OpenRouter
 - Routing priority, app-level bindings, provider model mapping, and free-model routing
 - Optional local model routing through Ollama-style runtimes
 

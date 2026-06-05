@@ -12,6 +12,7 @@ import {
     validateApiKey,
     getStats
 } from '../api-key-manager.js';
+import { presetUiList } from '../providers/provider-presets.js';
 
 export function handleListApiKeys(req, res) {
     const keys = listApiKeys();
@@ -70,4 +71,13 @@ export async function handleValidateApiKey(req, res) {
 
 export function handleGetApiKeyStats(req, res) {
     res.json(getStats());
+}
+
+/**
+ * GET /api/providers/presets
+ * Declarative provider presets (provider-presets.js) so the dashboard can
+ * render the add-key form data-driven instead of hardcoding each vendor.
+ */
+export function handleListProviderPresets(req, res) {
+    res.json({ presets: presetUiList() });
 }

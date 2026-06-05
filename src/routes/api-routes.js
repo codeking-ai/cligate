@@ -18,7 +18,7 @@ import { handleListModels, handleAccountModels, handleAccountUsage } from './mod
 import { handleGetHaikuModel, handleSetHaikuModel, handleGetKiloModels, handleGetAccountStrategy, handleSetAccountStrategy, handleGetRoutingPriority, handleSetRoutingPriority, handleGetRoutingMode, handleSetRoutingMode, handleGetStrictCodexCompatibility, handleSetStrictCodexCompatibility, handleGetStrictTranslatorCompatibility, handleSetStrictTranslatorCompatibility, handleGetAppRouting, handleSetAppRouting, handleGetEnableFreeModels, handleSetEnableFreeModels, handleGetAssistantAgentConfig, handleSetAssistantAgentConfig, handleGetLocalModelRoutingEnabled, handleSetLocalModelRoutingEnabled, handleGetDiscoveredModels, handleRefreshDiscoveredModels } from './settings-route.js';
 import { handleGetLogs, handleStreamLogs } from './logs-route.js';
 import { handleGetClaudeConfig, handleSetProxyMode, handleSetDirectMode, handleSetClaudeApiEndpoint } from './claude-config-route.js';
-import { handleListApiKeys, handleGetApiKey, handleAddApiKey, handleRemoveApiKey, handleUpdateApiKey, handleValidateApiKey, handleGetApiKeyStats } from './api-keys-route.js';
+import { handleListApiKeys, handleGetApiKey, handleAddApiKey, handleRemoveApiKey, handleUpdateApiKey, handleValidateApiKey, handleGetApiKeyStats, handleListProviderPresets } from './api-keys-route.js';
 import { handleGetUsageOverview, handleGetUsageHistory, handleGetDailyStats, handleGetMonthlyStats, handleGetProviderStats, handleGetModelStats, handleGetAccountStats } from './usage-route.js';
 import { handleGetPricing, handleUpdatePricing, handleResetPricing } from './pricing-route.js';
 import { handleGatewayChat, handleGatewayMessages, handleListProviders } from './gateway-route.js';
@@ -379,6 +379,7 @@ export function registerApiRoutes(app, { port }) {
   app.delete('/api/keys/:id', handleRemoveApiKey);
   app.post('/api/keys/:id/validate', handleValidateApiKey);
   app.get('/api/keys/stats', handleGetApiKeyStats);
+  app.get('/api/providers/presets', handleListProviderPresets);
   app.get('/api/keys/:id', handleGetApiKey);
 
   // ─── Usage & Analytics ───────────────────────────────────────────────────

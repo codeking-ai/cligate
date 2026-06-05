@@ -95,9 +95,10 @@
                                                 'bg-purple-500/10 text-purple-400 border border-purple-500/30': key.type === 'vertex-ai',
                                                 'bg-yellow-500/10 text-yellow-400 border border-yellow-500/30': key.type === 'minimax',
                                                 'bg-pink-500/10 text-pink-400 border border-pink-500/30': key.type === 'moonshot',
-                                                'bg-red-500/10 text-red-300 border border-red-500/30': key.type === 'zhipu'
+                                                'bg-red-500/10 text-red-300 border border-red-500/30': key.type === 'zhipu',
+                                                'bg-indigo-500/10 text-indigo-300 border border-indigo-500/30': isPresetProvider(key.type)
                                             }"
-                                            x-text="key.type === 'azure-openai' ? 'AZURE' : key.type === 'deepseek' ? 'DEEPSEEK' : key.type === 'vertex-ai' ? 'VERTEX' : key.type === 'moonshot' ? 'KIMI' : key.type === 'zhipu' ? 'GLM' : key.type.toUpperCase()"></span>
+                                            x-text="apiKeyBadgeLabel(key.type)"></span>
                                     </td>
                                     <td class="py-4"><span class="font-mono text-xs text-gray-500" x-text="key.apiKey"></span></td>
                                     <td class="py-4"><span class="font-mono text-sm text-gray-300" x-text="key.totalRequests"></span></td>

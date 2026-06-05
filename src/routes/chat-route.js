@@ -18,6 +18,7 @@ import { resolveModel } from '../model-mapping.js';
 import { logRequest } from '../request-logger.js';
 import { detectRequestApp, resolveAssignedCredentials, orderAssignedCredentials } from '../app-routing.js';
 import { resolveCredentialForRequest } from '../credential-selector.js';
+import { presetIdsByFormat } from '../providers/provider-presets.js';
 import { markCredentialError, markCredentialRateLimited, markCredentialSuccess, recordRoutingDecision } from '../runtime-state.js';
 import { buildCredentialId } from '../credential-registry.js';
 import { tryHandleLocalChat } from '../local-routing.js';
@@ -53,7 +54,7 @@ export async function handleChatCompletion(req, res) {
   const priority = settings.routingPriority || 'account-first';
   const hasAccounts = listAccounts().total > 0;
   // Try openai, azure-openai, gemini, vertex-ai keys for chat completions
-  const chatKeyTypes = ['openai', 'azure-openai', 'gemini', 'vertex-ai', 'deepseek'];
+  const chatKeyTypes = ['openai', 'azure-openai', 'gemini', 'vertex-ai', 'deepseek', ...presetIdsByFormat('openai_chat')];
   const hasApiKeys = hasKeysForTypes(chatKeyTypes);
   const routingPreview = resolveCredentialForRequest({
     appId,

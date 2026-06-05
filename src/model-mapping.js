@@ -17,6 +17,7 @@
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs';
 import { join } from 'path';
 import { CONFIG_DIR } from './account-manager.js';
+import { presetTierMappings, presetStaticModels, PRESET_BY_ID } from './providers/provider-presets.js';
 
 const MAPPINGS_FILE = join(CONFIG_DIR, 'model-mappings.json');
 
@@ -107,6 +108,11 @@ const STATIC_PROVIDER_MODELS = {
         'deepseek-chat', 'deepseek-reasoner',
     ],
 };
+
+// Additively merge declarative preset tier maps + model lists
+// (provider-presets.js). Existing providers are untouched.
+Object.assign(DEFAULT_PROVIDER_MAPPINGS, presetTierMappings());
+Object.assign(STATIC_PROVIDER_MODELS, presetStaticModels());
 
 // Dynamic model lists populated by model-discovery.js
 const dynamicProviderModels = {};
@@ -255,8 +261,17 @@ function isNativeModel(providerType, model) {
             return m.startsWith('deepseek-') || m === 'deepseek-chat' || m === 'deepseek-reasoner';
         case 'anthropic':
             return m.startsWith('claude-');
-        default:
+        default: {
+            // Declarative presets describe their own pass-through rules so a
+            // model the caller explicitly chose isn't tier-remapped.
+            const preset = PRESET_BY_ID[providerType];
+            if (!preset) return false;
+            if (preset.passthroughModelMatch && m.includes(preset.passthroughModelMatch)) return true;
+            if (Array.isArray(preset.nativeModelPrefixes)) {
+                return preset.nativeModelPrefixes.some((prefix) => m.startsWith(String(prefix).toLowerCase()));
+            }
             return false;
+        }
     }
 }
 

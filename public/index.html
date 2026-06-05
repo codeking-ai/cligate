@@ -485,6 +485,9 @@
                         <option value="minimax">MiniMax</option>
                         <option value="moonshot">Moonshot (Kimi)</option>
                         <option value="zhipu">ZhipuAI (GLM)</option>
+                        <template x-for="p in presetProviders" :key="p.id">
+                            <option :value="p.id" x-text="providerLabel(p)"></option>
+                        </template>
                     </select>
                 </div>
                 <div>

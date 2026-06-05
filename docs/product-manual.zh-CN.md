@@ -170,6 +170,9 @@ CliGate 默认本地运行。最常见的使用路径是：启动服务，添加
 - MiniMax
 - Moonshot
 - ZhipuAI
+- DeepSeek
+- 通义千问（Qwen / DashScope）
+- OpenRouter
 
 启用后的 Key 可以参与系统路由，也可以直接在 `Chat` 中被选为来源。
 
