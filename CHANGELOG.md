@@ -4,6 +4,12 @@ All notable user-facing changes should be documented in this file.
 
 This changelog is maintained from source. Published release artifacts and tags remain the source of truth for shipped binaries and npm packages.
 
+## 1.2.4 - 2026-06-05
+
+### Fixed
+
+- Fixed the desktop app startup failure caused by the missing runtime `js-yaml` dependency in packaged builds.
+
 ## 1.2.3 - 2026-06-05
 
 ### Documentation
