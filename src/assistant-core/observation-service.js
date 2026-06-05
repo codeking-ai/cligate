@@ -897,11 +897,18 @@ export class AssistantObservationService {
       .filter((entry) => entry.kind === 'authorization')
       .flatMap((entry) => Array.isArray(entry.value) ? entry.value : []);
     const recentRuns = this.assistantRunStore.listByConversationId(conversation.id, { limit: 8 });
+    // Recent chat turns are the supervisor's short-term memory of the
+    // conversation. This used to be filtered to channel==='chat-ui', which left
+    // DingTalk / Feishu / Telegram conversations with an EMPTY recent-turn view:
+    // the supervisor then lost track of what it had already done a few turns
+    // earlier (e.g. "already published to CSDN, here is the link") and redid
+    // side-effecting work. summarizeRecentChatTurn is channel-agnostic (it keys
+    // off `direction`), so include EVERY channel and keep a deeper window so the
+    // user's "you should see the last ~10-20 messages" expectation holds.
     const recentChatTurns = deliveries
-      .filter((entry) => String(entry?.channel || '').trim() === 'chat-ui')
       .map(summarizeRecentChatTurn)
       .filter(Boolean)
-      .slice(-8);
+      .slice(-16);
     const recentToolArtifacts = [
       ...buildRecentImageArtifactsFromDeliveries(
         deliveries.filter((entry) => String(entry?.channel || '').trim() === 'chat-ui'),

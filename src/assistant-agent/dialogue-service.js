@@ -323,7 +323,11 @@ export class AssistantDialogueService {
       : null;
     const conversationContext = conversation?.id
       ? this.observationService.getConversationContext(conversation.id, {
-          deliveryLimit: 8,
+          // Deeper window so a long multi-turn task keeps earlier facts in view
+          // (e.g. "already published to CSDN") instead of dropping them after a
+          // few turns and redoing side-effecting work. Feeds recent_chat_turns
+          // (last 16) and conversation_summary.recentDeliveries (last 20).
+          deliveryLimit: 24,
           // Exclude this very run from <active_assistant_runs> so the supervisor
           // never mistakes itself for a concurrent duplicate and cancels itself.
           excludeRunId: run?.id || '',
