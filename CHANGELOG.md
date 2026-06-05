@@ -4,7 +4,7 @@ All notable user-facing changes should be documented in this file.
 
 This changelog is maintained from source. Published release artifacts and tags remain the source of truth for shipped binaries and npm packages.
 
-## Unreleased
+## 1.2.3 - 2026-06-05
 
 ### Documentation
 
