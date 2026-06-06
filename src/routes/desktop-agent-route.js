@@ -1,4 +1,5 @@
 import desktopAgentService from '../desktop-agent/service.js';
+import desktopCaptureSetup from '../desktop-agent/capture-setup.js';
 
 export async function handleGetDesktopAgentStatus(req, res) {
   const payload = await desktopAgentService.getStatus();
@@ -75,10 +76,28 @@ export function handleSetDesktopAgentSettings(req, res) {
   });
 }
 
+// ---- Desktop-capture one-time setup (the "Desktop control" toggle) ----------
+
+export async function handleGetDesktopCaptureSetupStatus(req, res) {
+  res.json(await desktopCaptureSetup.getStatus());
+}
+
+export async function handleEnableDesktopCaptureSetup(req, res) {
+  const autoLogin = req.body?.autoLogin === true;
+  res.json(await desktopCaptureSetup.enable({ autoLogin }));
+}
+
+export async function handleDisableDesktopCaptureSetup(req, res) {
+  res.json(await desktopCaptureSetup.disable());
+}
+
 export default {
   handleGetDesktopAgentStatus,
   handleStartDesktopAgent,
   handleStopDesktopAgent,
   handleGetDesktopAgentSettings,
-  handleSetDesktopAgentSettings
+  handleSetDesktopAgentSettings,
+  handleGetDesktopCaptureSetupStatus,
+  handleEnableDesktopCaptureSetup,
+  handleDisableDesktopCaptureSetup
 };

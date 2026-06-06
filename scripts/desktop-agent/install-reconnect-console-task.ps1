@@ -61,29 +61,37 @@ Copy-Item -Path $srcWorker -Destination $destWorker -Force
 $psExe = Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe'
 if (-not (Test-Path $psExe)) { $psExe = 'powershell.exe' }
 
-# Build the action command. The whole value is passed to schtasks /TR as one
-# argument; inner double-quotes guard paths that may contain spaces.
-$action = '"' + $psExe + '" -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "' + $destWorker + '" -TargetUser "' + $TargetUser + '"'
-
-$channel = 'Microsoft-Windows-TerminalServices-LocalSessionManager/Operational'
-$xpath   = "*[System[Provider[@Name='Microsoft-Windows-TerminalServices-LocalSessionManager'] and (EventID=24)]]"
-
-$schtasksArgs = @(
-    '/Create',
-    '/TN', $TaskName,
-    '/SC', 'ONEVENT',
-    '/EC', $channel,
-    '/MO', $xpath,
-    '/RU', 'SYSTEM',
-    '/RL', 'HIGHEST',
-    '/TR', $action,
-    '/F'
-)
-
+# Register the EVENT-triggered task with PowerShell-native Register-ScheduledTask
+# instead of schtasks.exe. schtasks /SC ONEVENT mangled the event XPath on the
+# command line, and schtasks /Create /XML silently returned exit 0 WITHOUT
+# creating the task — both failure modes were invisible. Register-ScheduledTask
+# builds the event trigger from a CIM object (XPath is a plain property, no
+# quoting) and THROWS a real, logged error if registration fails.
 Write-Host "Registering scheduled task '$TaskName' (runs as SYSTEM on RDP disconnect)..." -ForegroundColor Cyan
-& schtasks.exe @schtasksArgs
-if ($LASTEXITCODE -ne 0) {
-    Write-Error "schtasks failed with exit code $LASTEXITCODE."
+
+$argLine = '-NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "' + $destWorker + '" -TargetUser "' + $TargetUser + '"'
+$action = New-ScheduledTaskAction -Execute $psExe -Argument $argLine
+
+# EventID 24 (session disconnected) on the LocalSessionManager/Operational log.
+$subscription = '<QueryList><Query Id="0" Path="Microsoft-Windows-TerminalServices-LocalSessionManager/Operational"><Select Path="Microsoft-Windows-TerminalServices-LocalSessionManager/Operational">*[System[(EventID=24)]]</Select></Query></QueryList>'
+$trigClass = Get-CimClass -Namespace 'Root/Microsoft/Windows/TaskScheduler' -ClassName 'MSFT_TaskEventTrigger'
+$trigger = New-CimInstance -CimClass $trigClass -ClientOnly
+$trigger.Enabled = $true
+$trigger.Subscription = $subscription
+
+$principal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
+$settings = New-ScheduledTaskSettingsSet `
+    -AllowStartIfOnBatteries `
+    -DontStopIfGoingOnBatteries `
+    -StartWhenAvailable `
+    -ExecutionTimeLimit (New-TimeSpan -Minutes 5) `
+    -MultipleInstances IgnoreNew
+
+Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Force -ErrorAction Stop | Out-Null
+
+# Verify it actually exists (defensive — never claim success blindly again).
+if (-not (Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue)) {
+    Write-Error "Register-ScheduledTask reported success but '$TaskName' is not present."
     exit 1
 }
 
@@ -91,7 +99,7 @@ Write-Host ""
 Write-Host "Installed:" -ForegroundColor Green
 Write-Host "  Task name  : $TaskName"
 Write-Host "  Runs as    : NT AUTHORITY\SYSTEM (highest)"
-Write-Host "  Trigger    : $channel  (EventID 24 = session disconnected)"
+Write-Host "  Trigger    : TerminalServices-LocalSessionManager/Operational EventID 24 (session disconnected)"
 Write-Host "  Worker     : $destWorker"
 Write-Host "  TargetUser : $TargetUser"
 Write-Host "  Log        : $(Join-Path $destDir 'reconnect-console.log')"

@@ -82,6 +82,40 @@
                             </div>
                         </div>
 
+                        <!-- Desktop control (screenshot / click) capability -->
+                        <div class="rounded-lg border border-space-border/50 bg-space-800/30 px-4 py-3"
+                            x-show="desktopCapture.supported !== false">
+                            <div class="flex flex-wrap items-center justify-between gap-4">
+                                <div>
+                                    <div class="text-sm text-gray-300" x-text="t('desktopCaptureTitle')"></div>
+                                    <div class="text-xs text-gray-500 font-mono" x-text="t('desktopCaptureDesc')"></div>
+                                </div>
+                                <div class="inline-flex items-center gap-3">
+                                    <span class="text-xs font-mono"
+                                        :class="desktopCapture.enabled ? 'text-neon-green' : 'text-red-400'"
+                                        x-text="desktopCapture.enabled ? t('enabled') : t('disabled')"></span>
+                                    <button class="relative inline-flex h-6 w-11 items-center rounded-full transition-colors duration-200 focus:outline-none"
+                                        :class="desktopCapture.enabled ? 'bg-neon-green' : 'bg-space-700'"
+                                        :disabled="desktopCapture.busy"
+                                        @click="toggleDesktopCapture()">
+                                        <span class="inline-block h-4 w-4 transform rounded-full bg-white transition-transform duration-200"
+                                            :class="desktopCapture.enabled ? 'translate-x-6' : 'translate-x-1'"></span>
+                                    </button>
+                                </div>
+                            </div>
+                            <label class="mt-3 flex items-center gap-2 text-xs text-gray-400 font-mono cursor-pointer">
+                                <input type="checkbox" x-model="desktopCapture.autoLogin" :disabled="desktopCapture.busy" class="accent-neon-green">
+                                <span x-text="t('desktopCaptureAutoLogin')"></span>
+                            </label>
+                            <div class="mt-2 text-[11px] font-mono text-yellow-400/80" x-text="t('desktopCaptureHostNote')"></div>
+                            <template x-if="desktopCapture.needsAdmin">
+                                <div class="mt-2 rounded border border-red-500/40 bg-red-500/10 px-3 py-2">
+                                    <div class="text-[11px] text-red-300 font-mono" x-text="t('desktopCaptureNeedsAdminHint')"></div>
+                                    <code class="mt-1 block break-all text-[11px] text-gray-200 bg-space-900/60 rounded px-2 py-1 select-all" x-text="desktopCapture.command"></code>
+                                </div>
+                            </template>
+                        </div>
+
                         <div class="space-y-3">
                             <div class="rounded-lg border border-space-border/50 bg-space-800/30 px-4 py-3">
                                 <div class="flex flex-wrap items-center justify-between gap-3">

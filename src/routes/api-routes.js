@@ -48,7 +48,10 @@ import {
   handleStartDesktopAgent,
   handleStopDesktopAgent,
   handleGetDesktopAgentSettings,
-  handleSetDesktopAgentSettings
+  handleSetDesktopAgentSettings,
+  handleGetDesktopCaptureSetupStatus,
+  handleEnableDesktopCaptureSetup,
+  handleDisableDesktopCaptureSetup
 } from './desktop-agent-route.js';
 import {
   handleListAgentRuntimeProviders,
@@ -529,6 +532,10 @@ export function registerApiRoutes(app, { port }) {
   app.post('/api/desktop-agent/settings', handleSetDesktopAgentSettings);
   app.post('/api/desktop-agent/start', handleStartDesktopAgent);
   app.post('/api/desktop-agent/stop', handleStopDesktopAgent);
+  // One-time setup so screenshot/click works across physical / dummy / RDP.
+  app.get('/api/desktop-agent/capture-setup', handleGetDesktopCaptureSetupStatus);
+  app.post('/api/desktop-agent/capture-setup/enable', handleEnableDesktopCaptureSetup);
+  app.post('/api/desktop-agent/capture-setup/disable', handleDisableDesktopCaptureSetup);
 
   // ─── Tool Installer ────────────────────────────────────────────────────
   app.get('/api/tools/status', handleGetToolsStatus);

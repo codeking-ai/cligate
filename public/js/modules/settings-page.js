@@ -49,6 +49,8 @@ export function createSettingsPageModule() {
     },
     assistantAgentSaving: false,
     assistantAgentTestResult: null,
+    // Desktop control (screenshot/click) one-time setup state.
+    desktopCapture: { supported: true, enabled: false, autoLogin: false, busy: false, elevated: true, needsAdmin: false, command: '', details: {} },
     localModelRoutingEnabled: false,
     localModelRoutingSaving: false,
     localRuntime: null,
@@ -562,6 +564,86 @@ export function createSettingsPageModule() {
             azureOpenaiApiKeyBridge: cfg.sources?.azureOpenaiApiKeyBridge !== false
           }
         };
+      }
+      // Reflect the desktop-control toggle state alongside the agent config.
+      if (typeof this.loadDesktopCaptureStatus === 'function') {
+        this.loadDesktopCaptureStatus();
+      }
+    },
+
+    async loadDesktopCaptureStatus() {
+      const { ok, data } = await this.api('/api/desktop-agent/capture-setup');
+      if (ok && data) {
+        this.desktopCapture = {
+          ...this.desktopCapture,
+          supported: data.supported !== false,
+          enabled: data.enabled === true,
+          elevated: data.elevated !== false,
+          needsAdmin: data.elevated === false && data.enabled !== true,
+          command: data.command || this.desktopCapture.command || '',
+          details: data.details || {}
+        };
+      }
+    },
+
+    _pollDesktopCaptureStatus() {
+      let n = 0;
+      const tick = async () => {
+        n += 1;
+        await this.loadDesktopCaptureStatus();
+        if (n < 6) setTimeout(tick, 2500);
+      };
+      setTimeout(tick, 2500);
+    },
+
+    async toggleDesktopCapture() {
+      if (this.desktopCapture.busy) return;
+      if (this.desktopCapture.enabled) {
+        await this.disableDesktopCapture();
+      } else {
+        await this.enableDesktopCapture();
+      }
+    },
+
+    async enableDesktopCapture() {
+      if (this.desktopCapture.busy) return;
+      this.desktopCapture.busy = true;
+      const { ok, data } = await this.api('/api/desktop-agent/capture-setup/enable', {
+        method: 'POST',
+        body: JSON.stringify({ autoLogin: this.desktopCapture.autoLogin === true })
+      });
+      this.desktopCapture.busy = false;
+      if (ok && data?.ok) {
+        this.desktopCapture.needsAdmin = false;
+        this.desktopCapture.command = '';
+        this.showToast(this.t('desktopCaptureEnabledOk'), 'success');
+        this._pollDesktopCaptureStatus();
+      } else if (data?.needsAdmin) {
+        // CliGate is not elevated — surface the exact command to run by hand.
+        this.desktopCapture.needsAdmin = true;
+        this.desktopCapture.command = data.command || '';
+        this.showToast(this.t('desktopCaptureNeedsAdmin'), 'error');
+      } else {
+        this.showToast((data && data.error) || this.t('desktopCaptureFailed'), 'error');
+      }
+    },
+
+    async disableDesktopCapture() {
+      if (this.desktopCapture.busy) return;
+      this.desktopCapture.busy = true;
+      const { ok, data } = await this.api('/api/desktop-agent/capture-setup/disable', { method: 'POST' });
+      this.desktopCapture.busy = false;
+      if (ok && data?.ok) {
+        this.desktopCapture.needsAdmin = false;
+        this.desktopCapture.command = '';
+        this.showToast(this.t('desktopCaptureDisabledOk'), 'success');
+        this._pollDesktopCaptureStatus();
+      } else if (data?.needsAdmin) {
+        this.desktopCapture.needsAdmin = true;
+        this.desktopCapture.command = data.command || '';
+        this.showToast(this.t('desktopCaptureNeedsAdmin'), 'error');
+      } else {
+        this.showToast((data && data.error) || this.t('desktopCaptureFailed'), 'error');
       }
     },
 
