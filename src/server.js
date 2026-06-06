@@ -97,6 +97,19 @@ export function createServer({ port }) {
   });
   chatUiRuntimeObserver.start();
   assistantConsolidator.start();
+
+  // Recover any scheduled task left stuck in 'running' by a previous process
+  // (a hung/interrupted fire). Without this it would never fire again, since
+  // the scheduler only fires tasks in state 'scheduled'. Must run BEFORE
+  // start() so the recovered task is eligible on the first tick.
+  try {
+    const recovered = localScheduler.recoverStuckRunningTasks();
+    if (recovered > 0) {
+      console.log(`[LocalScheduler] recovered ${recovered} scheduled task(s) stuck in 'running' after restart`);
+    }
+  } catch (error) {
+    console.error('[LocalScheduler] stuck-task recovery failed:', error?.message || error);
+  }
   localScheduler.start();
 
   // Retire any long-abandoned non-terminal assistant runs left over from a
@@ -110,6 +123,19 @@ export function createServer({ port }) {
     }
   } catch (error) {
     console.error('[AssistantCore] stale-run cleanup failed:', error?.message || error);
+  }
+
+  // Compact old terminal assistant runs: archive the full record, then slim the
+  // hot copy's heavy metadata (toolResults/checkpoint can reach hundreds of MB).
+  // Keeps the hot assistant-runs.json small so per-save full rewrites stay cheap.
+  // Best-effort; never fatal to boot. Resumable runs are preserved untouched.
+  try {
+    const { compacted, reclaimedBytes } = assistantRunStore.compactRuns();
+    if (compacted > 0) {
+      console.log(`[AssistantCore] compacted ${compacted} old assistant run(s) at startup, reclaimed ~${(reclaimedBytes / 1e6).toFixed(1)}MB`);
+    }
+  } catch (error) {
+    console.error('[AssistantCore] run compaction failed:', error?.message || error);
   }
   mcpConnectionManager.start().catch((error) => {
     console.error('[MCP] Failed to start MCP connection manager:', error.message);

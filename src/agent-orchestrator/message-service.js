@@ -1551,32 +1551,69 @@ export class AgentOrchestratorMessageService {
     const runId = `run-${scheduledTask.id}-${Date.now()}`;
 
     if (action === 'invoke_assistant') {
-      // Run the assistant in the task's OWN scope conversation, never in
-      // any user-facing conversation. The scope conversation is created
-      // and bound when the task is created; we look it up here.
-      const scopeConvId = String(scheduledTask.scopeConversationId || '').trim();
-      if (!scopeConvId) {
-        throw new Error('invoke_assistant scheduled task is missing scopeConversationId; recreate the task');
-      }
-      let scopeConv = this.conversationStore?.get?.(scopeConvId) || null;
-      if (!scopeConv?.id) {
-        // Lazy-heal: scope conversation got lost — recreate it.
-        scopeConv = this.stateCoordinator?.ensureScheduledTaskScopeConversation?.(scheduledTask.id, {
-          title: scheduledTask.title
-        });
+      // Resolve the scope conversation the assistant runs in — NEVER a
+      // user-facing conversation.
+      //
+      // For a RECURRING, non-shared task, each fire must start from a genuinely
+      // clean slate. The scope conversation accumulates the prior fire's runs,
+      // deliveries and task-memory — all keyed by conversation id (see
+      // observation-service buildAssistantConversationContext). Reusing one
+      // scope conversation across fires makes the supervisor's anti-redo /
+      // idempotence guard (prompt-builder.js) treat each re-fire as a duplicate
+      // and reply "本轮已完成" in a single turn WITHOUT re-running the skill
+      // (the observed bug: same-day manual re-triggers never produced a new
+      // article). The existing sharedContext:false intent — "start each fire
+      // from a fresh slate" — previously only detached the runtime session; we
+      // complete it here by giving each recurring fire its OWN scope
+      // conversation. One-shot tasks and shared-context tasks keep the single
+      // persistent scope conversation (so existing behavior is unchanged).
+      const isRecurring = String(scheduledTask.schedule?.recurrence || 'once').trim() !== 'once';
+      const wantsFreshScope = isRecurring && scheduledTask.sharedContext !== true;
+
+      let scopeConv = null;
+      if (wantsFreshScope) {
+        scopeConv = this.conversationStore?.findOrCreateByExternal?.({
+          channel: 'scheduled-task-scope',
+          accountId: 'default',
+          externalConversationId: `${scheduledTask.id}::${runId}`,
+          externalUserId: 'scheduled-task',
+          title: scheduledTask.title ? `[scheduled] ${scheduledTask.title}` : `[scheduled] ${scheduledTask.id}`,
+          metadata: {
+            scheduledTaskId: scheduledTask.id,
+            scheduledTaskRunId: runId,
+            source: 'scheduled_task_scope_fire'
+          }
+        }) || null;
+      } else {
+        const scopeConvId = String(scheduledTask.scopeConversationId || '').trim();
+        scopeConv = (scopeConvId ? this.conversationStore?.get?.(scopeConvId) : null) || null;
+        if (!scopeConv?.id) {
+          // Lazy-heal: scope conversation missing/lost — recreate the persistent one.
+          scopeConv = this.stateCoordinator?.ensureScheduledTaskScopeConversation?.(scheduledTask.id, {
+            title: scheduledTask.title
+          });
+        }
       }
       if (!scopeConv?.id) {
         throw new Error('failed to resolve scope conversation for scheduled task');
       }
 
-      const userText = String(payload.message || scheduledTask.title || '').trim();
+      let userText = String(payload.message || scheduledTask.title || '').trim();
       if (!userText) {
         throw new Error('invoke_assistant scheduled task requires payload.message');
       }
+      // On a fresh-slate recurring fire, prepend an explicit "new round"
+      // directive so the supervisor does not suppress the work based on DURABLE
+      // history either (e.g. today's row already in the skill's published.jsonl).
+      // De-duplication for these tasks is the skill's own job (angle/title
+      // history), not a blanket "already did something today".
+      if (wantsFreshScope) {
+        userText = `【定时任务·本次为独立的新一轮执行】这是一次全新的触发，请勿因为"今天/本轮已经做过"而跳过或只回一句"已完成"。是否重复只依据任务自身的历史文件（如 skill 的 history/published.jsonl）判断：按其中规则选一个未用过/最久未用的角度，正常执行并产出本轮结果。\n\n${userText}`;
+      }
 
-      // If this task does NOT share context across runs, detach the active
-      // runtime session on the scope conversation so the assistant starts
-      // each fire from a fresh slate.
+      // If this task does NOT share context across runs, detach any active
+      // runtime session so the assistant starts each fire from a fresh slate.
+      // (For a fresh scope conversation this is a no-op — it has none yet.)
       if (!scheduledTask.sharedContext && scopeConv.activeRuntimeSessionId) {
         try {
           scopeConv = this.conversationStore.clearActiveRuntimeSession(scopeConv.id) || scopeConv;

@@ -1067,7 +1067,11 @@ export class StateCoordinator {
         nextRunAt: toText(next.nextRunAt),
         lastRunAt: toText(next.lastRunAt),
         lastResultPreview: toText(next.lastResultPreview),
-        lastError: toText(next.lastError)
+        lastError: toText(next.lastError),
+        // The conversation this fire actually ran in (recurring non-shared tasks
+        // use a fresh one per fire). Surfaced so the dashboard run history can
+        // link straight to the right conversation.
+        scopeConversationId: toText(next.lastScopeConversationId)
       },
       metadata: {
         source: 'state_coordinator_scheduled_task'

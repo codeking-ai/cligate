@@ -276,6 +276,52 @@ test('invoke_assistant dispatches into the assistant in its scope conversation (
   assert.match(String(result.summary || ''), /assistant invoked/);
 });
 
+test('recurring non-shared invoke_assistant uses a FRESH scope conversation per fire (no cross-fire idempotence skip)', async () => {
+  const { conversationStore, coordinator, messageService } = createFixture();
+  const notifyConv = conversationStore.findOrCreateByExternal({
+    channel: 'dingtalk', accountId: 'default',
+    externalConversationId: 'ext-fresh', externalUserId: 'u', title: 'Notify'
+  });
+  const task = coordinator.createScheduledTask({
+    title: '定时发布文章',
+    kind: 'reminder',
+    schedule: { recurrence: 'daily', localTime: '08:00', timezone: 'Asia/Shanghai' },
+    payload: { action: 'invoke_assistant', message: '调用 skill 发布文章' },
+    notifyTargets: [{ kind: 'conversation', conversationId: notifyConv.id }],
+    now: Date.parse('2026-06-03T00:00:00.000Z')
+  });
+  const persistentScopeId = task.scopeConversationId;
+
+  const runsById = {};
+  const calls = [];
+  installStubAssistantModeService(messageService, runsById, calls, () => ({
+    type: 'assistant_response', message: '已发布', assistantRun: { id: 'r', status: 'completed' }
+  }));
+
+  await messageService.runScheduledTask(task);
+  await new Promise((resolve) => setTimeout(resolve, 5)); // ensure distinct runId (Date.now ms)
+  await messageService.runScheduledTask(task);
+
+  // Two fires landed in TWO DIFFERENT scope conversations — the core of the fix.
+  assert.equal(calls.length, 2);
+  assert.notEqual(calls[0].conversation.id, calls[1].conversation.id, 'each fire gets its own scope conversation');
+
+  for (const call of calls) {
+    const conv = conversationStore.get(call.conversation.id);
+    // Never the notify target, never the persistent per-task scope conversation.
+    assert.notEqual(conv.id, notifyConv.id);
+    assert.notEqual(conv.id, persistentScopeId);
+    // Still a scope-type conversation bound to this task.
+    assert.equal(conv.channel, 'scheduled-task-scope');
+    assert.equal(conv.metadata?.scheduledTaskId, task.id);
+    // Promoted to assistant control mode so maybeHandleMessage does not short-circuit.
+    assert.equal(getAssistantControlMode(conv), 'assistant');
+    // Carries the explicit "new round" directive AND the original task message.
+    assert.match(String(call.text || ''), /独立的新一轮执行/);
+    assert.match(String(call.text || ''), /调用 skill 发布文章/);
+  }
+});
+
 test('selectScheduledPromptForReply: single resumes, ambiguous asks, title disambiguates', () => {
   assert.equal(selectScheduledPromptForReply([], '同意').match, null);
 

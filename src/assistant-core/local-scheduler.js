@@ -120,7 +120,10 @@ export class LocalScheduler {
       id: scheduledTask.id,
       state: 'running',
       patch: {
-        lastError: ''
+        lastError: '',
+        // Cleared on each fire; the success path below fills in the conversation
+        // the run actually used, so stale ids never leak into the run history.
+        lastScopeConversationId: ''
       },
       reason: 'local_scheduler_triggered'
     });
@@ -161,7 +164,10 @@ export class LocalScheduler {
         patch: {
           lastRunAt: firedAt,
           lastResultPreview: toText(result?.summary || result?.result || 'scheduled task completed'),
-          nextRunAt
+          nextRunAt,
+          // Surface the conversation this fire ran in (runScheduledTask returns
+          // scopeConversationId) so the dashboard run history can link to it.
+          lastScopeConversationId: toText(result?.scopeConversationId || '')
         },
         reason: 'local_scheduler_success'
       });
@@ -184,6 +190,45 @@ export class LocalScheduler {
         error
       };
     }
+  }
+
+  // Recover tasks left stuck in 'running' by a previous process. A run cannot
+  // survive a restart, so a task still marked 'running' at boot means its last
+  // fire was interrupted (crash, kill, or a hung command before this fix). Such
+  // a task would never fire again (isDue requires state==='scheduled'). Reset
+  // recurring tasks to 'scheduled' with a freshly recomputed nextRunAt; mark a
+  // stuck one-shot as 'failed' (it already fired once). Call ONCE at startup,
+  // before start() — never while ticking (a genuine in-flight task is 'running').
+  recoverStuckRunningTasks({ now = Date.now() } = {}) {
+    const tasks = this.stateCoordinator.scheduledTaskStore.list({ limit: 1000 });
+    let recovered = 0;
+    for (const task of tasks) {
+      if (toText(task?.state) !== 'running') continue;
+      const recurrence = toText(task.schedule?.recurrence) || 'once';
+      let nextRunAt = toText(task.nextRunAt);
+      if (recurrence !== 'once') {
+        try {
+          nextRunAt = computeNextOccurrenceIso(task.schedule || {}, { now });
+        } catch {
+          // keep the existing nextRunAt if recomputation fails
+        }
+      }
+      try {
+        this.stateCoordinator.updateScheduledTaskState({
+          id: task.id,
+          state: recurrence === 'once' ? 'failed' : 'scheduled',
+          patch: {
+            nextRunAt,
+            lastError: 'recovered from an interrupted run (process restart)'
+          },
+          reason: 'local_scheduler_recover_stuck_running'
+        });
+        recovered += 1;
+      } catch (error) {
+        this.log?.warn?.(`[LocalScheduler] failed to recover stuck task ${task.id}: ${error?.message || error}`);
+      }
+    }
+    return recovered;
   }
 }
 

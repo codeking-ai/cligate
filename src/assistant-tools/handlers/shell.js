@@ -50,13 +50,42 @@ export function createShellToolHandlers({ workspaceGuard }) {
           resolve(payload);
         };
 
-        const timer = setTimeout(() => {
-          timedOut = true;
+        // Kill the WHOLE process tree, not just the direct child. With
+        // shell:true the child is cmd.exe/sh; a hung grandchild (e.g. a CLI
+        // waiting on a browser bridge) keeps the stdio pipes open, so child.kill()
+        // alone leaves 'close' un-fired. On Windows use taskkill /T /F.
+        const killTree = () => {
           try {
-            child.kill();
+            if (process.platform === 'win32' && child.pid) {
+              spawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], { windowsHide: true });
+            } else {
+              child.kill('SIGKILL');
+            }
           } catch {
             // ignore kill races
           }
+        };
+
+        const timer = setTimeout(() => {
+          timedOut = true;
+          killTree();
+          // Do NOT wait for 'close': on Windows a surviving grandchild can hold
+          // the stdio pipes open after the shell is killed, so 'close' may never
+          // fire and the Promise would hang forever (observed: `wechatsync
+          // platforms --auth` pinned an entire scheduled run indefinitely).
+          // Resolve the timeout result immediately; a late 'close' is a no-op.
+          finish({
+            command,
+            cwd: workspaceGuard.toWorkspaceRelative(cwd),
+            exitCode: null,
+            signal: 'SIGKILL',
+            timedOut: true,
+            stdout,
+            stderr,
+            stdoutTruncated,
+            stderrTruncated,
+            success: false
+          });
         }, timeoutMs);
         if (typeof timer.unref === 'function') {
           timer.unref();

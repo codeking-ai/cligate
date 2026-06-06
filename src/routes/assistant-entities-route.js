@@ -705,6 +705,10 @@ export function handleListAssistantScheduledTaskRuns(req, res) {
       return [
         'scheduled_task.triggered',
         'scheduled_task.completed',
+        // A recurring task that finishes goes running -> scheduled, recorded as
+        // 'rescheduled' (NOT 'completed'); treat it as a successful outcome so the
+        // run history doesn't show every successful daily fire as "unknown".
+        'scheduled_task.rescheduled',
         'scheduled_task.failed',
         'scheduled_task.compute_next_failed'
       ].includes(toText(entry?.kind));
@@ -721,17 +725,20 @@ export function handleListAssistantScheduledTaskRuns(req, res) {
         other !== ep
         && Date.parse(other.createdAt) >= triggeredMs
         && Date.parse(other.createdAt) - triggeredMs < 10 * 60 * 1000
-        && ['scheduled_task.completed', 'scheduled_task.failed', 'scheduled_task.compute_next_failed'].includes(other.kind)
+        && ['scheduled_task.completed', 'scheduled_task.rescheduled', 'scheduled_task.failed', 'scheduled_task.compute_next_failed'].includes(other.kind)
       ));
       runs.push({
         firedAt: ep.createdAt,
         completedAt: outcome?.createdAt || '',
-        state: outcome?.kind === 'scheduled_task.completed' ? 'completed'
+        state: (outcome?.kind === 'scheduled_task.completed' || outcome?.kind === 'scheduled_task.rescheduled') ? 'completed'
           : outcome?.kind === 'scheduled_task.failed' ? 'failed'
           : outcome?.kind === 'scheduled_task.compute_next_failed' ? 'failed_compute_next'
           : 'unknown',
         summary: String(outcome?.payload?.lastResultPreview || '').slice(0, 1000),
-        error: String(outcome?.payload?.lastError || '').slice(0, 1000)
+        error: String(outcome?.payload?.lastError || '').slice(0, 1000),
+        // The conversation this fire actually ran in (recurring non-shared tasks
+        // get a fresh one per fire). Lets the dashboard link straight to it.
+        scopeConversationId: toText(outcome?.payload?.scopeConversationId || ep?.payload?.scopeConversationId || '')
       });
       if (runs.length >= limit) break;
     }
@@ -744,21 +751,23 @@ export function handleListAssistantScheduledTaskRuns(req, res) {
   });
 }
 
-export async function handleRunAssistantScheduledTask(req, res) {
-  try {
-    const result = await localScheduler.runTask(toText(req.params.id));
-    return res.json({
-      success: true,
-      task: result.task,
-      result: result.result || null,
-      error: result.error ? String(result.error.message || result.error) : null
-    });
-  } catch (error) {
-    return res.status(404).json({
-      success: false,
-      error: error.message
-    });
+export function handleRunAssistantScheduledTask(req, res) {
+  const id = toText(req.params.id);
+  const task = stateCoordinator.scheduledTaskStore.get(id);
+  if (!task?.id) {
+    return res.status(404).json({ success: false, error: 'scheduled task not found' });
   }
+  // Fire the run in the BACKGROUND. A scheduled task can take minutes — it
+  // delegates to a runtime and may run many tool calls. Awaiting it here held
+  // the HTTP request open for the WHOLE run, so the dashboard's "run now" button
+  // looked frozen (the queued toast never fired) and a hung command (e.g. a CLI
+  // waiting on a browser bridge) pinned the request indefinitely. Kick it off
+  // and return immediately; progress shows up in the task's run history /
+  // episodes, and the scheduler writes lastRunAt / lastResultPreview on finish.
+  localScheduler.runTask(id).catch((error) => {
+    console.error(`[ScheduledTask] manual run ${id} failed:`, error?.message || error);
+  });
+  return res.json({ success: true, queued: true, taskId: id });
 }
 
 export default {

@@ -343,3 +343,38 @@ test('LocalScheduler defaults to messageService.runScheduledTask when no custom 
   assert.equal(result.task.state, 'completed');
   assert.equal(result.result.summary, 'message service runner ok');
 });
+
+test('recoverStuckRunningTasks revives a recurring task stuck in running and fails a stuck once task', () => {
+  const { coordinator } = createCoordinator();
+  const scheduler = new LocalScheduler({ stateCoordinator: coordinator, runner: async () => ({}) });
+
+  const daily = coordinator.createScheduledTask({
+    title: 'daily stuck', kind: 'reminder',
+    schedule: { recurrence: 'daily', localTime: '09:00', timezone: 'Asia/Shanghai' },
+    notifyTargets: [], now: Date.parse('2026-05-15T00:00:00.000Z')
+  });
+  const once = coordinator.createScheduledTask({
+    title: 'once stuck', kind: 'reminder',
+    schedule: { recurrence: 'once', delayMinutes: 5 },
+    notifyTargets: [], now: Date.parse('2026-05-15T00:00:00.000Z')
+  });
+  const normal = coordinator.createScheduledTask({
+    title: 'normal', kind: 'reminder',
+    schedule: { recurrence: 'daily', localTime: '10:00', timezone: 'Asia/Shanghai' },
+    notifyTargets: [], now: Date.parse('2026-05-15T00:00:00.000Z')
+  });
+  // Simulate a previous process dying mid-fire: both fired tasks left 'running'.
+  coordinator.scheduledTaskStore.save({ ...coordinator.scheduledTaskStore.get(daily.id), state: 'running' });
+  coordinator.scheduledTaskStore.save({ ...coordinator.scheduledTaskStore.get(once.id), state: 'running' });
+
+  const recovered = scheduler.recoverStuckRunningTasks({ now: Date.parse('2026-05-15T10:00:00.000Z') });
+  assert.equal(recovered, 2, 'only the two stuck-running tasks are recovered');
+
+  const dailyAfter = coordinator.scheduledTaskStore.get(daily.id);
+  assert.equal(dailyAfter.state, 'scheduled', 'recurring task revived to scheduled');
+  assert.ok(Date.parse(dailyAfter.nextRunAt) > Date.parse('2026-05-15T10:00:00.000Z'), 'nextRunAt recomputed into the future');
+  assert.match(String(dailyAfter.lastError || ''), /interrupted/);
+
+  assert.equal(coordinator.scheduledTaskStore.get(once.id).state, 'failed', 'stuck one-shot is failed, not re-fired');
+  assert.equal(coordinator.scheduledTaskStore.get(normal.id).state, 'scheduled', 'a healthy scheduled task is untouched');
+});

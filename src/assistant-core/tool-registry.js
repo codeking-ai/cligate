@@ -776,6 +776,9 @@ export function createDefaultAssistantToolRegistry({
           return [
             'scheduled_task.triggered',
             'scheduled_task.completed',
+            // Recurring success is recorded as 'rescheduled' (running -> scheduled);
+            // count it as a successful outcome, not "unknown".
+            'scheduled_task.rescheduled',
             'scheduled_task.failed',
             'scheduled_task.compute_next_failed'
           ].includes(String(entry?.kind || ''));
@@ -792,16 +795,17 @@ export function createDefaultAssistantToolRegistry({
             other !== ep
             && Date.parse(other.createdAt) >= Date.parse(ep.createdAt)
             && Date.parse(other.createdAt) - Date.parse(ep.createdAt) < 10 * 60 * 1000
-            && ['scheduled_task.completed', 'scheduled_task.failed', 'scheduled_task.compute_next_failed'].includes(other.kind)
+            && ['scheduled_task.completed', 'scheduled_task.rescheduled', 'scheduled_task.failed', 'scheduled_task.compute_next_failed'].includes(other.kind)
           ));
           runs.push({
             firedAt: ep.createdAt,
-            state: outcome?.kind === 'scheduled_task.completed' ? 'completed'
+            state: (outcome?.kind === 'scheduled_task.completed' || outcome?.kind === 'scheduled_task.rescheduled') ? 'completed'
               : outcome?.kind === 'scheduled_task.failed' ? 'failed'
               : outcome?.kind === 'scheduled_task.compute_next_failed' ? 'failed_compute_next'
               : 'unknown',
             summary: String(outcome?.payload?.lastResultPreview || '').slice(0, 300),
-            error: String(outcome?.payload?.lastError || '').slice(0, 300)
+            error: String(outcome?.payload?.lastError || '').slice(0, 300),
+            scopeConversationId: String(outcome?.payload?.scopeConversationId || ep?.payload?.scopeConversationId || '').trim()
           });
           if (runs.length >= limit) break;
         }

@@ -18,6 +18,9 @@ export function createScheduledTasksPageModule() {
     selectedScheduledTask: null,
     scheduledTaskRuns: [],
     scheduledTaskRunsLoading: false,
+    // "Run now" local cooldown — prevents double-clicks from launching multiple
+    // independent fires (each fire runs in its own scope conversation now).
+    scheduledTaskRunNowBusy: false,
 
     // Form state
     scheduledTaskFormOpen: false,
@@ -555,7 +558,11 @@ export function createScheduledTasksPageModule() {
     },
 
     async runScheduledTaskNow(id) {
-      if (!id) return;
+      if (!id || this.scheduledTaskRunNowBusy) return;
+      // Disable immediately (don't wait for the server's state refresh — the run
+      // now starts in the background and the round-trip returns right away).
+      this.scheduledTaskRunNowBusy = true;
+      setTimeout(() => { this.scheduledTaskRunNowBusy = false; }, 8000);
       const { ok, data } = await this.api(`/api/assistant/scheduled-tasks/${encodeURIComponent(id)}/run`, {
         method: 'POST'
       });
@@ -564,6 +571,7 @@ export function createScheduledTasksPageModule() {
         await this.loadScheduledTasks();
         if (this.selectedScheduledTask?.id) await this.loadScheduledTaskRuns(this.selectedScheduledTask.id);
       } else {
+        this.scheduledTaskRunNowBusy = false; // failed fast → allow immediate retry
         this.showToast?.(data?.error || this.t('scheduledTaskRunFailed'), 'error');
       }
     }
