@@ -66,6 +66,12 @@ npm install -g cligate
 cligate start
 ```
 
+或者使用桌面端 release 包：
+
+1. 从 [Releases](https://github.com/codeking-ai/cligate/releases) 下载适合你平台的安装包或应用包。
+2. 安装或直接打开后，启动 `CliGate`。
+3. CliGate 会自动启动本地服务，并直接打开桌面窗口。
+
 默认仪表盘地址：
 
 `http://localhost:8081`

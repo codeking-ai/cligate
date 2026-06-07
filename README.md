@@ -66,6 +66,12 @@ npm install -g cligate
 cligate start
 ```
 
+Or use a desktop release package:
+
+1. Download the installer or app package for your platform from [Releases](https://github.com/codeking-ai/cligate/releases).
+2. Install or open the package, then launch `CliGate`.
+3. CliGate will start the local service and open the desktop window automatically.
+
 Default dashboard:
 
 `http://localhost:8081`
