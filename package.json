@@ -1,6 +1,6 @@
 {
   "name": "cligate",
-  "version": "1.2.6",
+  "version": "1.2.7",
   "description": "Local AI control plane with a resident private assistant for task execution and a unified model proxy API for Claude Code, Codex CLI, Gemini CLI, OpenClaw, accounts, API keys, logs, and usage.",
   "type": "module",
   "main": "electron-main.cjs",
@@ -91,7 +91,7 @@
       "src/desktop-agent/runtime/**/*"
     ],
     "win": {
-      "icon": "build/icon-dark.ico",
+      "icon": "public/icon-dark.ico",
       "target": [
         {
           "target": "nsis",
@@ -115,7 +115,7 @@
       "category": "public.app-category.developer-tools"
     },
     "linux": {
-      "icon": "build/icon-dark.png",
+      "icon": "public/icon-dark.png",
       "target": [
         "AppImage"
       ],
