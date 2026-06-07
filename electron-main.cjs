@@ -178,6 +178,9 @@ function createTray() {
 function getIconPath() {
     // Try common icon locations
     const candidates = [
+        path.join(__dirname, 'build', 'icon-dark.ico'),
+        path.join(__dirname, 'build', 'icon-dark.png'),
+        path.join(__dirname, 'public', 'favicon-dark.ico'),
         path.join(__dirname, 'build', 'icon.ico'),
         path.join(__dirname, 'build', 'icon.png'),
         path.join(__dirname, 'public', 'favicon.ico'),

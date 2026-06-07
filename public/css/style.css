@@ -2791,6 +2791,13 @@ table .btn-outline:hover {
     border-radius: 1rem;
 }
 
+.topbar-brand-logo {
+    display: block;
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+}
+
 .topbar-brand-copy {
     min-width: 0;
 }

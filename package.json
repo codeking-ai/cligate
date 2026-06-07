@@ -91,6 +91,7 @@
       "src/desktop-agent/runtime/**/*"
     ],
     "win": {
+      "icon": "build/icon-dark.ico",
       "target": [
         {
           "target": "nsis",
@@ -114,6 +115,7 @@
       "category": "public.app-category.developer-tools"
     },
     "linux": {
+      "icon": "build/icon-dark.png",
       "target": [
         "AppImage"
       ],
