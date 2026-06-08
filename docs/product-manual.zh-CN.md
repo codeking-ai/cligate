@@ -234,7 +234,7 @@ CliGate 默认本地运行。最常见的使用路径是：启动服务，添加
 - 把 Codex CLI 配到代理模式
 - 把 Gemini CLI 配到代理模式
 - 把 OpenClaw 配到代理模式
-- 在启用桌面自动化时查看或管理 Desktop Agent 设置
+- 用一个「桌面控制」开关启用助手截图 / 点击（物理显示器 / HDMI 虚拟显示器 / 远程桌面均适用，断开远程桌面后仍可用）；以管理员身份运行 CliGate 时，该开关会自动完成所需的本机准备，无需手动运行脚本
 
 ### Monitoring
 
@@ -493,6 +493,7 @@ CliGate 目前支持 Telegram、飞书和钉钉渠道工作流，对应 `Channel
 - `GET /api/assistant/mcp/servers`
 - `GET /api/assistant/skills`
 - `GET /api/desktop-agent/status`
+- `POST /api/desktop-agent/capture-setup/remove-legacy`（移除遗留的开机自启任务）
 - `GET /api/resources`
 - `GET /health`
 

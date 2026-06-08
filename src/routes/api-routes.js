@@ -51,7 +51,10 @@ import {
   handleSetDesktopAgentSettings,
   handleGetDesktopCaptureSetupStatus,
   handleEnableDesktopCaptureSetup,
-  handleDisableDesktopCaptureSetup
+  handleDisableDesktopCaptureSetup,
+  handleRemoveLegacyDesktopTasks,
+  handleGetDesktopControl,
+  handleSetDesktopControl
 } from './desktop-agent-route.js';
 import {
   handleListAgentRuntimeProviders,
@@ -536,6 +539,10 @@ export function registerApiRoutes(app, { port }) {
   app.get('/api/desktop-agent/capture-setup', handleGetDesktopCaptureSetupStatus);
   app.post('/api/desktop-agent/capture-setup/enable', handleEnableDesktopCaptureSetup);
   app.post('/api/desktop-agent/capture-setup/disable', handleDisableDesktopCaptureSetup);
+  app.post('/api/desktop-agent/capture-setup/remove-legacy', handleRemoveLegacyDesktopTasks);
+  // Single on/off switch backing the dashboard "Desktop control" toggle.
+  app.get('/api/desktop-agent/desktop-control', handleGetDesktopControl);
+  app.post('/api/desktop-agent/desktop-control', handleSetDesktopControl);
 
   // ─── Tool Installer ────────────────────────────────────────────────────
   app.get('/api/tools/status', handleGetToolsStatus);

@@ -91,6 +91,81 @@ export async function handleDisableDesktopCaptureSetup(req, res) {
   res.json(await desktopCaptureSetup.disable());
 }
 
+// Remove the legacy auto-start tasks (CliGateDesktopAgent, CliGateServer) that
+// brought the agent/CliGate up before the user opened CliGate.
+export async function handleRemoveLegacyDesktopTasks(req, res) {
+  res.json(await desktopCaptureSetup.removeLegacyTasks());
+}
+
+// ---- Single "Desktop control" switch -----------------------------------------
+//
+// ONE on/off control backs the whole feature. Turning it ON enables the
+// CliGate-owned runtime agent (screenshot/click) AND — when CliGate runs as
+// administrator — silently does the machine preparation in-process (removes
+// legacy auto-start tasks, installs the race-safe RDP-disconnect→console task,
+// keeps the desktop awake). The bundled setup script is invoked internally; the
+// user never has to find or run a .ps1 by hand. Turning it OFF stops the agent
+// and (when elevated) reverts the machine preparation. When CliGate is NOT
+// elevated, the runtime agent still works; only the "survive RDP disconnect"
+// extra needs admin, surfaced as a single short hint (no command, no file path).
+
+async function buildDesktopControlStatus() {
+  const settings = desktopAgentService.getSettings();
+  const enabled = settings?.enabled === true;
+  const manager = desktopAgentService.manager?.getStatus?.() || {};
+  const running = manager.running === true;
+
+  let supported = false;
+  let elevated = false;
+  let machinePrepared = false;
+  if (process.platform === 'win32') {
+    supported = true;
+    try {
+      const cap = await desktopCaptureSetup.getStatus();
+      supported = cap.supported !== false;
+      elevated = cap.elevated === true;
+      machinePrepared = cap.prepared === true;
+    } catch {
+      /* leave defaults */
+    }
+  }
+
+  return {
+    success: true,
+    supported,
+    enabled,
+    running,
+    elevated,
+    machinePrepared,
+    // Runtime works without admin; only the RDP-disconnect→console fallback needs it.
+    needsAdminForFullSupport: enabled && process.platform === 'win32' && !machinePrepared && !elevated
+  };
+}
+
+export async function handleGetDesktopControl(req, res) {
+  res.json(await buildDesktopControlStatus());
+}
+
+export async function handleSetDesktopControl(req, res) {
+  const enable = req.body?.enabled === true;
+  if (enable) {
+    desktopAgentService.updateSettings({ enabled: true });
+    try { await desktopAgentService.start(); } catch { /* surfaced via status.running */ }
+    if (process.platform === 'win32') {
+      // Runs the full machine prep ONLY if CliGate is elevated; otherwise this is
+      // a no-op that reports needsAdmin (we do not surface the raw command).
+      try { await desktopCaptureSetup.enable(); } catch { /* best-effort */ }
+    }
+  } else {
+    try { await desktopAgentService.stop(); } catch { /* ignore */ }
+    desktopAgentService.updateSettings({ enabled: false });
+    if (process.platform === 'win32') {
+      try { await desktopCaptureSetup.disable(); } catch { /* best-effort */ }
+    }
+  }
+  res.json(await buildDesktopControlStatus());
+}
+
 export default {
   handleGetDesktopAgentStatus,
   handleStartDesktopAgent,
@@ -99,5 +174,8 @@ export default {
   handleSetDesktopAgentSettings,
   handleGetDesktopCaptureSetupStatus,
   handleEnableDesktopCaptureSetup,
-  handleDisableDesktopCaptureSetup
+  handleDisableDesktopCaptureSetup,
+  handleRemoveLegacyDesktopTasks,
+  handleGetDesktopControl,
+  handleSetDesktopControl
 };

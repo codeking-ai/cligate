@@ -9,7 +9,10 @@
   Trigger: event log
     Microsoft-Windows-TerminalServices-LocalSessionManager/Operational
     Event ID 24 = "Session has been disconnected".
-  (Reconnecting raises event 25, not 24, so there is no trigger loop.)
+  The worker is race-safe: it debounces, then only bounces to the console when
+  the machine is genuinely disconnected-and-idle (no rdp-tcp client connected or
+  connecting). Combined with -MultipleInstances IgnoreNew, a burst of disconnect
+  events (e.g. during an RDP reconnect handshake) cannot start a fight or a loop.
 
   Run ONCE in an *Administrator* PowerShell:
     powershell -ExecutionPolicy Bypass -File install-reconnect-console-task.ps1
@@ -106,11 +109,13 @@ Write-Host "  Log        : $(Join-Path $destDir 'reconnect-console.log')"
 Write-Host ""
 Write-Host "Test it:" -ForegroundColor Cyan
 Write-Host "  1) RDP into the machine, then just CLOSE the RDP window (do not log off)."
-Write-Host "  2) Within a few seconds the session is bounced back to the console;"
+Write-Host "  2) After the debounce window the session is bounced back to the console;"
 Write-Host "     check $(Join-Path $destDir 'reconnect-console.log') and 'qwinsta'"
 Write-Host "     (your user should show Active on 'console')."
+Write-Host "  3) Reconnecting via RDP must NOT be blocked — the worker detects the"
+Write-Host "     in-progress connection and skips (look for 'skip:' lines in the log)."
 Write-Host ""
-Write-Host "Run worker manually (must be SYSTEM, e.g. via PsExec -s) to dry-run:" -ForegroundColor DarkGray
-Write-Host "  psexec -s -i powershell -ExecutionPolicy Bypass -File `"$destWorker`" -TargetUser $TargetUser"
+Write-Host "Dry-run the decision safely (logs what it WOULD do, runs no tscon):" -ForegroundColor DarkGray
+Write-Host "  psexec -s -i powershell -ExecutionPolicy Bypass -File `"$destWorker`" -TargetUser $TargetUser -DryRun"
 Write-Host ""
 Write-Host "Uninstall:  powershell -ExecutionPolicy Bypass -File install-reconnect-console-task.ps1 -Uninstall" -ForegroundColor DarkGray

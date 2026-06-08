@@ -49,8 +49,9 @@ export function createSettingsPageModule() {
     },
     assistantAgentSaving: false,
     assistantAgentTestResult: null,
-    // Desktop control (screenshot/click) one-time setup state.
-    desktopCapture: { supported: true, enabled: false, autoLogin: false, busy: false, elevated: true, needsAdmin: false, command: '', details: {} },
+    // Desktop control — single on/off switch. The backend orchestrates runtime
+    // agent + (when elevated) machine preparation behind one toggle.
+    desktopControl: { supported: true, enabled: false, running: false, elevated: false, machinePrepared: false, needsAdminForFullSupport: false, busy: false },
     localModelRoutingEnabled: false,
     localModelRoutingSaving: false,
     localRuntime: null,
@@ -565,85 +566,67 @@ export function createSettingsPageModule() {
           }
         };
       }
-      // Reflect the desktop-control toggle state alongside the agent config.
-      if (typeof this.loadDesktopCaptureStatus === 'function') {
-        this.loadDesktopCaptureStatus();
+      // Reflect the single desktop-control switch alongside the agent config.
+      if (typeof this.loadDesktopControlStatus === 'function') {
+        this.loadDesktopControlStatus();
       }
     },
 
-    async loadDesktopCaptureStatus() {
-      const { ok, data } = await this.api('/api/desktop-agent/capture-setup');
+    // Single "Desktop control" switch. The backend orchestrates the CliGate-owned
+    // runtime agent AND (only when CliGate is elevated) the machine preparation —
+    // remove legacy tasks, install the race-safe RDP-disconnect→console task, keep
+    // the desktop awake — behind this one toggle. No file paths, no extra buttons.
+    async loadDesktopControlStatus() {
+      const { ok, data } = await this.api('/api/desktop-agent/desktop-control');
       if (ok && data) {
-        this.desktopCapture = {
-          ...this.desktopCapture,
+        this.desktopControl = {
+          ...this.desktopControl,
           supported: data.supported !== false,
           enabled: data.enabled === true,
-          elevated: data.elevated !== false,
-          needsAdmin: data.elevated === false && data.enabled !== true,
-          command: data.command || this.desktopCapture.command || '',
-          details: data.details || {}
+          running: data.running === true,
+          elevated: data.elevated === true,
+          machinePrepared: data.machinePrepared === true,
+          needsAdminForFullSupport: data.needsAdminForFullSupport === true
         };
       }
     },
 
-    _pollDesktopCaptureStatus() {
+    _pollDesktopControlStatus() {
+      // Machine prep runs an elevated PowerShell out of band; poll a few times so
+      // the toggle settles on the confirmed state.
       let n = 0;
       const tick = async () => {
         n += 1;
-        await this.loadDesktopCaptureStatus();
+        await this.loadDesktopControlStatus();
         if (n < 6) setTimeout(tick, 2500);
       };
       setTimeout(tick, 2500);
     },
 
-    async toggleDesktopCapture() {
-      if (this.desktopCapture.busy) return;
-      if (this.desktopCapture.enabled) {
-        await this.disableDesktopCapture();
-      } else {
-        await this.enableDesktopCapture();
-      }
-    },
-
-    async enableDesktopCapture() {
-      if (this.desktopCapture.busy) return;
-      this.desktopCapture.busy = true;
-      const { ok, data } = await this.api('/api/desktop-agent/capture-setup/enable', {
+    async toggleDesktopControl() {
+      if (this.desktopControl.busy) return;
+      this.desktopControl.busy = true;
+      const next = !this.desktopControl.enabled;
+      const { ok, data } = await this.api('/api/desktop-agent/desktop-control', {
         method: 'POST',
-        body: JSON.stringify({ autoLogin: this.desktopCapture.autoLogin === true })
+        body: JSON.stringify({ enabled: next })
       });
-      this.desktopCapture.busy = false;
-      if (ok && data?.ok) {
-        this.desktopCapture.needsAdmin = false;
-        this.desktopCapture.command = '';
-        this.showToast(this.t('desktopCaptureEnabledOk'), 'success');
-        this._pollDesktopCaptureStatus();
-      } else if (data?.needsAdmin) {
-        // CliGate is not elevated — surface the exact command to run by hand.
-        this.desktopCapture.needsAdmin = true;
-        this.desktopCapture.command = data.command || '';
-        this.showToast(this.t('desktopCaptureNeedsAdmin'), 'error');
+      this.desktopControl.busy = false;
+      if (ok && data?.success) {
+        this.desktopControl = {
+          ...this.desktopControl,
+          supported: data.supported !== false,
+          enabled: data.enabled === true,
+          running: data.running === true,
+          elevated: data.elevated === true,
+          machinePrepared: data.machinePrepared === true,
+          needsAdminForFullSupport: data.needsAdminForFullSupport === true
+        };
+        this.showToast(next ? this.t('desktopControlEnabledOk') : this.t('desktopControlDisabledOk'), 'success');
+        this._pollDesktopControlStatus();
       } else {
-        this.showToast((data && data.error) || this.t('desktopCaptureFailed'), 'error');
-      }
-    },
-
-    async disableDesktopCapture() {
-      if (this.desktopCapture.busy) return;
-      this.desktopCapture.busy = true;
-      const { ok, data } = await this.api('/api/desktop-agent/capture-setup/disable', { method: 'POST' });
-      this.desktopCapture.busy = false;
-      if (ok && data?.ok) {
-        this.desktopCapture.needsAdmin = false;
-        this.desktopCapture.command = '';
-        this.showToast(this.t('desktopCaptureDisabledOk'), 'success');
-        this._pollDesktopCaptureStatus();
-      } else if (data?.needsAdmin) {
-        this.desktopCapture.needsAdmin = true;
-        this.desktopCapture.command = data.command || '';
-        this.showToast(this.t('desktopCaptureNeedsAdmin'), 'error');
-      } else {
-        this.showToast((data && data.error) || this.t('desktopCaptureFailed'), 'error');
+        this.showToast(this.t('desktopControlFailed'), 'error');
+        await this.loadDesktopControlStatus();
       }
     },
 

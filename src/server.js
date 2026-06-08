@@ -141,6 +141,11 @@ export function createServer({ port }) {
     console.error('[MCP] Failed to start MCP connection manager:', error.message);
   });
 
+  // Pre-warm the CliGate-OWNED desktop agent ONLY if the user explicitly opted
+  // in (both flags default to false). This spawns a child process that lives and
+  // dies with CliGate (see server close handler below) — it never installs
+  // scheduled tasks or touches Windows session/RDP state. Machine-level desktop
+  // preparation is a separate, explicit, admin-only path (capture-setup).
   if (settings.desktopAgent?.enabled === true && settings.desktopAgent?.autoStart === true) {
     desktopAgentService.start().catch((error) => {
       console.error('[DesktopAgent] Failed to auto-start desktop agent:', error.message);

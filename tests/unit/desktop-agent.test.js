@@ -10,6 +10,7 @@ import {
 import { AssistantDesktopClient } from '../../src/assistant-tools/desktop/client.js';
 import { DesktopAgentService } from '../../src/desktop-agent/service.js';
 import { DesktopAgentHttpClient } from '../../src/desktop-agent/http-client.js';
+import { manualCommand, removeLegacyCommand, uninstallCommand } from '../../src/desktop-agent/capture-setup.js';
 
 function mockRes() {
   return {
@@ -50,14 +51,25 @@ test('normalizeDesktopAgentConfig applies defaults and bounds', () => {
   assert.equal(normalized.idleTimeoutMs, 60_000);
 });
 
-test('normalizeDesktopAgentConfig preserves default enabled flags when legacy config omits them', () => {
+test('normalizeDesktopAgentConfig defaults enabled+autoStart to OFF when config omits them', () => {
+  // Desktop control is a CliGate-owned RUNTIME capability the user opts into —
+  // a fresh install must never auto-start it (and must never imply machine setup
+  // or scheduled tasks). Guards against regressing the startup-ownership fix.
   const normalized = normalizeDesktopAgentConfig({
     baseUrl: 'http://127.0.0.1:9999'
   });
 
-  assert.equal(normalized.enabled, true);
-  assert.equal(normalized.autoStart, true);
+  assert.equal(normalized.enabled, false);
+  assert.equal(normalized.autoStart, false);
   assert.equal(normalized.baseUrl, 'http://127.0.0.1:9999');
+});
+
+test('DEFAULT desktopAgent settings are off so server startup never auto-starts the agent', () => {
+  // src/server.js only pre-warms the agent when BOTH enabled && autoStart are
+  // true; both must default to false.
+  const normalized = normalizeDesktopAgentConfig({});
+  assert.equal(normalized.enabled, false);
+  assert.equal(normalized.autoStart, false);
 });
 
 test('server settings persist normalized desktopAgent config', () => {
@@ -620,6 +632,21 @@ test('DesktopAgentService status includes lease metadata', async () => {
   assert.equal(status.success, true);
   assert.equal(status.lease.activeLeaseId, 'lease-z');
   assert.equal(status.lease.busy, true);
+});
+
+test('capture-setup command helpers target setup-desktop-capture.ps1 with the right modes', () => {
+  // Machine preparation must NOT silently bundle reboot-survival auto-login: the
+  // default manual command passes -SkipAutoLogin.
+  assert.match(manualCommand(), /setup-desktop-capture\.ps1/);
+  assert.match(manualCommand(), /-SkipAutoLogin/);
+  assert.ok(!manualCommand({ autoLogin: true }).includes('-SkipAutoLogin'));
+
+  // The legacy-cleanup repair action removes only the auto-start tasks.
+  assert.match(removeLegacyCommand(), /-RemoveLegacyTasks/);
+  assert.match(removeLegacyCommand(), /setup-desktop-capture\.ps1/);
+
+  // Full revert.
+  assert.match(uninstallCommand(), /-Uninstall/);
 });
 
 test('DesktopAgentService ensureReady auto-starts and waits for health', async () => {

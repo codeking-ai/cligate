@@ -1,15 +1,20 @@
-// Desktop-capture SETUP service (Windows).
+// Desktop MACHINE-PREPARATION service (Windows).
 //
-// Backs the dashboard "Desktop control" toggle on the Assistant page. It does
-// NOT capture the screen itself — it configures the machine ONCE so that screen
-// capture + input work reliably in all three scenarios (physical monitor, HDMI
-// dummy display, Remote Desktop, including AFTER an RDP disconnect):
-//   - the desktop agent auto-starts in the logged-in session,
-//   - on RDP disconnect the session is bounced back to the console (stays
-//     unlocked),
-//   - (opt-in) the user auto-logs-in to the console so a headless box has a
-//     live desktop with nobody connected,
-//   - never lock / never sleep / no screensaver.
+// Backs the dashboard "Machine preparation (advanced)" surface on the Assistant
+// page. It does NOT capture the screen, and it does NOT auto-start any service.
+// Desktop control itself is a CliGate-OWNED runtime capability (the agent lives
+// and dies with CliGate). This service only does the *machine-level* Windows
+// preparation that headless/remote desktop use requires:
+//   - on RDP disconnect the (disconnected) session is bounced back to the
+//     console so the HDMI dummy / physical monitor keeps a live, unlocked
+//     desktop — RACE-SAFE: it never blocks an incoming/active RDP connection,
+//   - never lock / never sleep / no screensaver,
+//   - (opt-in) auto-login the user to the console so a headless box has a live
+//     desktop with nobody connected.
+//
+// It also DETECTS and REMOVES the legacy auto-start tasks (CliGateDesktopAgent,
+// CliGateServer) that used to bring the agent/CliGate up before the user opened
+// CliGate — see removeLegacyTasks().
 //
 // The heavy lifting lives in scripts/desktop-agent/setup-desktop-capture.ps1.
 // Enabling REQUIRES admin, so we launch that script ELEVATED via UAC
@@ -27,7 +32,13 @@ import { fileURLToPath } from 'node:url';
 import { logger } from '../utils/logger.js';
 
 const moduleDir = path.dirname(fileURLToPath(import.meta.url));
-const SETUP_SCRIPT = path.resolve(moduleDir, '..', '..', 'scripts', 'desktop-agent', 'setup-desktop-capture.ps1');
+const SETUP_SCRIPT_RAW = path.resolve(moduleDir, '..', '..', 'scripts', 'desktop-agent', 'setup-desktop-capture.ps1');
+// In a packaged Electron build the scripts live in app.asar.unpacked (asarUnpack),
+// because PowerShell cannot execute a file inside the asar virtual filesystem.
+// CliGate invokes this script INTERNALLY — the user never finds or runs it.
+const SETUP_SCRIPT = SETUP_SCRIPT_RAW.includes('app.asar')
+  ? SETUP_SCRIPT_RAW.replace('app.asar', 'app.asar.unpacked')
+  : SETUP_SCRIPT_RAW;
 
 function isWindows() {
   return process.platform === 'win32';
@@ -83,6 +94,17 @@ export function manualCommand({ autoLogin = false } = {}) {
   return `powershell -ExecutionPolicy Bypass -File "${SETUP_SCRIPT}"${autoLogin ? '' : ' -SkipAutoLogin'}`;
 }
 
+// Command to remove ONLY the legacy auto-start tasks (CliGateDesktopAgent +
+// CliGateServer) — the ones that used to start the agent/CliGate before the
+// user opened CliGate.
+export function removeLegacyCommand() {
+  return `powershell -ExecutionPolicy Bypass -File "${SETUP_SCRIPT}" -RemoveLegacyTasks`;
+}
+
+export function uninstallCommand() {
+  return `powershell -ExecutionPolicy Bypass -File "${SETUP_SCRIPT}" -Uninstall`;
+}
+
 export async function getStatus() {
   if (!isWindows()) {
     return { supported: false, enabled: false, platform: process.platform };
@@ -101,12 +123,30 @@ export async function getStatus() {
   } catch {
     details = {};
   }
-  // "enabled" = the capability that fixes the common case (works while/after RDP
-  // and on the console): the agent task plus the reconnect-to-console task. The
-  // auto-login flag is a separate, opt-in reboot-survival extra.
-  const enabled = details.agentTask === true && details.reconnectTask === true;
+  // "prepared" = the machine-level capability that keeps the desktop alive for
+  // headless/remote use: the race-safe reconnect-to-console task. It deliberately
+  // does NOT depend on any auto-start task — desktop control is CliGate-owned now.
+  const prepared = details.reconnectTask === true;
+  // Legacy auto-start tasks: these bring the agent/CliGate up BEFORE the user
+  // opens CliGate (and the agent task made the RDP-connect race worse). Surface
+  // them so the dashboard can warn + offer one-click removal.
+  const legacy = {
+    present: details.agentTask === true || details.serverTask === true,
+    agentTask: details.agentTask === true,
+    serverTask: details.serverTask === true
+  };
   const elevated = await isElevated();
-  return { supported: true, enabled, elevated, details, command: manualCommand({ autoLogin: false }) };
+  return {
+    supported: true,
+    prepared,
+    enabled: prepared, // back-compat alias for the existing dashboard toggle
+    elevated,
+    details,
+    legacy,
+    command: manualCommand({ autoLogin: false }),
+    removeLegacyCommand: removeLegacyCommand(),
+    uninstallCommand: uninstallCommand()
+  };
 }
 
 // Run the setup script DIRECTLY (we are already elevated) and capture the real
@@ -163,4 +203,37 @@ export async function disable() {
   return { ok: code === 0, ranDirect: true, code, tail };
 }
 
-export default { getStatus, enable, disable, isElevated, manualCommand };
+// Remove ONLY the legacy auto-start tasks (CliGateDesktopAgent + CliGateServer)
+// without touching the race-safe reconnect task, power/lock settings, or
+// auto-login. This is the "Remove legacy auto-start tasks" repair action.
+export async function removeLegacyTasks() {
+  if (!isWindows()) {
+    return { ok: false, supported: false, error: 'desktop machine preparation is Windows-only' };
+  }
+  const elevated = await isElevated();
+  if (!elevated) {
+    return {
+      ok: false,
+      needsAdmin: true,
+      command: removeLegacyCommand(),
+      error: 'CliGate is not running as administrator. Run the shown command once in an elevated PowerShell to remove the legacy auto-start tasks.'
+    };
+  }
+  const { code, tail } = await runScriptDirect(['-RemoveLegacyTasks']);
+  const status = await getStatus();
+  if (!status.legacy?.present) {
+    return { ok: true, ranDirect: true, code, status };
+  }
+  return { ok: false, ranDirect: true, code, error: 'removal ran but legacy tasks are still present; see the tail', tail, status };
+}
+
+export default {
+  getStatus,
+  enable,
+  disable,
+  removeLegacyTasks,
+  isElevated,
+  manualCommand,
+  removeLegacyCommand,
+  uninstallCommand
+};

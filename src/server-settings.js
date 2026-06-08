@@ -49,8 +49,13 @@ const DEFAULT_SETTINGS = {
         config: []
     },
     desktopAgent: {
-        enabled: true,
-        autoStart: true,
+        // Desktop control is OFF by default. It is a CliGate-owned RUNTIME
+        // capability the user explicitly enables from inside CliGate — never a
+        // machine-resident service that exists before CliGate is launched.
+        // (autoStart only pre-warms the CliGate-owned agent at server start; it
+        // installs no scheduled tasks and dies with CliGate.)
+        enabled: false,
+        autoStart: false,
         baseUrl: 'http://127.0.0.1:8765',
         token: '',
         command: '',
