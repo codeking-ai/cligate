@@ -4,6 +4,8 @@ export function createLogsPageModule() {
     logSearchQuery: '',
     logFilters: { INFO: true, SUCCESS: true, WARN: true, ERROR: true, DEBUG: false },
     logEventSource: null,
+    logStreamReconnectTimer: null,
+    logStreamConnected: false,
     reqLogEntries: [],
     reqLogDates: [],
     reqLogTotal: 0,
@@ -21,10 +23,12 @@ export function createLogsPageModule() {
     },
 
     startLogStream() {
-      if (this.logEventSource) this.logEventSource.close();
+      this.stopLogStream();
 
       this.logEventSource = new EventSource('/api/logs/stream?history=true');
+      this.logStreamConnected = false;
       this.logEventSource.onmessage = (event) => {
+        this.logStreamConnected = true;
         try {
           const log = JSON.parse(event.data);
           this.logs.unshift(log);
@@ -36,8 +40,30 @@ export function createLogsPageModule() {
       };
 
       this.logEventSource.onerror = () => {
-        setTimeout(() => this.startLogStream(), 3000);
+        this.logStreamConnected = false;
+        this.stopLogStream({ clearLogs: false, clearReconnect: false });
+        this.logStreamReconnectTimer = setTimeout(() => {
+          this.logStreamReconnectTimer = null;
+          if (this.activeTab === 'logs') {
+            this.startLogStream();
+          }
+        }, 3000);
       };
+    },
+
+    stopLogStream({ clearLogs = false, clearReconnect = true } = {}) {
+      if (this.logEventSource) {
+        this.logEventSource.close();
+        this.logEventSource = null;
+      }
+      this.logStreamConnected = false;
+      if (clearReconnect && this.logStreamReconnectTimer) {
+        clearTimeout(this.logStreamReconnectTimer);
+        this.logStreamReconnectTimer = null;
+      }
+      if (clearLogs) {
+        this.logs = [];
+      }
     },
 
     clearLogs() {

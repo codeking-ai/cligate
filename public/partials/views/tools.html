@@ -12,11 +12,11 @@
                             </svg>
                             <span x-text="toolsCheckingUpdates ? t('checkingUpdates') : t('checkUpdates')"></span>
                         </button>
-                        <button class="btn btn-sm btn-surface gap-1.5" @click="loadToolsStatus()">
-                            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <button class="btn btn-sm btn-surface gap-1.5" @click="loadToolsStatus()" :disabled="toolsStatusLoading">
+                            <svg class="w-3.5 h-3.5" :class="{'animate-spin': toolsStatusLoading}" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
                             </svg>
-                            <span x-text="t('refresh')"></span>
+                            <span x-text="toolsStatusLoading ? t('loading') : t('refresh')"></span>
                         </button>
                     </div>
                 </div>
@@ -45,6 +45,7 @@
                             <span class="meta-chip" x-text="t('detectedOS') + ': ' + toolsOS"></span>
                             <span class="meta-chip" x-text="t('toolsBatchUpdatesLabel') + ' ' + toolsWithUpdates()"></span>
                             <span class="meta-chip" x-text="t('toolsBatchNodeLabel') + ' ' + (toolsList.node?.installed ? t('toolsStateReady') : t('toolsStateMissing'))"></span>
+                            <span class="meta-chip" x-show="toolsStatusLoading" x-text="t('loading')"></span>
                         </div>
                     </div>
                     <div class="view-card overview-card overview-card-accent-purple">

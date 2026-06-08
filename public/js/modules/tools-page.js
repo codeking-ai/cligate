@@ -13,6 +13,7 @@ export function createToolsPageModule() {
     configViewerError: '',
     toolsList: {},
     toolsOS: '',
+    toolsStatusLoading: false,
     toolsInstalling: { node: false, claude: false, codex: false, gemini: false, openclaw: false },
     toolsErrors: {},
     toolsInstallingAll: false,
@@ -237,6 +238,7 @@ export function createToolsPageModule() {
     },
 
     async loadToolsStatus() {
+      this.toolsStatusLoading = true;
       const res = await this.api('/api/tools/status');
       if (res.ok && res.data) {
         this.toolsList = res.data.tools || {};
@@ -248,7 +250,7 @@ export function createToolsPageModule() {
           this.nodeInstallInfo = infoRes.data;
         }
       }
-      this.checkToolUpdates();
+      this.toolsStatusLoading = false;
     },
 
     async installNodeJs() {

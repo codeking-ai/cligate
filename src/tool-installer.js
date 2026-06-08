@@ -75,6 +75,7 @@ const DEFAULT_EXECUTION_ADAPTER = {
             return null;
         }
     },
+    runCommandAsync: null,
     spawnCommand(command, args, options) {
         return spawn(command, args, options);
     }
@@ -93,6 +94,21 @@ function runCommand(cmd) {
     return executionAdapter.runCommand(cmd);
 }
 
+async function runCommandAsync(cmd, { timeoutMs = 15000, env = process.env } = {}) {
+    if (typeof executionAdapter.runCommandAsync === 'function') {
+        return executionAdapter.runCommandAsync(cmd, { timeoutMs, env });
+    }
+    const result = await spawnWithCapture(cmd, [], {
+        shell: true,
+        timeoutMs,
+        env
+    });
+    if (!result.success) {
+        return null;
+    }
+    return String(result.stdout || '').trim() || null;
+}
+
 function extractVersion(raw) {
     if (!raw) return null;
     const firstLine = raw.split('\n')[0].trim();
@@ -105,6 +121,18 @@ function detectTool(toolId) {
     if (!tool) return { installed: false, error: 'Unknown tool' };
 
     const version = runCommand(`${tool.command} ${tool.versionFlag}`);
+    if (version) {
+        const cleanVersion = extractVersion(version);
+        return { installed: true, version: cleanVersion };
+    }
+    return { installed: false };
+}
+
+async function detectToolAsync(toolId) {
+    const tool = TOOLS[toolId];
+    if (!tool) return { installed: false, error: 'Unknown tool' };
+
+    const version = await runCommandAsync(`${tool.command} ${tool.versionFlag}`);
     if (version) {
         const cleanVersion = extractVersion(version);
         return { installed: true, version: cleanVersion };
@@ -394,12 +422,12 @@ function buildNodeInstallInfoForOS(os) {
     }
 }
 
-export function detectAllTools() {
+export async function detectAllTools() {
     const os = getOS();
     const results = {};
 
     for (const [id, tool] of Object.entries(TOOLS)) {
-        const status = detectTool(id);
+        const status = await detectToolAsync(id);
         results[id] = {
             ...tool,
             id,
@@ -407,7 +435,7 @@ export function detectAllTools() {
         };
     }
 
-    const npmVersion = runCommand('npm --version');
+    const npmVersion = await runCommandAsync('npm --version');
     results.node.npmInstalled = !!npmVersion;
     results.node.npmVersion = npmVersion || null;
 
@@ -458,7 +486,7 @@ async function installOrUpdateTool(toolId, packageSpecifier, actionLabel) {
         return finalizeCommandResult(result, actionLabel);
     }
 
-    const status = detectTool(toolId);
+    const status = await detectToolAsync(toolId);
     const output = result.usedFallback
         ? `${result.output}\nInstalled via fallback registry after official source failure.`.trim()
         : result.output;
@@ -522,7 +550,7 @@ export function compareVersions(a, b) {
     return 0;
 }
 
-export function checkLatestVersion(toolId) {
+export async function checkLatestVersion(toolId) {
     const tool = TOOLS[toolId];
     if (!tool || !tool.npmPackage) return null;
 
@@ -531,7 +559,7 @@ export function checkLatestVersion(toolId) {
         return cached.latestVersion;
     }
 
-    const official = runCommand(`npm view ${tool.npmPackage} version --registry=${OFFICIAL_NPM_REGISTRY}`);
+    const official = await runCommandAsync(`npm view ${tool.npmPackage} version --registry=${OFFICIAL_NPM_REGISTRY}`);
     if (official) {
         const latestVersion = official.split('\n')[0].replace(/^v/, '').trim();
         versionCache[toolId] = { latestVersion, checkedAt: Date.now() };
@@ -539,7 +567,7 @@ export function checkLatestVersion(toolId) {
     }
 
     for (let attempt = 1; attempt < OFFICIAL_VIEW_RETRY_LIMIT; attempt += 1) {
-        const retry = runCommand(`npm view ${tool.npmPackage} version --registry=${OFFICIAL_NPM_REGISTRY}`);
+        const retry = await runCommandAsync(`npm view ${tool.npmPackage} version --registry=${OFFICIAL_NPM_REGISTRY}`);
         if (retry) {
             const latestVersion = retry.split('\n')[0].replace(/^v/, '').trim();
             versionCache[toolId] = { latestVersion, checkedAt: Date.now() };
@@ -551,7 +579,7 @@ export function checkLatestVersion(toolId) {
         return null;
     }
 
-    const fallback = runCommand(`npm view ${tool.npmPackage} version --registry=${FALLBACK_NPM_REGISTRY}`);
+    const fallback = await runCommandAsync(`npm view ${tool.npmPackage} version --registry=${FALLBACK_NPM_REGISTRY}`);
     if (fallback) {
         const latestVersion = fallback.split('\n')[0].replace(/^v/, '').trim();
         versionCache[toolId] = { latestVersion, checkedAt: Date.now() };
@@ -561,11 +589,11 @@ export function checkLatestVersion(toolId) {
     return null;
 }
 
-export function checkAllLatestVersions() {
+export async function checkAllLatestVersions() {
     const results = {};
     for (const toolId of Object.keys(TOOLS)) {
         if (TOOLS[toolId].npmPackage) {
-            const latest = checkLatestVersion(toolId);
+            const latest = await checkLatestVersion(toolId);
             if (latest) {
                 results[toolId] = latest;
             }

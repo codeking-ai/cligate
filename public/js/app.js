@@ -111,6 +111,88 @@ function createShellModule() {
       localStorage.setItem('proxy-theme', this.darkMode ? 'dark' : 'light');
     },
 
+    loadInitialDataForTab(tab = this.activeTab) {
+      this.refreshAccounts();
+      this.refreshClaudeAccounts();
+      this.refreshAntigravityAccounts();
+      this.checkHealth();
+
+      if (tab === 'dashboard') {
+        this.refreshProxyStatus();
+        this.loadHaikuModelSetting();
+        this.loadKiloModels();
+        return;
+      }
+
+      if (tab === 'chat') {
+        this.loadChatSessions();
+        this.ensureChatDependenciesLoaded();
+        this.loadAgentRuntimeSessions();
+        return;
+      }
+
+      if (tab === 'logs') {
+        this.startLogStream();
+        return;
+      }
+
+      if (tab === 'settings' || tab === 'routing') {
+        this.refreshProxyStatus();
+        this.loadHaikuModelSetting();
+        this.loadAccountStrategySetting();
+        this.loadRoutingPrioritySetting();
+        this.loadRoutingModeSetting();
+        this.loadAppRoutingSettings();
+        this.loadFreeModelsSetting();
+        this.loadKiloModels();
+        return;
+      }
+
+      if (tab === 'assistantAgent') {
+        this.loadAssistantAgentConfig();
+        this.loadAssistantAgentStatus();
+        this.loadModelMappings();
+        return;
+      }
+
+      if (tab === 'localModels') {
+        this.loadLocalModelRoutingSetting();
+        this.loadLocalRuntimeStatus();
+        return;
+      }
+
+      if (tab === 'tools') {
+        this.refreshProxyStatus();
+        return;
+      }
+
+      if (tab === 'assistantTasks') {
+        this.loadAssistantTasks();
+        return;
+      }
+
+      if (tab === 'assistantWorkbench') {
+        this.loadAssistantWorkbench();
+        return;
+      }
+
+      if (tab === 'scheduledTasks') {
+        this.loadScheduledTasks();
+      }
+    },
+
+    ensureChatDependenciesLoaded() {
+      if (!Array.isArray(this.chatSources) || this.chatSources.length === 0) {
+        this.loadChatSources();
+      }
+      if (!Array.isArray(this.chatModels) || this.chatModels.length === 0) {
+        this.loadChatModels();
+      }
+      if (!Array.isArray(this.agentRuntimeProviders) || this.agentRuntimeProviders.length === 0) {
+        this.loadAgentRuntimeProviders();
+      }
+    },
+
     init() {
       document.documentElement.classList.toggle('light', !this.darkMode);
       document.documentElement.classList.toggle('dark', this.darkMode);
@@ -122,10 +204,7 @@ function createShellModule() {
       this.ensureActiveNavSection();
       this.updateTime();
       setInterval(() => this.updateTime(), 1000);
-      this.refreshAccounts();
-      this.refreshClaudeAccounts();
-      this.refreshAntigravityAccounts();
-      this.checkHealth();
+      this.loadInitialDataForTab(this.activeTab);
       setInterval(() => this.checkHealth(), 30000);
       setInterval(() => {
         if (this.activeTab === 'chat') {
@@ -154,24 +233,6 @@ function createShellModule() {
           }
         }
       }, 5000);
-      this.startLogStream();
-      this.loadHaikuModelSetting();
-      this.loadAccountStrategySetting();
-      this.loadRoutingPrioritySetting();
-      this.loadRoutingModeSetting();
-      this.loadAppRoutingSettings();
-      this.loadFreeModelsSetting();
-      this.loadAssistantAgentConfig();
-      this.loadLocalModelRoutingSetting();
-      this.loadLocalRuntimeStatus();
-      this.loadKiloModels();
-      this.refreshProxyStatus();
-      this.loadChatSessions();
-      this.loadChatSources();
-      this.loadChatModels();
-      this.loadModelMappings();
-      this.loadAgentRuntimeProviders();
-      this.loadAgentRuntimeSessions();
       this.initConfigViewerFromUrl();
 
       window.addEventListener('resize', () => {
@@ -286,11 +347,14 @@ function createShellModule() {
       if (tab === 'pricing') this.loadPricingData();
       if (tab === 'apiExplorer' && !this.apiExplorerResponse) this.loadApiExplorerPreset(this.apiExplorerPresetIndex);
       if (tab === 'dashboard') this.refreshProxyStatus();
+      if (tab === 'logs') {
+        this.startLogStream();
+      } else if (this.logEventSource || this.logStreamReconnectTimer) {
+        this.stopLogStream();
+      }
       if (tab === 'localModels') this.loadLocalRuntimeStatus();
       if (tab === 'chat') {
-        this.loadChatSources();
-        this.loadChatModels();
-        this.loadAgentRuntimeProviders();
+        this.ensureChatDependenciesLoaded();
         this.loadAgentRuntimeSessions();
         if (typeof this.loadChannelConversations === 'function') {
           this.loadChannelConversations({ silent: true });

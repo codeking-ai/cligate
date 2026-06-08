@@ -10,8 +10,8 @@
 import { detectAllTools, getNodeInstallInfo, installTool, installNode, checkAllLatestVersions, updateTool } from '../tool-installer.js';
 import { launchTool } from '../tool-launcher.js';
 
-export function handleGetToolsStatus(req, res) {
-    const status = detectAllTools();
+export async function handleGetToolsStatus(req, res) {
+    const status = await detectAllTools();
     res.json({ success: true, ...status });
 }
 
@@ -49,8 +49,8 @@ export function handleLaunchTool(req, res) {
     }
 }
 
-export function handleCheckUpdates(req, res) {
-    const latestVersions = checkAllLatestVersions();
+export async function handleCheckUpdates(req, res) {
+    const latestVersions = await checkAllLatestVersions();
     res.json({ success: true, latestVersions });
 }
 

@@ -52,6 +52,11 @@ test('installTool stays on official npm registry when official install succeeds'
       if (command === 'codex --version') return 'codex-cli 0.117.0';
       return null;
     },
+    runCommandAsync(command) {
+      if (command === 'npm --version') return Promise.resolve('10.9.0');
+      if (command === 'codex --version') return Promise.resolve('codex-cli 0.117.0');
+      return Promise.resolve(null);
+    },
     spawnCommand(command, args, options) {
       spawnCalls.push({ command, args, options });
       return createMockChildProcess({ stdout: 'installed from official', code: 0 });
@@ -79,6 +84,11 @@ test('installTool falls back only after official npm registry fails with network
       if (command === 'npm --version') return '10.9.0';
       if (command === 'codex --version') return 'codex-cli 0.117.0';
       return null;
+    },
+    runCommandAsync(command) {
+      if (command === 'npm --version') return Promise.resolve('10.9.0');
+      if (command === 'codex --version') return Promise.resolve('codex-cli 0.117.0');
+      return Promise.resolve(null);
     },
     spawnCommand(command, args, options) {
       spawnCalls.push({ command, args, options });
@@ -115,6 +125,10 @@ test('installTool does not fall back for non-network npm failures', async () => 
       if (command === 'npm --version') return '10.9.0';
       return null;
     },
+    runCommandAsync(command) {
+      if (command === 'npm --version') return Promise.resolve('10.9.0');
+      return Promise.resolve(null);
+    },
     spawnCommand(command, args, options) {
       spawnCalls.push({ command, args, options });
       return createMockChildProcess({
@@ -133,7 +147,7 @@ test('installTool does not fall back for non-network npm failures', async () => 
   assert.match(result.error, /official source/i);
 });
 
-test('checkLatestVersion uses fallback registry only when official lookups fail', () => {
+test('checkLatestVersion uses fallback registry only when official lookups fail', async () => {
   const calls = [];
 
   __setToolInstallerExecutionAdapterForTests({
@@ -143,9 +157,16 @@ test('checkLatestVersion uses fallback registry only when official lookups fail'
       if (command.includes('--registry=https://registry.npmmirror.com/')) return '0.200.0';
       return null;
     }
+    ,
+    runCommandAsync(command) {
+      calls.push(command);
+      if (command.includes('--registry=https://registry.npmjs.org/')) return Promise.resolve(null);
+      if (command.includes('--registry=https://registry.npmmirror.com/')) return Promise.resolve('0.200.0');
+      return Promise.resolve(null);
+    }
   });
 
-  const latest = checkLatestVersion('codex');
+  const latest = await checkLatestVersion('codex');
 
   assert.equal(latest, '0.200.0');
   assert.equal(calls.length, 3);
@@ -162,6 +183,11 @@ test('updateTool keeps package identity while using fallback transport when need
       if (command === 'npm --version') return '10.9.0';
       if (command === 'gemini --version') return '0.34.0';
       return null;
+    },
+    runCommandAsync(command) {
+      if (command === 'npm --version') return Promise.resolve('10.9.0');
+      if (command === 'gemini --version') return Promise.resolve('0.34.0');
+      return Promise.resolve(null);
     },
     spawnCommand(command, args, options) {
       spawnCalls.push({ command, args, options });
