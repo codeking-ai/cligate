@@ -6,11 +6,14 @@ import agentChannelConversationStore from '../../agent-channels/conversation-sto
 import artifactService from '../../assistant-core/artifact-service.js';
 
 // Channels whose provider can actually deliver an image today. delivery-sender
-// passes `images` to every provider, but providers without image support
+// passes `images` to every provider, but a provider without image support would
 // silently ignore them — so we keep an explicit list here to report honest
 // imageDelivered results to the supervisor instead of pretending an image went
-// out. Extend this when a provider gains real image support.
-const IMAGE_CAPABLE_CHANNELS = new Set(['dingtalk']);
+// out. DingTalk (sampleImageMsg), Feishu (im/v1/images → msg_type:image), and
+// Telegram (sendPhoto multipart) all upload the bytes themselves, so a local
+// (localhost / file path) artifact is deliverable. Extend this when another
+// provider gains real image support.
+const IMAGE_CAPABLE_CHANNELS = new Set(['dingtalk', 'feishu', 'telegram']);
 
 function inferImageMediaType(filePath) {
   const s = String(filePath || '').toLowerCase();

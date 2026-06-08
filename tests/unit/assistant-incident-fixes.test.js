@@ -30,6 +30,9 @@ function makeHandler({ sendImpl, conversations = {}, artifacts = {} } = {}) {
 
 const dingtalkConv = { id: 'c-ding', channel: 'dingtalk', accountId: 'default' };
 const feishuConv = { id: 'c-feishu', channel: 'feishu', accountId: 'default' };
+const telegramConv = { id: 'c-tg', channel: 'telegram', accountId: 'default' };
+// A channel with no image-capable provider — exercises the degrade/skip path.
+const noImageConv = { id: 'c-noimg', channel: 'webchat', accountId: 'default' };
 
 test('definition wires to handlers.sendMessageToChannel and is serialized + mutating', () => {
   const def = createSendMessageToChannelToolDefinition({ handlers: { sendMessageToChannel: 'HANDLER' } });
@@ -55,11 +58,40 @@ test('sends an image by path to DingTalk and reports imageDelivered=true', async
   assert.equal(sent[0].message.images[0].path, 'D:\\tmp\\screen.png');
 });
 
-test('image to a non-image channel (feishu) with text degrades to text-only; image is NOT passed', async () => {
+test('sends an image by path to Feishu and reports imageDelivered=true', async () => {
   const { handlers, sent } = makeHandler({ conversations: { 'c-feishu': feishuConv } });
   const res = await handlers.sendMessageToChannel({
     input: { text: 'here is the page', imagePath: 'D:\\tmp\\screen.png' },
     context: { conversation: feishuConv }
+  });
+  assert.equal(res.kind, 'channel_send_result');
+  assert.equal(res.delivered, true);
+  assert.equal(res.imageRequested, true);
+  assert.equal(res.imageSupported, true);
+  assert.equal(res.imageDelivered, true);
+  assert.equal(sent[0].message.images.length, 1);
+  assert.equal(sent[0].message.images[0].path, 'D:\\tmp\\screen.png');
+});
+
+test('sends an image-only message to Telegram and reports imageDelivered=true', async () => {
+  const { handlers, sent } = makeHandler({ conversations: { 'c-tg': telegramConv } });
+  const res = await handlers.sendMessageToChannel({
+    input: { imagePath: 'D:\\tmp\\screen.png' },
+    context: { conversation: telegramConv }
+  });
+  assert.equal(res.delivered, true);
+  assert.equal(res.imageRequested, true);
+  assert.equal(res.imageSupported, true);
+  assert.equal(res.imageDelivered, true);
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0].message.images.length, 1);
+});
+
+test('image to a channel without image support, with text, degrades to text-only; image is NOT passed', async () => {
+  const { handlers, sent } = makeHandler({ conversations: { 'c-noimg': noImageConv } });
+  const res = await handlers.sendMessageToChannel({
+    input: { text: 'here is the page', imagePath: 'D:\\tmp\\screen.png' },
+    context: { conversation: noImageConv }
   });
   assert.equal(res.delivered, true);
   assert.equal(res.imageRequested, true);
@@ -69,11 +101,11 @@ test('image to a non-image channel (feishu) with text degrades to text-only; ima
   assert.equal(sent[0].message.images.length, 0);
 });
 
-test('image-only to a non-image channel with no text is skipped (never sends an empty message)', async () => {
-  const { handlers, sent } = makeHandler({ conversations: { 'c-feishu': feishuConv } });
+test('image-only to a channel without image support and no text is skipped (never sends an empty message)', async () => {
+  const { handlers, sent } = makeHandler({ conversations: { 'c-noimg': noImageConv } });
   const res = await handlers.sendMessageToChannel({
     input: { imagePath: 'D:\\tmp\\screen.png' },
-    context: { conversation: feishuConv }
+    context: { conversation: noImageConv }
   });
   assert.equal(res.kind, 'channel_send_skipped');
   assert.equal(res.delivered, false);
