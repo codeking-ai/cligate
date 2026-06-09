@@ -67,18 +67,42 @@ export function createChannelsPageModule() {
       };
 
       for (const provider of this.channelCatalog) {
-        addOption(provider?.id, provider?.label);
+        addOption(provider?.id, this.channelProviderLabel(provider));
       }
 
       for (const provider of this.channelProviders) {
-        addOption(provider?.id, provider?.label);
+        addOption(provider?.id, this.channelProviderLabel(provider));
       }
 
       for (const conversation of this.channelConversations) {
-        addOption(conversation?.channel, conversation?.channel);
+        addOption(conversation?.channel, this.channelLabel(conversation?.channel));
       }
 
       return options;
+    },
+
+    channelLabel(channelId) {
+      const normalized = String(channelId || '').trim().toLowerCase();
+      if (!normalized) return '';
+      const key = `channelName_${normalized}`;
+      const translated = this.t(key);
+      return translated && translated !== key ? translated : normalized;
+    },
+
+    channelProviderLabel(provider) {
+      if (!provider) return '';
+      return this.channelLabel(provider.id || provider.providerId || provider.label || '');
+    },
+
+    channelInstanceLabel(instance) {
+      const label = String(instance?.label || '').trim();
+      if (!label) return this.t('channelInstanceDefault');
+      if (label === 'Default') return this.t('channelInstanceDefault');
+      return label;
+    },
+
+    channelInstanceIdLabel(instanceId) {
+      return String(instanceId || '').trim() || this.t('channelInstanceDefault');
     },
 
     channelProviderStatusClass(provider) {
@@ -127,17 +151,17 @@ export function createChannelsPageModule() {
     },
 
     channelSectionLabel(section) {
-      if (section === 'basic') return 'Basic';
-      if (section === 'auth') return 'Auth';
-      if (section === 'transport') return 'Transport';
-      if (section === 'runtime') return 'Runtime';
-      if (section === 'security') return 'Security';
-      return 'Advanced';
+      if (section === 'basic') return this.t('channelSectionBasic');
+      if (section === 'auth') return this.t('channelSectionAuth');
+      if (section === 'transport') return this.t('channelSectionTransport');
+      if (section === 'runtime') return this.t('channelSectionRuntime');
+      if (section === 'security') return this.t('channelSectionSecurity');
+      return this.t('channelSectionAdvanced');
     },
 
     defaultChannelFieldValue(field) {
       if (field?.key === 'id') return 'default';
-      if (field?.key === 'label') return 'Default';
+      if (field?.key === 'label') return this.t('channelInstanceDefault');
       if (field?.type === 'boolean') return false;
       if (field?.type === 'number') return 0;
       if (field?.type === 'select' && Array.isArray(field.options) && field.options[0]) return field.options[0].value;
@@ -148,7 +172,7 @@ export function createChannelsPageModule() {
     buildDefaultChannelInstance(provider, overrides = {}) {
       const instance = {
         id: 'default',
-        label: 'Default'
+        label: this.t('channelInstanceDefault')
       };
       for (const field of (provider?.configFields || [])) {
         instance[field.key] = this.defaultChannelFieldValue(field);
@@ -169,7 +193,7 @@ export function createChannelsPageModule() {
       }
       for (const instance of this.channelSettings[provider.id].instances) {
         if (!instance.id) instance.id = 'default';
-        if (!instance.label) instance.label = instance.id === 'default' ? 'Default' : instance.id;
+        if (!instance.label) instance.label = instance.id === 'default' ? this.t('channelInstanceDefault') : instance.id;
         for (const field of (provider.configFields || [])) {
           if (instance[field.key] === undefined) {
             instance[field.key] = this.defaultChannelFieldValue(field);
@@ -441,7 +465,7 @@ export function createChannelsPageModule() {
       if (!provider?.id) return;
       const payload = this.buildDefaultChannelInstance(provider, {
         id: `${provider.id}-${Date.now().toString(36).slice(-4)}`,
-        label: `Instance ${(this.channelProviderInstances(provider).length || 0) + 1}`,
+        label: this.t('channelInstanceNumbered', (this.channelProviderInstances(provider).length || 0) + 1),
         enabled: false
       });
       const { ok, data } = await this.api(`/api/agent-channels/settings/${encodeURIComponent(provider.id)}`, {

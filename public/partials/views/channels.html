@@ -24,8 +24,8 @@
                                 <div class="flex items-start justify-between gap-3">
                                     <div>
                                         <div class="text-sm font-semibold text-white">
-                                            <span x-text="provider.label || provider.providerId || provider.id"></span>
-                                            <span class="text-gray-500 font-mono text-xs ml-2" x-text="provider.instanceLabel || provider.instanceId || 'default'"></span>
+                                            <span x-text="channelProviderLabel(provider)"></span>
+                                            <span class="text-gray-500 font-mono text-xs ml-2" x-text="channelInstanceIdLabel(provider.instanceLabel || provider.instanceId)"></span>
                                         </div>
                                         <div class="text-xs text-gray-500 font-mono mt-1">
                                             <span x-text="provider.status?.mode || provider.capabilities?.mode || '-'"></span>
@@ -50,11 +50,11 @@
                                     <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" class="w-4 h-4 text-neon-cyan">
                                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7h16M4 12h12M4 17h8"></path>
                                     </svg>
-                                    <h3 class="text-xs font-mono text-gray-400 uppercase tracking-widest" x-text="provider.label || provider.id"></h3>
+                                    <h3 class="text-xs font-mono text-gray-400 uppercase tracking-widest" x-text="channelProviderLabel(provider)"></h3>
                                 </div>
                                 <button class="btn btn-xs bg-space-800 hover:bg-space-700 border border-space-border text-gray-200"
                                     @click="addChannelInstance(provider)">
-                                    + Instance
+                                    <span x-text="t('channelAddInstance')"></span>
                                 </button>
                             </div>
                             <div class="space-y-5">
@@ -65,9 +65,9 @@
                                             @click="toggleChannelInstanceExpanded(provider.id, instance.id)">
                                             <div class="min-w-0 flex-1">
                                                 <div class="flex items-center gap-3 min-w-0">
-                                                    <div class="text-sm font-semibold text-white truncate" x-text="instance.label || instance.id"></div>
+                                                    <div class="text-sm font-semibold text-white truncate" x-text="channelInstanceLabel(instance)"></div>
                                                     <div class="text-[11px] text-gray-500 font-mono truncate">
-                                                        <span>ID: </span><span x-text="instance.id || 'default'"></span>
+                                                        <span x-text="t('channelInstanceIdPrefix')"></span><span x-text="channelInstanceIdLabel(instance.id)"></span>
                                                     </div>
                                                 </div>
                                                 <div class="text-xs text-gray-500 font-mono mt-1 truncate" x-text="channelInstanceSummary(provider, instance)"></div>
@@ -80,7 +80,8 @@
                                                 </template>
                                                 <button class="btn btn-xs btn-ghost text-red-300 hover:bg-red-500/10"
                                                     x-show="channelProviderInstances(provider).length > 1"
-                                                    @click.stop="removeChannelInstance(provider, instance)">Delete</button>
+                                                    @click.stop="removeChannelInstance(provider, instance)"
+                                                    x-text="t('delete')"></button>
                                                 <svg class="w-4 h-4 text-gray-500 transition-transform"
                                                     :class="isChannelInstanceExpanded(provider.id, instance.id) ? 'rotate-180' : ''"
                                                     fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -154,7 +155,7 @@
                                                             <div class="text-xs text-gray-500 font-mono mt-2" x-show="channelFieldDescription(field)" x-text="channelFieldDescription(field)"></div>
                                                             <div class="text-xs text-gray-500 font-mono mt-2"
                                                                 x-show="field.key === 'mode' && channelWebhookHint(provider.id, instance)"
-                                                                x-text="'Webhook: ' + channelWebhookHint(provider.id, instance)"></div>
+                                                                x-text="t('channelWebhookLabel', channelWebhookHint(provider.id, instance))"></div>
                                                         </div>
                                                     </template>
                                                 </div>
