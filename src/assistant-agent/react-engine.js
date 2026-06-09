@@ -31,6 +31,43 @@ function isChineseText(text) {
   return /[\u3400-\u9fff]/.test(String(text || ''));
 }
 
+// A continuation / auto turn \u2014 e.g. the "[Assistant continuation \u2014 system
+// auto-message, not from the user] \u2026" prompt spawned after a tool approval \u2014
+// is system-generated and hardcoded English. It is NOT a signal of the user's
+// language. Detecting reply language from it is what flipped a Chinese
+// conversation into English confirmation prompts mid-task (the "\u4e2d\u82f1\u6587\u4e24\u7248"
+// approval requests the user saw: turn 1 in Chinese, the continuation turns in
+// English).
+function isSystemAuthoredTurn(text) {
+  const trimmed = String(text || '').trimStart();
+  if (!trimmed) return true;
+  return trimmed.startsWith('[Assistant continuation')
+    || trimmed.includes('system auto-message')
+    || trimmed.includes('not from the user');
+}
+
+// Resolve the assistant's reply language from the user's actual language rather
+// than the current turn's raw text. The current text is authoritative only when
+// it is a genuine user message; for system-authored continuation turns we look
+// back to the most recent real user turn so the language stays consistent for
+// the whole task (every confirmation prompt in the user's language).
+export function resolveReplyLanguage(text, conversationContext = null) {
+  if (text && !isSystemAuthoredTurn(text)) {
+    return isChineseText(text) ? 'zh-CN' : 'en';
+  }
+  const turns = Array.isArray(conversationContext?.recentChatTurns)
+    ? conversationContext.recentChatTurns
+    : [];
+  for (let i = turns.length - 1; i >= 0; i -= 1) {
+    const turn = turns[i];
+    if (String(turn?.role || '') !== 'user') continue;
+    const turnText = String(turn?.text || '');
+    if (!turnText || isSystemAuthoredTurn(turnText)) continue;
+    return isChineseText(turnText) ? 'zh-CN' : 'en';
+  }
+  return isChineseText(text) ? 'zh-CN' : 'en';
+}
+
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -249,7 +286,7 @@ export class AssistantReactEngine {
     cwd = '',
     model = ''
   } = {}) {
-    const language = isChineseText(text) ? 'zh-CN' : 'en';
+    const language = resolveReplyLanguage(text, conversationContext);
     const discoveredSkills = skillManager.discoverForCwd(cwd || process.cwd()).skills;
     const restoredSkills = restoreActiveSkillsFromCheckpoint(run);
     const explicitSkills = collectExplicitSkillMentions(text, discoveredSkills);

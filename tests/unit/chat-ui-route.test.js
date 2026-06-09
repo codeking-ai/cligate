@@ -1009,6 +1009,186 @@ test('handleConfirmAssistantToolAction clears persisted conversation pending sta
   }
 });
 
+test('handleConfirmAssistantToolAction enables task-scoped auto-approve after the first command approval', async () => {
+  // Root cause B fix: a single "read this PDF" task fired a fresh confirmation
+  // for every probe (python --version → where … → markitdown). Approving the
+  // first command must flip on conversation auto-approve so the supervisor's
+  // continuation runs don't re-prompt for each subsequent step.
+  const workspaceRoot = process.cwd();
+  const command = process.platform === 'win32' ? 'echo first-approval' : 'printf first-approval';
+  const conversationId = 'conversation-exec-confirm-autoapprove-1';
+  const pendingAction = assistantPendingActionStore.create({
+    conversationId,
+    assistantRunId: 'run-exec-confirm-autoapprove-1',
+    toolName: 'run_shell_command',
+    input: { command },
+    title: 'Confirmation required before continuing',
+    summary: `Target scope: ${workspaceRoot}`,
+    metadata: { requestedPath: workspaceRoot }
+  });
+
+  const originalGet = chatUiConversationStore.get;
+  const originalPatch = chatUiConversationStore.patch;
+  const conversation = {
+    id: conversationId,
+    externalConversationId: 'chat-autoapprove-1',
+    metadata: {
+      assistantCore: {
+        pendingActionConfirmToken: pendingAction.confirmToken
+        // autoApproveTools intentionally absent → starts OFF.
+      }
+    }
+  };
+  chatUiConversationStore.get = (id) => (id === conversationId ? conversation : null);
+  chatUiConversationStore.patch = (id, patch) => {
+    if (id !== conversationId) return conversation;
+    conversation.metadata = { ...(conversation.metadata || {}), ...(patch.metadata || {}) };
+    return conversation;
+  };
+
+  try {
+    const res = mockRes();
+    await handleConfirmAssistantToolAction({ body: { confirmToken: pendingAction.confirmToken } }, res);
+
+    assert.equal(res._status, 200);
+    assert.equal(res._body.success, true);
+    assert.equal(res._body.autoApproveEnabled, true);
+    assert.equal(conversation.metadata.assistantCore.autoApproveTools, true);
+    // The first-approval acknowledgement tells the user later steps won't re-prompt.
+    assert.match(String(res._body.result || ''), /自动放行|Auto-approve/);
+  } finally {
+    chatUiConversationStore.get = originalGet;
+    chatUiConversationStore.patch = originalPatch;
+    assistantPendingActionStore.dismiss(pendingAction.confirmToken);
+  }
+});
+
+test('handleConfirmAssistantToolAction does not claim auto-approve when no conversation exists to persist it', async () => {
+  const pendingAction = assistantPendingActionStore.create({
+    conversationId: '',
+    assistantRunId: 'run-exec-confirm-no-conversation-1',
+    toolName: 'run_shell_command',
+    input: { command: process.platform === 'win32' ? 'echo no-conversation' : 'printf no-conversation' },
+    title: 'Confirmation required before continuing',
+    summary: `Target scope: ${process.cwd()}`,
+    metadata: { requestedPath: process.cwd() }
+  });
+
+  try {
+    const res = mockRes();
+    await handleConfirmAssistantToolAction({ body: { confirmToken: pendingAction.confirmToken } }, res);
+
+    assert.equal(res._status, 200);
+    assert.equal(res._body.success, true);
+    assert.equal(res._body.autoApproveEnabled, false);
+    assert.doesNotMatch(String(res._body.result || ''), /Auto-approve is on|自动放行/);
+  } finally {
+    assistantPendingActionStore.dismiss(pendingAction.confirmToken);
+  }
+});
+
+test('approving a command does NOT resurrect the confirm button (markResolved must not re-merge a stale uiChatMessages snapshot)', async () => {
+  // Root cause of the persisting "点击报错 / 审批重复": handleConfirmAssistantToolAction
+  // captured `conversation` BEFORE clearConversationPendingActionState ran, then
+  // markAssistantRunConfirmationResolved spread that stale snapshot (uiChatMessages
+  // still carrying the confirmToken) back over the just-cleared store copy. The
+  // button reappeared → re-click hit a consumed token (error) and users re-typed
+  // "同意" (duplicate run). This mock mirrors the REAL store: patch returns a NEW
+  // object and never mutates the caller's captured reference.
+  const conversationId = 'conv-no-resurrect-1';
+  const command = process.platform === 'win32' ? 'echo ok-no-resurrect' : 'printf ok-no-resurrect';
+  const pendingAction = assistantPendingActionStore.create({
+    conversationId,
+    assistantRunId: 'run-no-resurrect-1',
+    toolName: 'run_shell_command',
+    input: { command },
+    title: 'Confirmation required before continuing',
+    summary: `Target scope: ${process.cwd()}`,
+    metadata: { requestedPath: process.cwd() }
+  });
+
+  let storeConv = {
+    id: conversationId,
+    externalConversationId: '', // empty → continuation no-ops (no live LLM call)
+    metadata: {
+      assistantCore: { pendingActionConfirmToken: pendingAction.confirmToken },
+      uiChatMessages: [{
+        role: 'assistant',
+        kind: 'agent-message',
+        assistantRunId: 'run-no-resurrect-1',
+        runStatus: 'waiting_user',
+        pendingAction: { confirmToken: pendingAction.confirmToken }
+      }]
+    }
+  };
+  const originalGet = chatUiConversationStore.get;
+  const originalPatch = chatUiConversationStore.patch;
+  chatUiConversationStore.get = (id) => (id === conversationId ? storeConv : null);
+  chatUiConversationStore.patch = (id, patch) => {
+    if (id !== conversationId) return null;
+    const mergedMetadata = {
+      ...(storeConv.metadata || {}),
+      ...((patch && patch.metadata) || {})
+    };
+    storeConv = { ...storeConv, ...patch, metadata: mergedMetadata }; // NEW object, like save()
+    return storeConv;
+  };
+
+  try {
+    const res = mockRes();
+    await handleConfirmAssistantToolAction({ body: { confirmToken: pendingAction.confirmToken } }, res);
+
+    assert.equal(res._status, 200);
+    assert.equal(res._body.success, true);
+    // The button must be cleared AND stay cleared after every post-approval patch.
+    assert.equal(storeConv.metadata.uiChatMessages[0].pendingAction, null);
+    assert.equal(storeConv.metadata.assistantCore.pendingActionConfirmToken, null);
+  } finally {
+    chatUiConversationStore.get = originalGet;
+    chatUiConversationStore.patch = originalPatch;
+    assistantPendingActionStore.dismiss(pendingAction.confirmToken);
+  }
+});
+
+test('clicking an already-consumed/expired confirm token is recovered as already-resolved, not a 400 error', async () => {
+  // The 确认 button is rendered from persisted uiChatMessages and can outlive the
+  // single-use in-memory token. Clicking it once the token is gone must report a
+  // friendly resolved result (and clear the dead button) instead of falling
+  // through to the legacy proxy executor's `expired_or_missing` 400.
+  const conversationId = 'conv-stale-token-recovery-1';
+  const deadToken = 'dead-token-recovery-1';
+  const conversation = {
+    id: conversationId,
+    channel: 'chat-ui',
+    metadata: {
+      assistantCore: {}, // no pending run → ensurePendingAssistantAction returns null → resolved
+      uiChatMessages: [{
+        role: 'assistant',
+        kind: 'agent-message',
+        content: '我准备执行一条系统命令，需要你确认。',
+        pendingAction: { confirmToken: deadToken, kind: 'assistant_tool_confirmation' }
+      }]
+    }
+  };
+  const store = chatUiConversationStore;
+  store.conversations.push(conversation);
+
+  try {
+    assert.equal(assistantPendingActionStore.get(deadToken), null);
+    const res = mockRes();
+    await handleConfirmAssistantToolAction({ body: { confirmToken: deadToken } }, res);
+
+    assert.equal(res._status, 200, `expected 200, got ${res._status}: ${JSON.stringify(res._body)}`);
+    assert.equal(res._body.success, true);
+    assert.equal(res._body.alreadyResolved, true);
+    const refreshed = store.get(conversationId) || conversation;
+    assert.equal(refreshed.metadata.uiChatMessages[0].pendingAction, null);
+  } finally {
+    const idx = store.conversations.findIndex((c) => c.id === conversationId);
+    if (idx >= 0) store.conversations.splice(idx, 1);
+  }
+});
+
 test('handleConfirmAssistantToolAction replays approved direct MCP tool confirmations with mounted MCP tools', async () => {
   const conversationId = 'conversation-mcp-direct-confirm-1';
   const pendingAction = assistantPendingActionStore.create({

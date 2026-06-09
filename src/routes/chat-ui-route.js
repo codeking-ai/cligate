@@ -325,14 +325,24 @@ function markAssistantRunConfirmationResolved(conversation = null, action = {}, 
   }
 
   if (conversation?.id) {
-    const ac = (conversation?.metadata?.assistantCore && typeof conversation.metadata.assistantCore === 'object')
-      ? conversation.metadata.assistantCore
+    // CRITICAL: re-read the LIVE conversation instead of spreading the stale
+    // `conversation` snapshot captured before clearConversationPendingActionState
+    // ran. That snapshot still carries the pre-approval uiChatMessages — WITH the
+    // confirmToken on the pending bubble. Spreading `...conversation.metadata`
+    // here re-merged that stale array over the just-cleared one (the store does a
+    // metadata-level shallow merge), so the 确认 button reappeared after approval:
+    // re-clicking it hit an already-consumed token (the "点击报错"), and the
+    // lingering button made users re-type "同意", spawning a duplicate run / reply
+    // (the "审批重复"). Patch ONLY assistantCore and let the store preserve the
+    // cleared uiChatMessages.
+    const live = chatUiConversationStore.get(conversation.id) || conversation;
+    const ac = (live?.metadata?.assistantCore && typeof live.metadata.assistantCore === 'object')
+      ? live.metadata.assistantCore
       : {};
     const summary = String(toolResult?.message || '').trim()
       || `已批准并执行 ${String(action?.toolName || '').trim() || '操作'}`;
     chatUiConversationStore.patch(conversation.id, {
       metadata: {
-        ...(conversation.metadata || {}),
         assistantCore: {
           ...ac,
           lastRunSummary: summary,
@@ -464,6 +474,56 @@ function rebuildPendingActionFromRun(conversation = null) {
     pendingActionStore: assistantPendingActionStore,
     conversationStore: chatUiConversationStore
   });
+}
+
+// Locate the chat-ui conversation whose persisted uiChatMessages still render a
+// 确认 button for this confirmToken. The button can outlive the in-memory token
+// (single-use + 10-min TTL + wiped on restart, plus stale buttons rendered
+// before the markAssistantRunConfirmationResolved fix), so this tells "stale
+// assistant confirmation button" apart from a legacy proxy-toggle token.
+function findConversationByPendingConfirmToken(token) {
+  const target = String(token || '').trim();
+  if (!target) return null;
+  const conversations = Array.isArray(chatUiConversationStore.conversations)
+    ? chatUiConversationStore.conversations
+    : [];
+  return conversations.find((conversation) => {
+    const messages = Array.isArray(conversation?.metadata?.uiChatMessages)
+      ? conversation.metadata.uiChatMessages
+      : [];
+    return messages.some((message) => (
+      String(message?.pendingAction?.confirmToken || '').trim() === target
+    ));
+  }) || null;
+}
+
+// confirmToken is single-use (consume() deletes it) and lives only in memory.
+// When it is gone we must NOT fall through to the unrelated legacy
+// executePendingAssistantAction (a different store that only knows proxy
+// enable/disable tokens) — that always returns `expired_or_missing`, the exact
+// "click → error" users hit on an approval button. Instead: if the underlying
+// run is genuinely still pending, rebuild a fresh token and re-drive it;
+// otherwise treat it as already-resolved and clear the stale button.
+function recoverMissingAssistantConfirmation(token) {
+  const conversation = findConversationByPendingConfirmToken(token);
+  if (!conversation) {
+    return null; // not an assistant tool confirmation — let the legacy path handle it
+  }
+  const rebuilt = ensurePendingAssistantAction(conversation, {
+    runStore: assistantRunStore,
+    pendingActionStore: assistantPendingActionStore,
+    conversationStore: chatUiConversationStore
+  });
+  if (rebuilt?.confirmToken) {
+    return { rebuiltToken: rebuilt.confirmToken };
+  }
+  // Run already completed/expired. Drop the stale persisted button(s) so the
+  // user cannot click it into another error.
+  clearConversationPendingActionState(conversation);
+  return {
+    resolved: true,
+    message: '该操作已处理或已过期，无需重复确认。 / This action was already handled or has expired.'
+  };
 }
 
 function buildDeliveryArtifactRefs(refs = []) {
@@ -1417,17 +1477,35 @@ export async function handleConfirmAssistantToolAction(req, res) {
         // feeds the real tool result back into the supervisor LLM so it
         // continues the user's original multi-step task (open browser →
         // search → download → install, etc.) on its own.
-        const continuationConversation = conversation?.id
+        const baseContinuationConversation = conversation?.id
           ? (chatUiConversationStore.get(conversation.id) || conversation)
           : conversation;
+        // Task-scoped auto-approve: once the user has approved the FIRST command
+        // in this conversation, stop interrupting them for every subsequent step
+        // of the same task. Without this, a single "read this PDF" request fired
+        // a fresh confirmation for each probe (python --version → where … →
+        // markitdown) — the repeated approval prompts the user reported. The
+        // supervisor reads assistantCore.autoApproveTools (react-engine.js) to
+        // skip the gate; /safe (or a new chat) turns it back off.
+        const canPersistAutoApprove = Boolean(baseContinuationConversation?.id);
+        const autoApproveWasOn = getAutoApproveToolsState(baseContinuationConversation);
+        const continuationConversation = canPersistAutoApprove
+          ? applyAutoApproveToolsPatch(baseContinuationConversation, true)
+          : baseContinuationConversation;
         spawnAssistantContinuationAfterConfirmation({
           conversation: continuationConversation,
           action: assistantPendingAction,
           routeResult
         });
+        const autoApproveEnabled = canPersistAutoApprove && !autoApproveWasOn;
+        const autoApproveNote = autoApproveEnabled
+          ? '\n\n已为本次对话开启自动放行，后续步骤不再逐条确认（发送 /safe 可恢复逐次确认）。'
+            + '\nAuto-approve is on for this conversation; later steps run without asking (send /safe to revert).'
+          : '';
         return res.json({
           success: true,
-          result: routeResult?.message || `Confirmed and executed ${assistantPendingAction.toolName}.`,
+          result: (routeResult?.message || `Confirmed and executed ${assistantPendingAction.toolName}.`) + autoApproveNote,
+          autoApproveEnabled,
           routeResult
         });
       } catch (error) {
@@ -1465,6 +1543,22 @@ export async function handleConfirmAssistantToolAction(req, res) {
         error: error?.message || 'assistant confirmation execution failed'
       });
     }
+  }
+
+  // Token missing from the in-memory store: recover instead of erroring on a
+  // persisted/stale button. Either re-drive a still-pending run or report it as
+  // already handled — never leak `expired_or_missing` from the legacy proxy
+  // executor for what is actually an assistant tool confirmation.
+  const recovery = recoverMissingAssistantConfirmation(normalizedToken);
+  if (recovery?.rebuiltToken) {
+    return handleConfirmAssistantToolAction({ body: { confirmToken: recovery.rebuiltToken } }, res);
+  }
+  if (recovery?.resolved) {
+    return res.json({
+      success: true,
+      alreadyResolved: true,
+      result: recovery.message
+    });
   }
 
   const result = await executePendingAssistantAction(normalizedToken);

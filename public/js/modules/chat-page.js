@@ -179,6 +179,16 @@ export function createChatPageModule() {
       return map[value] || 'text-gray-300 border-space-border/40 bg-space-800/60';
     },
 
+    // Channels that must never appear as REMOTE history cards: `chat-ui`/`web`
+    // are the local Web chats themselves (already shown as local cards), and
+    // any `*-scope` (e.g. `scheduled-task-scope`) is an internal conversation
+    // scope, not a user-facing channel.
+    isHiddenHistoryChannel(channel) {
+      const value = String(channel || '').toLowerCase();
+      if (!value) return false;
+      return value === 'chat-ui' || value === 'web' || value.endsWith('-scope');
+    },
+
     unifiedChatHistory() {
       const filter = String(this.chatHistoryChannelFilter || 'all');
       const localItems = (this.chatSessions || []).map((session) => {
@@ -203,21 +213,46 @@ export function createChatPageModule() {
         };
       });
 
-      const remoteItems = (this.channelConversations || []).map((conv) => {
-        const channel = String(conv.channel || conv.provider || 'unknown').toLowerCase();
-        const subtitleParts = [conv.provider, conv.channel].filter(Boolean);
-        return {
-          id: 'remote:' + conv.id,
-          type: 'remote',
-          channel,
-          title: conv.title || conv.externalConversationId || conv.id || '-',
-          subtitle: subtitleParts.join(' · '),
-          preview: conv.lastMessagePreview || conv.summary || '',
-          badgeUnread: false,
-          updatedAt: conv.lastMessageAt || conv.updatedAt || new Date(0).toISOString(),
-          raw: conv
-        };
-      });
+      // Web Chat conversations live on the `chat-ui` channel server-side, so
+      // /api/agent-channels/conversations returns them alongside true external
+      // channels — but they are ALREADY shown as local session cards (channel
+      // 'web'). Listing them again as "Chat UI / chat_xxx" remote cards was the
+      // bulk of the history duplication (7 local + 44 remote = 51 cards, where
+      // ~29 remote were chat-ui echoes of local chats). `scheduled-task-scope`
+      // (and any other internal *-scope) is not a user conversation at all.
+      // Drop both here, and dedupe a remote channel already opened as a local
+      // shadow session (originConversationId) — that was the telegram double card.
+      const localConversationIds = new Set(
+        (this.chatSessions || [])
+          .map((session) => String(session.originConversationId || '').trim())
+          .filter(Boolean)
+      );
+      const seenRemoteConversationIds = new Set();
+      const remoteItems = (this.channelConversations || [])
+        .filter((conv) => {
+          const channel = String(conv.channel || conv.provider || '').toLowerCase();
+          if (this.isHiddenHistoryChannel(channel)) return false;
+          const conversationId = String(conv.conversationId || conv.id || '').trim();
+          if (conversationId && localConversationIds.has(conversationId)) return false;
+          if (conversationId && seenRemoteConversationIds.has(conversationId)) return false;
+          if (conversationId) seenRemoteConversationIds.add(conversationId);
+          return true;
+        })
+        .map((conv) => {
+          const channel = String(conv.channel || conv.provider || 'unknown').toLowerCase();
+          const subtitleParts = [conv.provider, conv.channel].filter(Boolean);
+          return {
+            id: 'remote:' + conv.id,
+            type: 'remote',
+            channel,
+            title: conv.title || conv.externalConversationId || conv.id || '-',
+            subtitle: subtitleParts.join(' · '),
+            preview: conv.lastMessagePreview || conv.summary || '',
+            badgeUnread: false,
+            updatedAt: conv.lastMessageAt || conv.updatedAt || new Date(0).toISOString(),
+            raw: conv
+          };
+        });
 
       const all = [...localItems, ...remoteItems];
       const filtered = filter === 'all' ? all : all.filter((card) => card.channel === filter);
@@ -236,6 +271,8 @@ export function createChatPageModule() {
       };
       push('web');
       for (const conv of (this.channelConversations || [])) {
+        const channel = String(conv.channel || '').toLowerCase();
+        if (this.isHiddenHistoryChannel(channel)) continue;
         push(conv.channel);
       }
       return opts;

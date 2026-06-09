@@ -354,6 +354,17 @@ function createShellModule() {
       }
       if (tab === 'localModels') this.loadLocalRuntimeStatus();
       if (tab === 'chat') {
+        // Initialize chat sessions from localStorage (and auto-create one when
+        // none exist) the first time the chat tab is shown. loadInitialDataForTab
+        // only does this when chat is the *initial* tab; navigating here from
+        // another tab via setActiveTab used to skip it, leaving chatSessions=[]
+        // and activeChatSessionId='' — so getActiveChatSession() returned null
+        // and sendChatMessage()/Ctrl+Enter silently no-op'd until the user
+        // manually clicked "新建对话". Guarded so revisiting chat keeps the
+        // currently-open session instead of resetting to the most recent one.
+        if (!Array.isArray(this.chatSessions) || this.chatSessions.length === 0 || !this.activeChatSessionId) {
+          this.loadChatSessions();
+        }
         this.ensureChatDependenciesLoaded();
         this.loadAgentRuntimeSessions();
         if (typeof this.loadChannelConversations === 'function') {
