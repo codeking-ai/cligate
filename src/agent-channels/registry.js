@@ -1,6 +1,7 @@
 import DingTalkChannelProvider from './providers/dingtalk-provider.js';
 import FeishuChannelProvider from './providers/feishu-provider.js';
 import TelegramChannelProvider from './providers/telegram-provider.js';
+import WeixinChannelProvider from './providers/weixin-provider.js';
 
 function buildProviderDescriptor(provider) {
   return {
@@ -38,6 +39,7 @@ export function createDefaultAgentChannelRegistry() {
   registry.register(new TelegramChannelProvider());
   registry.register(new FeishuChannelProvider());
   registry.register(new DingTalkChannelProvider());
+  registry.register(new WeixinChannelProvider());
   return registry;
 }
 

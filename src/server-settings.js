@@ -95,6 +95,15 @@ const DEFAULT_SETTINGS = {
             defaultRuntimeProvider: 'codex',
             cwd: '',
             requirePairing: false
+        },
+        weixin: {
+            enabled: false,
+            mode: 'polling',
+            accountId: '',
+            pollingIntervalMs: 3000,
+            defaultRuntimeProvider: 'codex',
+            cwd: '',
+            requirePairing: false
         }
     }
 };
@@ -164,7 +173,8 @@ function normalizeChannelsConfig(channels = {}) {
     return {
         telegram: normalizeChannelProviderConfig('telegram', channels.telegram),
         feishu: normalizeChannelProviderConfig('feishu', channels.feishu),
-        dingtalk: normalizeChannelProviderConfig('dingtalk', channels.dingtalk)
+        dingtalk: normalizeChannelProviderConfig('dingtalk', channels.dingtalk),
+        weixin: normalizeChannelProviderConfig('weixin', channels.weixin)
     };
 }
 

@@ -63,10 +63,12 @@
   },
   "dependencies": {
     "@larksuiteoapi/node-sdk": "^1.61.0",
+    "@tencent-weixin/openclaw-weixin": "2.4.3",
     "cors": "^2.8.5",
     "express": "^4.18.2",
     "fzstd": "^0.1.1",
-    "js-yaml": "^4.2.0"
+    "js-yaml": "^4.2.0",
+    "qrcode": "^1.5.4"
   },
   "devDependencies": {
     "electron": "^41.0.3",

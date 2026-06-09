@@ -89,7 +89,32 @@
                                             </div>
                                         </div>
                                         <div x-show="isChannelInstanceExpanded(provider.id, instance.id)" x-transition class="px-4 pb-4 space-y-4 border-t border-space-border/20">
-                                            <div class="pt-4"></div>
+                                             <div class="pt-4"></div>
+                                            <template x-if="provider.id === 'weixin'">
+                                                <div class="rounded-xl border border-emerald-500/20 bg-emerald-500/5 p-3 space-y-3">
+                                                    <div class="flex items-center justify-between gap-3">
+                                                        <div>
+                                                            <div class="text-sm font-semibold text-white" x-text="t('channelWeixinBindTitle')"></div>
+                                                            <div class="text-xs text-gray-500 font-mono mt-1" x-text="instance.accountId ? t('channelWeixinBoundAccount', instance.accountId) : t('channelWeixinBindDesc')"></div>
+                                                        </div>
+                                                        <button class="btn btn-xs bg-emerald-500/90 hover:bg-emerald-400 text-space-950 border-none"
+                                                            @click.stop="startWeixinBinding(instance)"
+                                                            :disabled="weixinBindingState(instance).status === 'loading' || weixinBindingState(instance).status === 'showing'">
+                                                            <span x-text="weixinBindingState(instance).status === 'loading' || weixinBindingState(instance).status === 'showing' ? t('channelWeixinBinding') : t('channelWeixinBindAction')"></span>
+                                                        </button>
+                                                    </div>
+                                                    <template x-if="weixinBindingState(instance).url">
+                                                        <div class="flex items-center gap-3">
+                                                            <img class="w-36 h-36 rounded-lg border border-space-border bg-white p-1 object-contain"
+                                                                :src="weixinBindingState(instance).url"
+                                                                :alt="t('channelWeixinQrAlt')">
+                                                            <div class="text-xs text-gray-400 font-mono" x-text="t('channelWeixinScanHint')"></div>
+                                                        </div>
+                                                    </template>
+                                                    <div class="text-xs text-emerald-300 font-mono" x-show="weixinBindingState(instance).status === 'success'" x-text="t('channelWeixinBindSuccess')"></div>
+                                                    <div class="text-xs text-red-300 font-mono" x-show="weixinBindingState(instance).status === 'error'" x-text="weixinBindingState(instance).error"></div>
+                                                </div>
+                                            </template>
                                             <template x-for="group in channelProviderFormSections(provider)" :key="provider.id + '-' + instance.id + '-' + group.section">
                                                 <div class="space-y-3">
                                                     <div class="text-[11px] font-mono uppercase tracking-widest text-gray-500" x-text="channelSectionLabel(group.section)"></div>

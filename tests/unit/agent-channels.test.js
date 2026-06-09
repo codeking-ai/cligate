@@ -24,6 +24,7 @@ import assistantPendingActionStore from '../../src/assistant-core/pending-action
 import FeishuChannelProvider from '../../src/agent-channels/providers/feishu-provider.js';
 import DingTalkChannelProvider from '../../src/agent-channels/providers/dingtalk-provider.js';
 import TelegramChannelProvider from '../../src/agent-channels/providers/telegram-provider.js';
+import WeixinChannelProvider from '../../src/agent-channels/providers/weixin-provider.js';
 import { formatAgentRuntimeEventForChannel } from '../../src/agent-channels/formatter.js';
 import {
   buildAgentChannelSessionRecords,
@@ -2797,7 +2798,9 @@ test('AgentChannelManager starts enabled telegram provider from settings', async
     outboundDispatcher: { start() {}, stop() {} },
     settingsProvider: () => ({
       channels: {
-        telegram: { enabled: true, mode: 'polling', botToken: 'token' }
+        telegram: {
+          instances: [{ id: 'default', enabled: true, mode: 'polling', botToken: 'token' }]
+        }
       }
     }),
     settingsWriter: (patch) => ({
@@ -2807,7 +2810,7 @@ test('AgentChannelManager starts enabled telegram provider from settings', async
 
   const providers = await manager.start();
   assert.equal(started, 1);
-  assert.equal(stopped, 1);
+  assert.equal(stopped, 0);
   assert.equal(providers[0].status.running, true);
 });
 
@@ -2926,10 +2929,12 @@ test('channel providers do not expose a runtime model config field', () => {
   const telegram = new TelegramChannelProvider();
   const feishu = new FeishuChannelProvider();
   const dingtalk = new DingTalkChannelProvider();
+  const weixin = new WeixinChannelProvider();
 
   assert.equal(telegram.configFields.some((field) => field.key === 'model'), false);
   assert.equal(feishu.configFields.some((field) => field.key === 'model'), false);
   assert.equal(dingtalk.configFields.some((field) => field.key === 'model'), false);
+  assert.equal(weixin.configFields.some((field) => field.key === 'model'), false);
 });
 
 test('FeishuChannelProvider does not pass a channel model into router options', async () => {

@@ -224,6 +224,20 @@ export function createChannelsPageModule() {
       return parts.filter(Boolean).join(' · ');
     },
 
+    weixinBindingState(instance) {
+      if (!instance) return null;
+      if (!instance._weixinBinding) {
+        instance._weixinBinding = {
+          status: 'idle',
+          url: '',
+          sessionKey: '',
+          error: '',
+          pollTimer: null
+        };
+      }
+      return instance._weixinBinding;
+    },
+
     channelWebhookHint(providerId, instance) {
       if (!instance || instance.mode !== 'webhook') return '';
       if (providerId === 'feishu' || providerId === 'dingtalk') {
@@ -495,6 +509,64 @@ export function createChannelsPageModule() {
       } finally {
         this.channelSettingsSaving[saveKey] = false;
       }
+    },
+
+    async startWeixinBinding(instance) {
+      if (!instance) return;
+      const state = this.weixinBindingState(instance);
+      if (state.pollTimer) {
+        clearTimeout(state.pollTimer);
+        state.pollTimer = null;
+      }
+      state.status = 'loading';
+      state.url = '';
+      state.sessionKey = '';
+      state.error = '';
+      const { ok, data, error } = await this.api('/api/agent-channels/weixin/login/start', {
+        method: 'POST',
+        body: JSON.stringify({
+          force: true,
+          accountId: instance.accountId || ''
+        })
+      });
+      if (!ok || !data?.success || !data?.url || !data?.sessionKey) {
+        state.status = 'error';
+        state.error = data?.error || error || this.t('channelWeixinBindFailed');
+        return;
+      }
+      state.status = 'showing';
+      state.url = data.url;
+      state.sessionKey = data.sessionKey;
+      this.pollWeixinBinding(instance);
+    },
+
+    async pollWeixinBinding(instance) {
+      const state = this.weixinBindingState(instance);
+      if (!state.sessionKey || state.status !== 'showing') return;
+      const { ok, data, error } = await this.api('/api/agent-channels/weixin/login/poll', {
+        method: 'POST',
+        body: JSON.stringify({
+          sessionKey: state.sessionKey,
+          instanceId: instance.id || 'default',
+          timeoutMs: 35000
+        })
+      });
+      if (ok && data?.done && data?.accountId) {
+        state.status = 'success';
+        state.error = '';
+        instance.accountId = data.accountId;
+        instance.enabled = true;
+        await this.loadChannelSettings();
+        await this.loadChannelProviders();
+        this.showToast(this.t('channelWeixinBindSuccess'), 'success');
+        return;
+      }
+      if (ok && data?.success && data?.done === false && !data?.message) {
+        state.pollTimer = setTimeout(() => this.pollWeixinBinding(instance), 3000);
+        return;
+      }
+      state.status = 'error';
+      state.error = data?.error || data?.message || error || this.t('channelWeixinBindFailed');
     },
 
     async approveChannelPairing(conversation) {

@@ -161,6 +161,8 @@ import {
   handleUpdateAgentChannelSettings,
   handleDeleteAgentChannelInstance,
   handleRefreshAgentChannels,
+  handleWeixinLoginStart,
+  handleWeixinLoginPoll,
   handleFeishuChannelWebhook,
   handleDingTalkChannelWebhook,
   handleListAgentChannelConversations,
@@ -519,6 +521,8 @@ export function registerApiRoutes(app, { port }) {
   app.put('/api/agent-channels/settings/:channel/:instanceId', handleUpdateAgentChannelSettings);
   app.delete('/api/agent-channels/settings/:channel/:instanceId', handleDeleteAgentChannelInstance);
   app.post('/api/agent-channels/refresh', handleRefreshAgentChannels);
+  app.post('/api/agent-channels/weixin/login/start', handleWeixinLoginStart);
+  app.post('/api/agent-channels/weixin/login/poll', handleWeixinLoginPoll);
   app.post('/api/agent-channels/feishu/webhook', handleFeishuChannelWebhook);
   app.post('/api/agent-channels/dingtalk/webhook', handleDingTalkChannelWebhook);
   app.get('/api/agent-channels/session-records', handleListAgentChannelSessionRecords);

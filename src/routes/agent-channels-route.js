@@ -4,7 +4,8 @@ import agentChannelManager from '../agent-channels/manager.js';
 import agentChannelPairingStore from '../agent-channels/pairing-store.js';
 import agentChannelRegistry from '../agent-channels/registry.js';
 import agentRuntimeSessionManager from '../agent-runtime/session-manager.js';
-import { getServerSettings } from '../server-settings.js';
+import { getServerSettings, setServerSettings } from '../server-settings.js';
+import weixinLoginService from '../agent-channels/providers/weixin/login-service.js';
 
 function parseLimit(value, fallback = 50) {
   const parsed = Number.parseInt(String(value || ''), 10);
@@ -300,6 +301,86 @@ export async function handleRefreshAgentChannels(_req, res) {
   });
 }
 
+export async function handleWeixinLoginStart(req, res) {
+  try {
+    const result = await weixinLoginService.startLogin({
+      force: req.body?.force !== false,
+      accountId: req.body?.accountId || ''
+    });
+    return res.json({
+      success: true,
+      ...result
+    });
+  } catch (error) {
+    return res.status(500).json({ success: false, error: error.message });
+  }
+}
+
+export async function handleWeixinLoginPoll(req, res) {
+  try {
+    const sessionKey = String(req.body?.sessionKey || req.body?.deviceCode || '').trim();
+    if (!sessionKey) {
+      return res.status(400).json({ success: false, error: 'sessionKey is required' });
+    }
+    const result = await weixinLoginService.waitForLogin({
+      sessionKey,
+      timeoutMs: Math.min(Number(req.body?.timeoutMs || 35_000), 35_000)
+    });
+    if (!result.connected) {
+      return res.json({
+        success: true,
+        done: false,
+        message: result.message || ''
+      });
+    }
+
+    const settings = getServerSettings();
+    const requestedInstanceId = String(req.body?.instanceId || 'default');
+    const instances = Array.isArray(settings.channels?.weixin?.instances)
+      ? settings.channels.weixin.instances
+      : [];
+    const hasInstance = instances.some((entry) => String(entry?.id || 'default') === requestedInstanceId);
+    const nextInstances = (hasInstance ? instances : [{
+      id: requestedInstanceId,
+      label: requestedInstanceId === 'default' ? 'Default' : requestedInstanceId,
+      enabled: false,
+      mode: 'polling',
+      pollingIntervalMs: 3000,
+      defaultRuntimeProvider: 'codex',
+      cwd: '',
+      requirePairing: false
+    }]).map((instance) => (
+      String(instance?.id || 'default') === requestedInstanceId
+        ? {
+            ...instance,
+            enabled: true,
+            mode: 'polling',
+            accountId: result.accountId
+          }
+        : instance
+    ));
+    setServerSettings({
+      channels: {
+        ...settings.channels,
+        weixin: {
+          instances: nextInstances
+        }
+      }
+    });
+    await agentChannelManager.refresh();
+
+    return res.json({
+      success: true,
+      done: true,
+      accountId: result.accountId,
+      sessionKey: result.sessionKey,
+      message: result.message || ''
+    });
+  } catch (error) {
+    return res.status(500).json({ success: false, error: error.message });
+  }
+}
+
 export async function handleFeishuChannelWebhook(req, res) {
   try {
     const settings = getServerSettings().channels?.feishu || {};
@@ -460,6 +541,8 @@ export default {
   handleUpdateAgentChannelSettings,
   handleDeleteAgentChannelInstance,
   handleRefreshAgentChannels,
+  handleWeixinLoginStart,
+  handleWeixinLoginPoll,
   handleFeishuChannelWebhook,
   handleDingTalkChannelWebhook,
   handleListAgentChannelConversations,
