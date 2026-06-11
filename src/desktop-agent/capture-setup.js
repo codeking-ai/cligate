@@ -27,6 +27,7 @@
 // the scheduled tasks + auto-login flag) to confirm the result.
 
 import { spawn } from 'node:child_process';
+import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { logger } from '../utils/logger.js';
@@ -39,6 +40,39 @@ const SETUP_SCRIPT_RAW = path.resolve(moduleDir, '..', '..', 'scripts', 'desktop
 const SETUP_SCRIPT = SETUP_SCRIPT_RAW.includes('app.asar')
   ? SETUP_SCRIPT_RAW.replace('app.asar', 'app.asar.unpacked')
   : SETUP_SCRIPT_RAW;
+
+// Elevation-independent "prepared" marker the setup script writes (elevated) in
+// the world-readable ProgramData dir. CliGateReconnectConsole runs as SYSTEM and
+// a SYSTEM task is invisible to a non-elevated Get-ScheduledTask, so when CliGate
+// is NOT elevated the task probe alone would report prepared:false and re-prompt
+// for admin on every restart. Reading this flag with plain fs (no elevation, no
+// PowerShell) keeps the "set up once" contract regardless of how CliGate runs.
+const PREPARED_MARKER = process.platform === 'win32'
+  ? path.join(process.env.ProgramData || 'C:\\ProgramData', 'CliGate', 'desktop-prepared.flag')
+  : '';
+
+// Bump whenever the bundled machine-prep (setup-desktop-capture.ps1 /
+// reconnect-console.ps1) changes in a way that MUST be redeployed to machines
+// that are already "prepared". The setup script stamps this number into the
+// marker; a machine whose marker version is lower is treated as NOT fully
+// prepared, so the next enable re-runs the prep (one UAC consent, or silent when
+// elevated) and the fixed worker lands in ProgramData. Without this, an
+// already-prepared machine would keep running an outdated/buggy worker forever.
+// MUST stay in sync with $preparedVersion in setup-desktop-capture.ps1.
+//   v2: fix qwinsta parsing of the blank-SESSIONNAME disconnected-session row
+//       (the reconnect-to-console bounce silently never ran before this).
+const PREPARED_VERSION = 2;
+
+// Version stamped in the marker (0 = absent / legacy unversioned marker).
+function preparedMarkerVersion() {
+  try {
+    if (!PREPARED_MARKER || !existsSync(PREPARED_MARKER)) return 0;
+    const match = readFileSync(PREPARED_MARKER, 'utf8').match(/version\s*=\s*(\d+)/i);
+    return match ? Number(match[1]) : 0;
+  } catch {
+    return 0;
+  }
+}
 
 function isWindows() {
   return process.platform === 'win32';
@@ -126,7 +160,11 @@ export async function getStatus() {
   // "prepared" = the machine-level capability that keeps the desktop alive for
   // headless/remote use: the race-safe reconnect-to-console task. It deliberately
   // does NOT depend on any auto-start task — desktop control is CliGate-owned now.
-  const prepared = details.reconnectTask === true;
+  // The SYSTEM-registered task is invisible to a non-elevated probe, so the
+  // authoritative, elevation-independent signal is the versioned marker the
+  // setup writes: prepared only when its version is current. A lower/absent
+  // version means a worker fix needs (re)deploying, so the next enable re-runs.
+  const prepared = preparedMarkerVersion() >= PREPARED_VERSION;
   // Legacy auto-start tasks: these bring the agent/CliGate up BEFORE the user
   // opens CliGate (and the agent task made the RDP-connect race worse). Surface
   // them so the dashboard can warn + offer one-click removal.
@@ -156,6 +194,91 @@ async function runScriptDirect(scriptArgs, { timeoutMs = 180000 } = {}) {
   const args = ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', SETUP_SCRIPT, ...scriptArgs];
   const { code, out, err } = await runPowerShell(args, { timeoutMs });
   return { code, tail: String(`${out || ''}\n${err || ''}`).trim().slice(-800) };
+}
+
+// Wrap a string as a PowerShell single-quoted literal (escape embedded quotes).
+function psSingleQuote(value) {
+  return `'${String(value).replace(/'/g, "''")}'`;
+}
+
+// Launch the machine-prep script ELEVATED via a Windows UAC consent prompt.
+// CliGate runs inside the user's INTERACTIVE desktop session, so the consent
+// dialog (drawn by the system on the secure desktop) appears on the host's
+// screen — console or Remote Desktop — and the user clicks "Yes" once. The
+// outer powershell is non-interactive/hidden; that does NOT suppress the UAC
+// consent (window visibility and -NonInteractive are unrelated to consent.exe).
+//
+// We do NOT -Wait: the elevated child is a separate process whose exit code we
+// cannot read across the elevation boundary, so the dashboard confirms the
+// result by polling getStatus().prepared. We still capture the LAUNCHER's own
+// stdout so a cancelled consent ("operation was canceled by the user") is
+// logged rather than looking like a silent success. Returns immediately so the
+// HTTP request never blocks on the human responding to UAC.
+//
+// (The historical "RunAs silently fails" note above was the chicken-and-egg of
+// trying to elevate while the session was already locked/disconnected — i.e.
+// the very state this feature exists to prevent. When the user enables this
+// while connected and at the desktop, the consent shows.)
+function launchElevatedSetup(scriptArgs) {
+  const inner = ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-File', SETUP_SCRIPT, ...scriptArgs];
+  const innerList = inner.map(psSingleQuote).join(',');
+  const psCommand = `try { Start-Process -FilePath 'powershell.exe' -Verb RunAs -WindowStyle Hidden -ArgumentList ${innerList}; Write-Output 'launched' } catch { Write-Output ('declined:' + $_.Exception.Message) }`;
+  let child;
+  try {
+    child = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', psCommand], {
+      windowsHide: true
+    });
+  } catch (error) {
+    return { launched: false, error: String(error?.message || error) };
+  }
+  let out = '';
+  child.stdout?.on('data', (chunk) => { out += chunk.toString(); });
+  child.on('close', () => {
+    const text = String(out || '').trim();
+    if (text.startsWith('declined')) {
+      logger.warn?.(`[desktop-capture] one-time setup UAC consent declined or failed: ${text.slice('declined:'.length).trim()}`);
+    } else {
+      logger.info?.('[desktop-capture] one-time machine preparation launched via UAC consent');
+    }
+  });
+  child.on('error', (error) => {
+    logger.warn?.(`[desktop-capture] elevated setup launcher error: ${String(error?.message || error)}`);
+  });
+  return { launched: true, pendingConsent: true };
+}
+
+// The one-time machine preparation behind the single "Desktop control" switch.
+//
+// IDEMPOTENT BY DESIGN: if the machine is already prepared (the race-safe
+// CliGateReconnectConsole task exists) this is a no-op, so toggling desktop
+// control off then on again NEVER re-prompts for admin — that is the whole
+// "set up once, then open/close freely" contract. When NOT yet prepared:
+//   - CliGate already elevated  -> run the prep in-process (silent, no UAC), or
+//   - CliGate not elevated      -> raise a SINGLE Windows UAC consent so the
+//                                  user authorizes it with one click (no script,
+//                                  no command to paste).
+// Returns quickly; callers confirm success by polling getStatus().prepared.
+export async function prepare() {
+  if (!isWindows()) {
+    return { ok: false, supported: false, error: 'desktop machine preparation is Windows-only' };
+  }
+  const status = await getStatus();
+  if (status.prepared) {
+    return { ok: true, alreadyPrepared: true, prepared: true, status };
+  }
+  if (status.elevated) {
+    const { code, tail } = await runScriptDirect(['-SkipAutoLogin']);
+    const after = await getStatus();
+    if (after.prepared) {
+      return { ok: true, ranDirect: true, prepared: true, status: after };
+    }
+    return { ok: false, ranDirect: true, code, error: 'setup ran but the reconnect task was not created; see the tail', tail, status: after };
+  }
+  const launch = launchElevatedSetup(['-SkipAutoLogin']);
+  if (!launch.launched) {
+    return { ok: false, viaUac: true, declined: launch.declined === true, error: launch.error || 'could not launch the elevated one-time setup' };
+  }
+  return { ok: true, viaUac: true, pendingConsent: true };
 }
 
 export async function enable({ autoLogin = false } = {}) {
@@ -230,6 +353,7 @@ export async function removeLegacyTasks() {
 export default {
   getStatus,
   enable,
+  prepare,
   disable,
   removeLegacyTasks,
   isElevated,

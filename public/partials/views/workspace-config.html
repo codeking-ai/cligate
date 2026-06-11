@@ -83,11 +83,14 @@
                         </div>
 
                         <!-- Desktop control — ONE switch. Turning it on enables the
-                             CliGate-owned screenshot/click agent and, when CliGate runs as
-                             administrator, silently prepares the machine for RDP / HDMI
-                             dummy / physical-monitor use (including the race-safe fallback
-                             to the console after an RDP disconnect). No file paths, no
-                             extra steps; turning it off reverts everything. -->
+                             CliGate-owned screenshot/click agent. The first time, it also
+                             prepares the machine for RDP / HDMI dummy / physical-monitor use
+                             (the race-safe fallback to the console after an RDP disconnect):
+                             silently when CliGate is elevated, otherwise behind a single UAC
+                             consent surfaced as the "authorize" button below. That prep is a
+                             ONE-TIME step — afterwards open/close needs no admin, and turning
+                             the switch off only stops the agent (the prep is left in place).
+                             No file paths, no commands to paste. -->
                         <div class="rounded-lg border border-space-border/50 bg-space-800/30 px-4 py-3"
                             x-show="desktopControl.supported !== false">
                             <div class="flex flex-wrap items-center justify-between gap-4">
@@ -109,7 +112,13 @@
                                 </div>
                             </div>
                             <template x-if="desktopControl.enabled && desktopControl.needsAdminForFullSupport">
-                                <div class="mt-2 text-[11px] font-mono text-yellow-400/80" x-text="t('desktopControlAdminHint')"></div>
+                                <div class="mt-2 flex flex-wrap items-center gap-2">
+                                    <span class="text-[11px] font-mono text-yellow-400/80" x-text="t('desktopControlAdminHint')"></span>
+                                    <button class="rounded border border-neon-green/40 px-2 py-1 text-[11px] font-mono text-neon-green transition-colors hover:bg-neon-green/10 disabled:opacity-50"
+                                        :disabled="desktopControl.busy"
+                                        @click="prepareDesktopControl()"
+                                        x-text="t('desktopControlPrepareBtn')"></button>
+                                </div>
                             </template>
                         </div>
 

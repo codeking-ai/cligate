@@ -592,15 +592,48 @@ export function createSettingsPageModule() {
     },
 
     _pollDesktopControlStatus() {
-      // Machine prep runs an elevated PowerShell out of band; poll a few times so
-      // the toggle settles on the confirmed state.
+      // The one-time machine prep runs an elevated PowerShell out of band (and,
+      // when not already elevated, behind a UAC consent the user has to click);
+      // poll for a while so the toggle settles on the confirmed state once the
+      // reconnect-to-console task is installed.
       let n = 0;
       const tick = async () => {
         n += 1;
         await this.loadDesktopControlStatus();
-        if (n < 6) setTimeout(tick, 2500);
+        if (n < 12 && !this.desktopControl.machinePrepared) setTimeout(tick, 2500);
       };
       setTimeout(tick, 2500);
+    },
+
+    // Authorize the one-time machine setup behind one Windows UAC consent. Shown
+    // as a button when the runtime agent is on but the machine is not yet
+    // prepared and CliGate is not elevated. The user clicks here, approves the
+    // Windows prompt once, and afterwards open/close needs no admin.
+    async prepareDesktopControl() {
+      if (this.desktopControl.busy) return;
+      this.desktopControl.busy = true;
+      const { ok, data } = await this.api('/api/desktop-agent/desktop-control/prepare', { method: 'POST' });
+      this.desktopControl.busy = false;
+      if (ok && data) {
+        this.desktopControl = {
+          ...this.desktopControl,
+          supported: data.supported !== false,
+          enabled: data.enabled === true,
+          running: data.running === true,
+          elevated: data.elevated === true,
+          machinePrepared: data.machinePrepared === true,
+          needsAdminForFullSupport: data.needsAdminForFullSupport === true
+        };
+        if (data.prepare?.declined) {
+          this.showToast(this.t('desktopControlPrepareDeclined'), 'error');
+        } else {
+          this.showToast(this.t('desktopControlPreparing'), 'success');
+        }
+        this._pollDesktopControlStatus();
+      } else {
+        this.showToast(this.t('desktopControlFailed'), 'error');
+        await this.loadDesktopControlStatus();
+      }
     },
 
     async toggleDesktopControl() {

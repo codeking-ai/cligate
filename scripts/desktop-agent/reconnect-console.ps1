@@ -93,12 +93,25 @@ function Get-Sessions {
         }
         if ($stateIdx -lt 1) { continue }
         # The id is the integer token immediately before STATE.
-        $idTok = $tokens[$stateIdx - 1]
+        $idIndex = $stateIdx - 1
+        $idTok = $tokens[$idIndex]
         if ($idTok -notmatch '^\d+$') { continue }
-        $name = $tokens[0]
-        $user = ''
-        if (($stateIdx - 1) -gt 1) {
-            $user = ($tokens[1..($stateIdx - 2)] -join ' ')
+        # Disambiguate the SESSIONNAME vs USERNAME columns. qwinsta leaves the
+        # SESSIONNAME column BLANK for a fully DISCONNECTED session, so that row
+        # tokenizes as just `<user> <id> <state>` — identical in shape to a
+        # nameless system row like `services 0 Disc`. Decide by whether the first
+        # token is a known session-name keyword (console / services / rdp-tcp[#n]
+        # / a listener): if so it is the SessionName and the user sits between it
+        # and the id; otherwise the first token IS the username and SessionName is
+        # blank. Without this, a disconnected RDP session parsed as UserName=''
+        # and never matched the target user, so the bounce to the console
+        # silently never ran (the worker logged "no disconnected session").
+        if ($tokens[0] -imatch '^(console|services|rdp-tcp)') {
+            $name = $tokens[0]
+            $user = if ($idIndex -ge 2) { ($tokens[1..($idIndex - 1)] -join ' ') } else { '' }
+        } else {
+            $name = ''
+            $user = if ($idIndex -ge 1) { ($tokens[0..($idIndex - 1)] -join ' ') } else { '' }
         }
         $rows += [pscustomobject]@{
             SessionName = $name

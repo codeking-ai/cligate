@@ -152,18 +152,41 @@ export async function handleSetDesktopControl(req, res) {
     desktopAgentService.updateSettings({ enabled: true });
     try { await desktopAgentService.start(); } catch { /* surfaced via status.running */ }
     if (process.platform === 'win32') {
-      // Runs the full machine prep ONLY if CliGate is elevated; otherwise this is
-      // a no-op that reports needsAdmin (we do not surface the raw command).
-      try { await desktopCaptureSetup.enable(); } catch { /* best-effort */ }
+      // One-time machine preparation so screenshot/click survive an RDP
+      // disconnect (race-safe reconnect-to-console + keep-awake). prepare() is
+      // IDEMPOTENT: a no-op once the machine is already prepared (so re-toggling
+      // never re-prompts for admin), runs in-process when CliGate is elevated,
+      // and otherwise raises ONE Windows UAC consent. It never installs
+      // auto-start tasks and never tears anything down.
+      try { await desktopCaptureSetup.prepare(); } catch { /* best-effort; surfaced via status */ }
     }
   } else {
+    // OFF stops ONLY the CliGate-owned runtime agent. The one-time machine
+    // preparation (reconnect-to-console task, keep-awake) is intentionally LEFT
+    // in place so the next enable needs no admin — that is the "set up once,
+    // open/close freely" contract. Undoing the machine prep is a separate,
+    // explicit action (POST /api/desktop-agent/capture-setup/disable).
     try { await desktopAgentService.stop(); } catch { /* ignore */ }
     desktopAgentService.updateSettings({ enabled: false });
-    if (process.platform === 'win32') {
-      try { await desktopCaptureSetup.disable(); } catch { /* best-effort */ }
-    }
   }
   res.json(await buildDesktopControlStatus());
+}
+
+// Explicit "authorize the one-time setup" action — backs the dashboard button
+// shown when the runtime agent is on but the machine is not yet prepared and
+// CliGate is not elevated. Triggers the single UAC consent (or runs in-process
+// if already elevated). The dashboard then polls the status until prepared.
+export async function handlePrepareDesktopControl(req, res) {
+  if (process.platform !== 'win32') {
+    return res.json({ success: false, supported: false });
+  }
+  let prepare = {};
+  try {
+    prepare = await desktopCaptureSetup.prepare();
+  } catch (error) {
+    prepare = { ok: false, error: String(error?.message || error) };
+  }
+  res.json({ ...(await buildDesktopControlStatus()), prepare });
 }
 
 export default {
@@ -177,5 +200,6 @@ export default {
   handleDisableDesktopCaptureSetup,
   handleRemoveLegacyDesktopTasks,
   handleGetDesktopControl,
-  handleSetDesktopControl
+  handleSetDesktopControl,
+  handlePrepareDesktopControl
 };

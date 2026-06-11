@@ -5,12 +5,14 @@ import assert from 'node:assert/strict';
 import { getServerSettings, setServerSettings, normalizeDesktopAgentConfig } from '../../src/server-settings.js';
 import {
   handleGetDesktopAgentSettings,
-  handleSetDesktopAgentSettings
+  handleSetDesktopAgentSettings,
+  handleSetDesktopControl
 } from '../../src/routes/desktop-agent-route.js';
 import { AssistantDesktopClient } from '../../src/assistant-tools/desktop/client.js';
 import { DesktopAgentService } from '../../src/desktop-agent/service.js';
+import desktopAgentService from '../../src/desktop-agent/service.js';
 import { DesktopAgentHttpClient } from '../../src/desktop-agent/http-client.js';
-import { manualCommand, removeLegacyCommand, uninstallCommand } from '../../src/desktop-agent/capture-setup.js';
+import desktopCaptureSetup, { manualCommand, removeLegacyCommand, uninstallCommand } from '../../src/desktop-agent/capture-setup.js';
 
 function mockRes() {
   return {
@@ -647,6 +649,55 @@ test('capture-setup command helpers target setup-desktop-capture.ps1 with the ri
 
   // Full revert.
   assert.match(uninstallCommand(), /-Uninstall/);
+});
+
+test('capture-setup exposes an idempotent prepare() entry point for the single switch', () => {
+  // prepare() is the "set up once, then open/close freely" path: a no-op when
+  // already prepared, in-process when elevated, one UAC consent otherwise.
+  assert.equal(typeof desktopCaptureSetup.prepare, 'function');
+});
+
+test('desktop-control switch: ON prepares once, OFF never tears the machine prep down', { skip: process.platform !== 'win32' }, async () => {
+  // The product contract: enabling triggers the IDEMPOTENT one-time prep
+  // (prepare(), not the legacy -Uninstall-coupled enable()), and DISABLING only
+  // stops the runtime agent — it must NOT uninstall the reconnect-to-console
+  // task, or the next enable would demand admin again. Guards the regression
+  // that made "turn off then on" re-prompt for elevation every time.
+  const cap = desktopCaptureSetup;
+  const svc = desktopAgentService;
+  const saved = {
+    getStatus: cap.getStatus, prepare: cap.prepare, enable: cap.enable, disable: cap.disable,
+    start: svc.start, stop: svc.stop, updateSettings: svc.updateSettings, getSettings: svc.getSettings, manager: svc.manager
+  };
+  const calls = [];
+  try {
+    cap.getStatus = async () => ({ supported: true, prepared: true, elevated: false, legacy: { present: false } });
+    cap.prepare = async () => { calls.push('prepare'); return { ok: true, alreadyPrepared: true }; };
+    cap.enable = async () => { calls.push('enable'); return { ok: true }; };
+    cap.disable = async () => { calls.push('disable'); return { ok: true }; };
+    svc.start = async () => { calls.push('start'); return { success: true }; };
+    svc.stop = async () => { calls.push('stop'); return { success: true }; };
+    svc.updateSettings = (patch) => { calls.push(`update:${JSON.stringify(patch)}`); return patch; };
+    svc.getSettings = () => ({ enabled: true });
+    svc.manager = { getStatus: () => ({ running: true }) };
+
+    const onRes = mockRes();
+    await handleSetDesktopControl(mockReq({ enabled: true }), onRes);
+    assert.ok(calls.includes('start'), 'ON starts the runtime agent');
+    assert.ok(calls.includes('prepare'), 'ON triggers the idempotent one-time prep');
+    assert.ok(!calls.includes('enable'), 'ON must NOT use the legacy enable() path');
+    assert.ok(calls.includes('update:{"enabled":true}'), 'ON persists enabled:true');
+
+    calls.length = 0;
+    const offRes = mockRes();
+    await handleSetDesktopControl(mockReq({ enabled: false }), offRes);
+    assert.ok(calls.includes('stop'), 'OFF stops the runtime agent');
+    assert.ok(calls.includes('update:{"enabled":false}'), 'OFF persists enabled:false');
+    assert.ok(!calls.includes('disable'), 'OFF must NOT uninstall the one-time machine prep');
+  } finally {
+    cap.getStatus = saved.getStatus; cap.prepare = saved.prepare; cap.enable = saved.enable; cap.disable = saved.disable;
+    svc.start = saved.start; svc.stop = saved.stop; svc.updateSettings = saved.updateSettings; svc.getSettings = saved.getSettings; svc.manager = saved.manager;
+  }
 });
 
 test('DesktopAgentService ensureReady auto-starts and waits for health', async () => {

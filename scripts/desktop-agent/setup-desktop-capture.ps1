@@ -65,10 +65,20 @@ function Ok($msg)   { Write-Host "    [ok] $msg" -ForegroundColor Green }
 function Warn($msg) { Write-Host "    [warn] $msg" -ForegroundColor Yellow }
 
 # Remove the two legacy auto-start tasks. Safe to call when they don't exist.
+# Both removals MUST be idempotent: this runs on every prepare(), usually when
+# the tasks are already gone. The old `schtasks /Delete` aborted the WHOLE
+# script under `$ErrorActionPreference='Stop'` because schtasks writes to stderr
+# (treated as a NativeCommandError) when the task is missing — so prepare never
+# reached the reconnect-task install. Use Get-/Unregister-ScheduledTask, which
+# simply no-ops when the task is absent.
 function Remove-LegacyAutostartTasks {
   Step "Removing legacy auto-start tasks (CliGateDesktopAgent, CliGateServer)"
   try { & (Join-Path $here 'install-elevated-task.ps1') -Uninstall | Out-Null } catch { Warn "CliGateDesktopAgent: $($_.Exception.Message)" }
-  & schtasks.exe /Delete /TN 'CliGateServer' /F 2>$null | Out-Null
+  try {
+    if (Get-ScheduledTask -TaskName 'CliGateServer' -ErrorAction SilentlyContinue) {
+      Unregister-ScheduledTask -TaskName 'CliGateServer' -Confirm:$false -ErrorAction Stop
+    }
+  } catch { Warn "CliGateServer: $($_.Exception.Message)" }
   Ok "legacy auto-start tasks removed (if they were present)"
 }
 
@@ -81,6 +91,17 @@ $logDir = Join-Path $env:ProgramData 'CliGate'
 try { $null = New-Item -ItemType Directory -Force -Path $logDir -ErrorAction Stop } catch {}
 $setupLog = Join-Path $logDir 'setup-desktop-capture.log'
 try { Start-Transcript -Path $setupLog -Append -ErrorAction Stop | Out-Null } catch {}
+
+# "Prepared" marker in the world-readable ProgramData dir. getStatus() reads this
+# as the elevation-independent source of truth for "machine is prepared":
+# CliGateReconnectConsole runs as SYSTEM, and a SYSTEM-registered task is NOT
+# visible to a non-elevated Get-ScheduledTask query, so a non-elevated CliGate
+# could not otherwise tell the machine is already prepared and would needlessly
+# re-prompt for admin. This flag (written elevated, read by anyone) closes that.
+# The version lets an already-prepared machine detect that a newer worker must
+# be redeployed. MUST stay in sync with PREPARED_VERSION in capture-setup.js.
+$preparedMarker = Join-Path $logDir 'desktop-prepared.flag'
+$preparedVersion = 2
 
 if (-not $CligateRepo) {
   # default: repo root is two levels up from scripts/desktop-agent
@@ -100,6 +121,7 @@ if ($Uninstall) {
   Step "Removing reconnect-console + legacy auto-start tasks"
   try { & (Join-Path $here 'install-reconnect-console-task.ps1') -Uninstall } catch { Warn $_.Exception.Message }
   Remove-LegacyAutostartTasks
+  Remove-Item $preparedMarker -Force -ErrorAction SilentlyContinue
 
   Step "Disabling auto-login"
   try {
@@ -131,6 +153,16 @@ try {
   Ok "disconnecting RDP bounces the session back to the console; reconnecting RDP is never blocked"
 } catch {
   Warn "reconnect task install failed: $($_.Exception.Message)"
+}
+
+# Write the elevation-independent, versioned "prepared" marker IFF the reconnect
+# task is now actually registered (we are elevated here, so this query is
+# authoritative). The version line is what lets capture-setup.js detect a stale
+# prep and redeploy a newer worker.
+if (Get-ScheduledTask -TaskName 'CliGateReconnectConsole' -ErrorAction SilentlyContinue) {
+  try { Set-Content -Path $preparedMarker -Value @("version=$preparedVersion", "prepared $(Get-Date -Format o)") -Encoding ASCII -ErrorAction Stop } catch { Warn "could not write prepared marker: $($_.Exception.Message)" }
+} else {
+  Remove-Item $preparedMarker -Force -ErrorAction SilentlyContinue
 }
 
 # ---------------------------------------------------------------- 2. keep desktop alive

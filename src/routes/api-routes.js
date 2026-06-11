@@ -54,7 +54,8 @@ import {
   handleDisableDesktopCaptureSetup,
   handleRemoveLegacyDesktopTasks,
   handleGetDesktopControl,
-  handleSetDesktopControl
+  handleSetDesktopControl,
+  handlePrepareDesktopControl
 } from './desktop-agent-route.js';
 import {
   handleListAgentRuntimeProviders,
@@ -547,6 +548,8 @@ export function registerApiRoutes(app, { port }) {
   // Single on/off switch backing the dashboard "Desktop control" toggle.
   app.get('/api/desktop-agent/desktop-control', handleGetDesktopControl);
   app.post('/api/desktop-agent/desktop-control', handleSetDesktopControl);
+  // Explicit "authorize one-time setup" action (the UAC-consent button).
+  app.post('/api/desktop-agent/desktop-control/prepare', handlePrepareDesktopControl);
 
   // ─── Tool Installer ────────────────────────────────────────────────────
   app.get('/api/tools/status', handleGetToolsStatus);
