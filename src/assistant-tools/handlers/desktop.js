@@ -1,4 +1,38 @@
 import assistantDesktopClient from '../desktop/client.js';
+import artifactService from '../../assistant-core/artifact-service.js';
+
+// Register a just-captured screenshot as an artifact so the model can forward it
+// on a channel by a STABLE imageArtifactId (send_message_to_channel) instead of
+// re-typing a fragile file path it reconstructs from memory — the path approach
+// is what produced the "image not found / sent the latest instead" failures.
+//
+// Desktop tools are assistant-tools (secondary) tools executed by
+// AssistantToolsExecutor, which — unlike the assistant-core executor's view_image
+// path — does NOT register artifacts. So we MUST do it here, in the handler, or
+// the imageArtifactId the tool description promises would never exist (the LLM
+// would then pass a bogus id and hit "image artifact not found").
+//
+// These are high-frequency verification captures, so we deliberately do NOT
+// attach them to a conversation/task (that would flood listRelevantArtifacts);
+// they stay resolvable by id via getArtifact. Returns '' when there is no path.
+function registerDesktopScreenshotArtifact(result) {
+  const screenshotPath = String(result?.path || '').trim();
+  if (!screenshotPath) return '';
+  try {
+    const artifact = artifactService.createArtifact({
+      kind: 'image',
+      source: 'desktop_capture',
+      role: 'assistant',
+      title: screenshotPath,
+      summary: `Desktop screenshot: ${screenshotPath}`,
+      mediaType: 'image/png',
+      path: screenshotPath
+    });
+    return String(artifact?.id || '');
+  } catch {
+    return '';
+  }
+}
 
 // Map raw desktop-agent failures into actionable, recovery-oriented messages
 // so the supervisor LLM gets concrete next steps instead of a bare Python
@@ -132,6 +166,7 @@ export function createDesktopToolHandlers({
         inline: true,
         inlineTarget: input?.inlineTarget || 'preview'
       });
+      const imageArtifactId = registerDesktopScreenshotArtifact(result);
       const base64 = String(result?.inline_b64 || '');
       if (base64) {
         // Hide the raw base64 from the JSON shape so the transcript does not
@@ -140,6 +175,7 @@ export function createDesktopToolHandlers({
         return {
           ...rest,
           inline_b64_omitted: true,
+          ...(imageArtifactId ? { imageArtifactId } : {}),
           // Anthropic-canonical image block — same shape view_image returns —
           // so the cross-provider translator (multimodal.js) reshapes it for
           // OpenAI Responses while preserving anthropic-native callers.
@@ -153,7 +189,7 @@ export function createDesktopToolHandlers({
           }]
         };
       }
-      return result;
+      return imageArtifactId ? { ...result, imageArtifactId } : result;
     }),
 
     desktopInspectWindow: wrapHandler(async ({ input = {} } = {}) => {
@@ -162,12 +198,14 @@ export function createDesktopToolHandlers({
         inline: true,
         inlineTarget: input?.inlineTarget || 'preview'
       });
+      const imageArtifactId = registerDesktopScreenshotArtifact(result);
       const base64 = String(result?.inline_b64 || '');
       if (base64) {
         const { inline_b64: _omit, ...rest } = result;
         return {
           ...rest,
           inline_b64_omitted: true,
+          ...(imageArtifactId ? { imageArtifactId } : {}),
           content: [{
             type: 'image',
             source: {
@@ -178,7 +216,7 @@ export function createDesktopToolHandlers({
           }]
         };
       }
-      return result;
+      return imageArtifactId ? { ...result, imageArtifactId } : result;
     }),
 
     desktopFindControl: wrapHandler(async ({ input = {} } = {}) => desktopClient.findControl(input)),

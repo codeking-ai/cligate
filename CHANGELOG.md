@@ -4,6 +4,15 @@ All notable user-facing changes should be documented in this file.
 
 This changelog is maintained from source. Published release artifacts and tags remain the source of truth for shipped binaries and npm packages.
 
+## 1.2.9 - 2026-06-11
+
+### Fixed
+
+- Desktop control now survives a Remote Desktop disconnect reliably: a disconnected session is bounced back to the local console (physical or HDMI dummy display) instead of leaving the desktop locked, so the assistant no longer reports the desktop as unavailable after you disconnect.
+- Desktop control setup is a one-time, click-to-authorize step. After authorizing once, turning desktop control off and on again no longer needs administrator rights, and turning it off no longer removes the machine preparation.
+- Screenshots are now stored under the CliGate data directory (`~/.cligate/desktop-control/screenshots`) instead of a temporary folder tied to the launch location, so capture works consistently on packaged installs and across operating systems.
+- Fixed "image not found / sent the latest screenshot instead" when forwarding a screenshot on a channel: captures now expose a stable image handle that the assistant can send directly.
+
 ## 1.2.8 - 2026-06-11
 
 ### Added

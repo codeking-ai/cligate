@@ -5,7 +5,8 @@ import path from 'node:path';
 
 import { CONFIG_DIR } from '../../src/account-manager.js';
 import { desktopControlDir, desktopScreenshotsDir } from '../../src/desktop-agent/paths.js';
-import { AssistantToolExecutor } from '../../src/assistant-core/tool-executor.js';
+import { createDesktopToolHandlers } from '../../src/assistant-tools/handlers/desktop.js';
+import assistantArtifactService from '../../src/assistant-core/artifact-service.js';
 
 import { getServerSettings, setServerSettings, normalizeDesktopAgentConfig } from '../../src/server-settings.js';
 import {
@@ -686,24 +687,25 @@ test('desktop-control paths honor a DESKTOP_CONTROL_DIR override (shared with th
   }
 });
 
-test('executeToolCall registers an image artifact and surfaces imageArtifactId for desktop captures', async () => {
-  // The LLM must be able to forward a screenshot by a STABLE handle instead of
-  // re-typing a fragile file path; the handle has to live in the RESULT the LLM
-  // sees (stringify ignores top-level metadata).
-  const shotPath = path.join(CONFIG_DIR, 'desktop-control', 'screenshots', 'screen-test.png');
-  const captureTool = {
-    name: 'desktop_capture_window',
-    execute: async () => ({ ok: true, action: 'screenshot', path: shotPath })
-  };
-  const executor = new AssistantToolExecutor({
-    toolRegistry: { get: (name) => (name === 'desktop_capture_window' ? captureTool : null) },
-    policyService: { canExecuteToolCall: () => ({ allowed: true }) }
+test('desktop_capture_window handler registers an image artifact and returns a resolvable imageArtifactId', async () => {
+  // desktop_capture_window executes through the assistant-tools (secondary)
+  // executor, which does NOT register artifacts — so the HANDLER must, or the
+  // imageArtifactId the description promises would never exist and the model
+  // would pass a bogus id (the live "image artifact not found" failure). The id
+  // must resolve to the exact screenshot, which is what send_message_to_channel
+  // relies on.
+  const shotPath = path.join(CONFIG_DIR, 'desktop-control', 'screenshots', 'screen-handler-test.png');
+  const handlers = createDesktopToolHandlers({
+    desktopClient: {
+      captureWindow: async () => ({ ok: true, action: 'screenshot', path: shotPath })
+    }
   });
-  const out = await executor.executeToolCall({ toolName: 'desktop_capture_window', input: {} }, {});
-  assert.equal(out.success, true);
-  assert.equal(typeof out.result.imageArtifactId, 'string');
-  assert.ok(out.result.imageArtifactId.length > 0);
-  assert.equal(out.metadata.artifactId, out.result.imageArtifactId);
+  const out = await handlers.desktopCaptureWindow({ input: {} });
+  assert.equal(typeof out.imageArtifactId, 'string');
+  assert.ok(out.imageArtifactId.length > 0);
+  const artifact = assistantArtifactService.getArtifact(out.imageArtifactId);
+  assert.equal(artifact?.path, shotPath);
+  assert.equal(artifact?.source, 'desktop_capture');
 });
 
 test('capture-setup exposes an idempotent prepare() entry point for the single switch', () => {

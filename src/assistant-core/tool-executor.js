@@ -32,15 +32,15 @@ function summarizeResult(result) {
   return String(result).slice(0, 160);
 }
 
-// Tools whose result is an image we register as an artifact so it can later be
-// referenced by a stable id (e.g. forwarded on a channel) instead of a fragile
-// file path the LLM has to re-type. view_image is a deliberate, low-frequency
-// "look at this"; desktop screenshots are high-frequency verification captures.
-const IMAGE_ARTIFACT_TOOLS = new Set(['view_image', 'desktop_capture_window', 'desktop_inspect_window']);
-
+// view_image is a SUPERVISOR (primary) tool, so its result flows through this
+// executor and we register it as an artifact here. Desktop screenshots are NOT
+// handled here: desktop_capture_window / desktop_inspect_window are assistant-
+// tools (secondary) tools that execute through AssistantToolsExecutor, which
+// never reaches this function — their artifact is registered in their own
+// handler (assistant-tools/handlers/desktop.js) instead.
 function buildArtifactMetadataForToolResult(call = {}, result = {}, context = {}) {
   const toolName = String(call?.toolName || '').trim();
-  if (!IMAGE_ARTIFACT_TOOLS.has(toolName) || !result || typeof result !== 'object') {
+  if (toolName !== 'view_image' || !result || typeof result !== 'object') {
     return null;
   }
   const imageUrl = String(result.imageUrl || '').trim()
@@ -51,29 +51,22 @@ function buildArtifactMetadataForToolResult(call = {}, result = {}, context = {}
   if (!imageUrl && !path) {
     return null;
   }
-  // Desktop screenshots fire on nearly every verification step, so — unlike a
-  // deliberate view_image — we do NOT attach them to the conversation/task/run.
-  // Attaching would flood listRelevantArtifacts and crowd out meaningful
-  // artifacts. We still register them (resolvable by id via getArtifact) so a
-  // screenshot can be forwarded by a stable imageArtifactId.
-  const isDesktopCapture = toolName !== 'view_image';
+  const conversationId = String(context?.conversation?.id || '').trim();
   const metadata = context?.run?.metadata && typeof context.run.metadata === 'object'
     ? context.run.metadata
     : {};
   const artifact = artifactService.createArtifact({
     kind: 'image',
-    source: isDesktopCapture ? 'desktop_capture' : 'view_image',
-    conversationId: isDesktopCapture ? '' : String(context?.conversation?.id || '').trim(),
-    taskId: isDesktopCapture ? '' : String(metadata?.assistantTaskId || '').trim(),
-    projectId: isDesktopCapture ? '' : String(metadata?.assistantProjectId || '').trim(),
-    executionId: isDesktopCapture ? '' : String(metadata?.assistantExecutionId || '').trim(),
-    assistantRunId: isDesktopCapture ? '' : String(context?.run?.id || '').trim(),
+    source: 'view_image',
+    conversationId,
+    taskId: String(metadata?.assistantTaskId || '').trim(),
+    projectId: String(metadata?.assistantProjectId || '').trim(),
+    executionId: String(metadata?.assistantExecutionId || '').trim(),
+    assistantRunId: String(context?.run?.id || '').trim(),
     role: 'assistant',
-    title: path || (isDesktopCapture ? 'desktop screenshot' : 'viewed image'),
-    summary: isDesktopCapture
-      ? `Desktop screenshot${path ? `: ${path}` : ''}`
-      : (path ? `Assistant viewed image: ${path}` : 'Assistant viewed an image.'),
-    mediaType: String(result.media_type || '').trim() || (isDesktopCapture ? 'image/png' : ''),
+    title: path || 'viewed image',
+    summary: path ? `Assistant viewed image: ${path}` : 'Assistant viewed an image.',
+    mediaType: String(result.media_type || '').trim(),
     path,
     imageUrl,
     metadata: {
