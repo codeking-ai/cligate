@@ -1,6 +1,11 @@
 import '../test-env.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import path from 'node:path';
+
+import { CONFIG_DIR } from '../../src/account-manager.js';
+import { desktopControlDir, desktopScreenshotsDir } from '../../src/desktop-agent/paths.js';
+import { AssistantToolExecutor } from '../../src/assistant-core/tool-executor.js';
 
 import { getServerSettings, setServerSettings, normalizeDesktopAgentConfig } from '../../src/server-settings.js';
 import {
@@ -649,6 +654,56 @@ test('capture-setup command helpers target setup-desktop-capture.ps1 with the ri
 
   // Full revert.
   assert.match(uninstallCommand(), /-Uninstall/);
+});
+
+test('desktop-control paths resolve under the CliGate data dir (CONFIG_DIR), never CWD/.tmp', () => {
+  // The agent used to write screenshots to <cwd>/.tmp/desktop-control-agent,
+  // which polluted the code tree and broke on packaged/relocated installs and on
+  // other OSes. They must now live under CONFIG_DIR (~/.cligate or
+  // CLIGATE_CONFIG_DIR). Assertions use path.join so they are OS-agnostic.
+  const prev = process.env.DESKTOP_CONTROL_DIR;
+  delete process.env.DESKTOP_CONTROL_DIR;
+  try {
+    assert.equal(desktopControlDir(), path.join(CONFIG_DIR, 'desktop-control'));
+    assert.equal(desktopScreenshotsDir(), path.join(CONFIG_DIR, 'desktop-control', 'screenshots'));
+    assert.ok(!desktopControlDir().includes('.tmp'), 'must not live under a .tmp dir');
+  } finally {
+    if (prev === undefined) delete process.env.DESKTOP_CONTROL_DIR;
+    else process.env.DESKTOP_CONTROL_DIR = prev;
+  }
+});
+
+test('desktop-control paths honor a DESKTOP_CONTROL_DIR override (shared with the Python agent)', () => {
+  const prev = process.env.DESKTOP_CONTROL_DIR;
+  const override = path.join(CONFIG_DIR, 'override-desktop-control');
+  process.env.DESKTOP_CONTROL_DIR = override;
+  try {
+    assert.equal(desktopControlDir(), override);
+    assert.equal(desktopScreenshotsDir(), path.join(override, 'screenshots'));
+  } finally {
+    if (prev === undefined) delete process.env.DESKTOP_CONTROL_DIR;
+    else process.env.DESKTOP_CONTROL_DIR = prev;
+  }
+});
+
+test('executeToolCall registers an image artifact and surfaces imageArtifactId for desktop captures', async () => {
+  // The LLM must be able to forward a screenshot by a STABLE handle instead of
+  // re-typing a fragile file path; the handle has to live in the RESULT the LLM
+  // sees (stringify ignores top-level metadata).
+  const shotPath = path.join(CONFIG_DIR, 'desktop-control', 'screenshots', 'screen-test.png');
+  const captureTool = {
+    name: 'desktop_capture_window',
+    execute: async () => ({ ok: true, action: 'screenshot', path: shotPath })
+  };
+  const executor = new AssistantToolExecutor({
+    toolRegistry: { get: (name) => (name === 'desktop_capture_window' ? captureTool : null) },
+    policyService: { canExecuteToolCall: () => ({ allowed: true }) }
+  });
+  const out = await executor.executeToolCall({ toolName: 'desktop_capture_window', input: {} }, {});
+  assert.equal(out.success, true);
+  assert.equal(typeof out.result.imageArtifactId, 'string');
+  assert.ok(out.result.imageArtifactId.length > 0);
+  assert.equal(out.metadata.artifactId, out.result.imageArtifactId);
 });
 
 test('capture-setup exposes an idempotent prepare() entry point for the single switch', () => {

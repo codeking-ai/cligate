@@ -4,6 +4,7 @@ import path from 'node:path';
 import agentChannelDeliverySender from '../../agent-channels/delivery-sender.js';
 import agentChannelConversationStore from '../../agent-channels/conversation-store.js';
 import artifactService from '../../assistant-core/artifact-service.js';
+import { desktopScreenshotsDir } from '../../desktop-agent/paths.js';
 
 // Channels whose provider can actually deliver an image today. delivery-sender
 // passes `images` to every provider, but a provider without image support would
@@ -27,14 +28,10 @@ function inferImageMediaType(filePath) {
 
 const SCREENSHOT_EXT_RE = /\.(png|jpe?g|webp|gif|bmp)$/i;
 
-// The desktop agent writes screenshots under DESKTOP_CONTROL_DIR (when set) or
-// <cwd>/.tmp/desktop-control-agent, in a `screenshots/` subdir — mirror that
-// same resolution the Python agent uses (root_dir() in desktop-agent-server).
-function desktopScreenshotsDir() {
-  const base = String(process.env.DESKTOP_CONTROL_DIR || '').trim()
-    || path.join(process.cwd(), '.tmp', 'desktop-control-agent');
-  return path.join(base, 'screenshots');
-}
+// The desktop agent writes screenshots under <desktopControlDir>/screenshots
+// (resolved from CONFIG_DIR / DESKTOP_CONTROL_DIR — see desktop-agent/paths.js).
+// We import the SAME resolver the manager passes to the Python agent so the Node
+// reader and the Python writer never disagree on the directory.
 
 // Heuristic gate: only attempt screenshot recovery for paths that were clearly
 // meant to be a desktop screenshot, so an unrelated missing image path never
@@ -42,7 +39,7 @@ function desktopScreenshotsDir() {
 function looksLikeScreenshotPath(p) {
   const normalized = String(p || '').toLowerCase().replace(/\\/g, '/');
   if (!normalized) return false;
-  return normalized.includes('desktop-control-agent')
+  return normalized.includes('desktop-control')
     || normalized.includes('/screenshots/')
     || /^(?:screen-region-|screen-|inspect-window-|capture[_-])/i.test(path.basename(normalized));
 }
@@ -51,24 +48,26 @@ function looksLikeScreenshotPath(p) {
 // The LLM sometimes reconstructs an approximate screenshot path from memory
 // (wrong directory and/or filename) instead of echoing the exact path
 // desktop_capture_window returned — especially across an approval round-trip
-// where the real path drops out of context. Try an exact basename match in the
-// canonical screenshots dir first, then fall back to the most recently modified
-// screenshot (in the capture→send flow that is the just-captured one). Returns
-// '' when nothing usable is found.
+// where the real path drops out of context. Prefer passing the capture's
+// imageArtifactId instead, which avoids this entirely. Try an exact basename
+// match in the canonical screenshots dir first (right file, wrong directory →
+// not a substitution), then fall back to the most recently modified screenshot
+// (in the capture→send flow that IS the just-captured one). Returns
+// { path, exact } — path '' when nothing usable is found.
 function recoverScreenshotPath(requestedPath) {
   const dir = desktopScreenshotsDir();
   let names;
   try {
     names = readdirSync(dir).filter((name) => SCREENSHOT_EXT_RE.test(name));
   } catch {
-    return '';
+    return { path: '', exact: false };
   }
-  if (names.length === 0) return '';
+  if (names.length === 0) return { path: '', exact: false };
 
   const wantedBase = path.basename(String(requestedPath || '')).toLowerCase();
   if (wantedBase) {
     const exact = names.find((name) => name.toLowerCase() === wantedBase);
-    if (exact) return path.join(dir, exact);
+    if (exact) return { path: path.join(dir, exact), exact: true };
   }
 
   let newestPath = '';
@@ -85,7 +84,7 @@ function recoverScreenshotPath(requestedPath) {
       // unreadable entry — skip it
     }
   }
-  return newestPath;
+  return { path: newestPath, exact: false };
 }
 
 export function createMessagingToolHandlers({
@@ -134,9 +133,15 @@ export function createMessagingToolHandlers({
         let effectiveImagePath = imagePath;
         if (!existsSync(effectiveImagePath) && looksLikeScreenshotPath(effectiveImagePath)) {
           const recovered = recoverScreenshotPath(effectiveImagePath);
-          if (recovered) {
-            recoveredImageNote = `requested image path "${imagePath}" did not exist; recovered and sent the latest screenshot "${recovered}" instead.`;
-            effectiveImagePath = recovered;
+          if (recovered.path) {
+            effectiveImagePath = recovered.path;
+            // Exact basename match = the intended file (just a wrong directory),
+            // so it is not a substitution and needs no note. A newest-fallback IS
+            // a best-effort guess — surface a NEUTRAL note (not an error) and nudge
+            // toward the stable handle so this stops happening.
+            if (!recovered.exact) {
+              recoveredImageNote = `Sent the current screenshot ("${path.basename(recovered.path)}"). Tip: pass desktop_capture_window's imageArtifactId to send_message_to_channel to forward the exact capture you mean.`;
+            }
           }
         }
         images.push({ path: effectiveImagePath, mediaType: inferImageMediaType(effectiveImagePath), title: 'image' });

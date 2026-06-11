@@ -192,7 +192,8 @@ test('screenshot send recovers from a fabricated path by sending the latest scre
     });
     assert.equal(res.delivered, true);
     assert.equal(res.imageDelivered, true);
-    assert.ok(res.note && /recovered/.test(res.note));
+    assert.ok(res.note && /Sent the current screenshot/.test(res.note));
+    assert.ok(/imageArtifactId/.test(res.note));
     assert.equal(sent.length, 1);
     assert.equal(sent[0].message.images[0].path, newest);
   });

@@ -130,7 +130,15 @@ def root_dir() -> Path:
     configured = os.environ.get("DESKTOP_CONTROL_DIR")
     if configured:
         return Path(configured).expanduser()
-    return Path.cwd() / ".tmp" / "desktop-control-agent"
+    # Standalone/dev fallback (CliGate normally passes DESKTOP_CONTROL_DIR). Use
+    # the canonical CliGate data dir, NEVER the process CWD: a CWD-relative path
+    # polluted the source tree and broke on packaged/relocated installs. This is
+    # cross-platform (Path.home() resolves on Windows/macOS/Linux) and honors
+    # CLIGATE_CONFIG_DIR so it matches the Node side (account-manager.js
+    # CONFIG_DIR) and stays isolated under test/redirected installs.
+    config_dir = os.environ.get("CLIGATE_CONFIG_DIR")
+    base = Path(config_dir).expanduser() if config_dir else (Path.home() / ".cligate")
+    return base / "desktop-control"
 
 
 def ensure_dirs() -> Path:

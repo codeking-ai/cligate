@@ -5,6 +5,7 @@ import { existsSync } from 'node:fs';
 import { request as httpRequest } from 'node:http';
 import { getDesktopAgentSettings } from './settings.js';
 import { ensureDesktopAgentToken } from './token-store.js';
+import { desktopControlDir } from './paths.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const DEFAULT_SCRIPT = join(__dirname, 'runtime', 'desktop-agent-server.py');
@@ -145,7 +146,12 @@ export class DesktopAgentManager {
       : [resolveRuntimeScript(), '--port', String(parsePort(settings.baseUrl)), '--token', token];
     this.child = this.spawnImpl(command, args, {
       stdio: 'pipe',
-      windowsHide: true
+      windowsHide: true,
+      // Pin the agent's output location to the CliGate data dir (cross-platform,
+      // CWD-independent) instead of letting it fall back to `<cwd>/.tmp`. Both
+      // the Node reader (messaging recovery) and this Python writer then resolve
+      // the same directory via paths.js / DESKTOP_CONTROL_DIR.
+      env: { ...process.env, DESKTOP_CONTROL_DIR: desktopControlDir() }
     });
     this.startedAt = new Date().toISOString();
     this.lastError = '';
