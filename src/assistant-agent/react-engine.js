@@ -108,7 +108,17 @@ function appendToolResultMessage(messages, toolCall, toolResult) {
   }).payload;
   let content = stringifyAssistantToolResult(toolResult);
   if (Array.isArray(payload?.content) && payload.content.length > 0) {
-    content = payload.content;
+    // Rich results (desktop_capture_window / view_image) carry renderable
+    // blocks in payload.content. Forward those blocks, but keep the remaining
+    // structured fields visible as a text block too: replacing the whole
+    // result with just the image hid imageArtifactId/path from the model, so
+    // it fabricated handles like "artifact:desktop_capture_window:<uuid>" and
+    // send_message_to_channel failed with artifact_not_found (the 2026-06-11
+    // DingTalk screenshot incident).
+    const { content: richBlocks, ...structuredFields } = payload;
+    content = Object.keys(structuredFields).length > 0
+      ? [{ type: 'text', text: JSON.stringify(structuredFields, null, 2) }, ...richBlocks]
+      : richBlocks;
   }
   messages.push({
     role: 'user',

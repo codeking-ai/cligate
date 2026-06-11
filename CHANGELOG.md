@@ -4,6 +4,13 @@ All notable user-facing changes should be documented in this file.
 
 This changelog is maintained from source. Published release artifacts and tags remain the source of truth for shipped binaries and npm packages.
 
+## 1.2.10 - 2026-06-12
+
+### Fixed
+
+- Fixed channel screenshot delivery failing with "image artifact not found": the assistant could see the captured screenshot but not its artifact id, so it fabricated an invalid handle when forwarding the image to DingTalk/Feishu/Telegram. Tool results now keep the structured fields (including `imageArtifactId`) visible to the model alongside the image.
+- Sending an image by artifact handle is now self-healing: wrapped handles (`artifact:<tool>:<id>`) resolve via the embedded id, and a fabricated desktop-capture handle falls back to the newest screenshot instead of failing the send.
+
 ## 1.2.9 - 2026-06-11
 
 ### Fixed

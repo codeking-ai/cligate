@@ -239,6 +239,66 @@ test('a missing NON-screenshot image path is left untouched (no latest-screensho
   });
 });
 
+// --- artifact-handle recovery (the 2026-06-11 DingTalk screenshot incident) --
+// The supervisor LLM passed "artifact:desktop_capture_window:<uuid>" instead of
+// the bare imageArtifactId, so getArtifact missed and the send failed outright.
+
+test('a wrapped artifact handle resolves via its embedded uuid', async () => {
+  const realId = 'e657c8f1-07a6-4106-ac3b-ed30c289d264';
+  const { handlers, sent } = makeHandler({
+    conversations: { 'c-ding': dingtalkConv },
+    artifacts: { [realId]: { id: realId, imageUrl: '', mediaType: 'image/png', title: 'shot', path: 'D:\\shots\\a.png' } }
+  });
+  const res = await handlers.sendMessageToChannel({
+    input: { text: '截图', imageArtifactId: `artifact:desktop_capture_window:${realId}` },
+    context: { conversation: dingtalkConv }
+  });
+  assert.equal(res.imageDelivered, true);
+  assert.equal(sent[0].message.images[0].artifactId, realId);
+});
+
+test('a fabricated desktop-capture artifact handle falls back to the newest screenshot', async () => {
+  const base = mkdtempSync(join(tmpdir(), 'cligate-desktop-ctl-'));
+  const shotsDir = join(base, 'screenshots');
+  mkdirSync(shotsDir, { recursive: true });
+  const older = join(shotsDir, 'screen-region-20260611-231000-000001.png');
+  const newest = join(shotsDir, 'screen-region-20260611-232250-564467.png');
+  writeFileSync(older, 'older');
+  writeFileSync(newest, 'newest');
+  utimesSync(older, new Date('2026-06-11T23:10:00Z'), new Date('2026-06-11T23:10:00Z'));
+  utimesSync(newest, new Date('2026-06-11T23:22:50Z'), new Date('2026-06-11T23:22:50Z'));
+
+  await withDesktopControlDir(base, async () => {
+    const { handlers, sent } = makeHandler({ conversations: { 'c-ding': dingtalkConv } });
+    const res = await handlers.sendMessageToChannel({
+      // Exactly the fabricated handle from the incident.
+      input: { text: '截图', imageArtifactId: 'artifact:desktop_capture_window:9dfeec4f-a71a-4da4-a5fb-efd3db412965' },
+      context: { conversation: dingtalkConv }
+    });
+    assert.equal(res.delivered, true);
+    assert.equal(res.imageDelivered, true);
+    assert.ok(res.note && /was not found/.test(res.note));
+    assert.equal(sent[0].message.images[0].path, newest);
+  });
+});
+
+test('an unknown NON-desktop artifact id still fails with artifact_not_found (no screenshot hijack)', async () => {
+  const base = mkdtempSync(join(tmpdir(), 'cligate-desktop-ctl-'));
+  const shotsDir = join(base, 'screenshots');
+  mkdirSync(shotsDir, { recursive: true });
+  writeFileSync(join(shotsDir, 'screen-region-20260611-232250-564467.png'), 'shot');
+
+  await withDesktopControlDir(base, async () => {
+    const { handlers, sent } = makeHandler({ conversations: { 'c-ding': dingtalkConv } });
+    const res = await handlers.sendMessageToChannel({
+      input: { text: 'pic', imageArtifactId: 'not-a-real-artifact' },
+      context: { conversation: dingtalkConv }
+    });
+    assert.equal(res.kind, 'artifact_not_found');
+    assert.equal(sent.length, 0);
+  });
+});
+
 // --- stale-run hygiene ------------------------------------------------------
 
 test('failStaleNonTerminalRuns retires old non-terminal runs, sparing recent and terminal ones', () => {
@@ -321,6 +381,69 @@ test('react loop halts before any LLM turn when the run is already cancelled, an
   // run must finalize as CANCELLED — not be overwritten with "completed".
   assert.equal(completeCalls, 0, 'LLM must not be called once the run is cancelled');
   assert.equal(executed.run.status, ASSISTANT_RUN_STATUS.CANCELLED);
+});
+
+test('tool_result keeps structured fields (imageArtifactId) visible next to rich image blocks', async () => {
+  // The 2026-06-11 DingTalk incident: appendToolResultMessage replaced the
+  // whole desktop_capture_window result with just the image block, so the LLM
+  // never saw imageArtifactId and fabricated a bogus handle for
+  // send_message_to_channel.
+  const emptyCwd = mkdtempSync(join(tmpdir(), 'cligate-react-cwd-'));
+  const capturedTurns = [];
+  const engine = new AssistantReactEngine({
+    llmClient: {
+      complete: async ({ messages }) => {
+        capturedTurns.push(messages.map((m) => ({ role: m.role, content: m.content })));
+        if (capturedTurns.length === 1) {
+          return {
+            text: 'capturing',
+            toolCalls: [{ id: 't1', name: 'desktop_capture_window', input: {} }],
+            source: {},
+            stopReason: 'tool_use'
+          };
+        }
+        return { text: 'done', toolCalls: [], source: {}, stopReason: 'end_turn' };
+      }
+    },
+    toolRegistry: { list: () => [] },
+    toolExecutor: {
+      executeToolCall: async () => ({
+        status: 'completed',
+        result: {
+          ok: true,
+          path: 'C:\\shots\\screen-region-1.png',
+          imageArtifactId: 'art-123',
+          content: [{ type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'QUJD' } }]
+        },
+        content: [{ type: 'text', text: 'Tool desktop_capture_window completed' }],
+        structured: null,
+        metadata: {}
+      })
+    },
+    reflectionService: { expandToolResults: async () => [] },
+    runEventStore: null,
+    runStore: { get: () => null }
+  });
+
+  await engine.run({
+    run: { id: 'run-artifact-visibility', status: ASSISTANT_RUN_STATUS.QUEUED, metadata: {} },
+    conversation: { id: 'c-shot' },
+    text: 'capture and send the screenshot',
+    cwd: emptyCwd
+  });
+
+  assert.equal(capturedTurns.length, 2, 'expected two LLM turns');
+  const toolResultMsg = capturedTurns[1].find(
+    (m) => Array.isArray(m.content) && m.content[0]?.type === 'tool_result'
+  );
+  assert.ok(toolResultMsg, 'transcript must contain a tool_result message');
+  const blocks = toolResultMsg.content[0].content;
+  assert.ok(Array.isArray(blocks), 'tool_result content must stay a block array');
+  const textBlock = blocks.find((b) => b.type === 'text');
+  assert.ok(textBlock, 'structured fields must be present as a text block');
+  assert.ok(textBlock.text.includes('art-123'), 'imageArtifactId must be visible to the model');
+  assert.ok(!textBlock.text.includes('QUJD'), 'image bytes must not leak into the text block');
+  assert.ok(blocks.some((b) => b.type === 'image'), 'image block must still be forwarded');
 });
 
 test('isRunCancelled is fail-open: a throwing store read reports not-cancelled', () => {

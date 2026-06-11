@@ -28,6 +28,14 @@ function inferImageMediaType(filePath) {
 
 const SCREENSHOT_EXT_RE = /\.(png|jpe?g|webp|gif|bmp)$/i;
 
+const UUID_RE = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi;
+
+// Handles the LLM has been seen fabricating for desktop captures, e.g.
+// "artifact:desktop_capture_window:<uuid>" — only these may fall back to the
+// latest screenshot, so an unrelated unknown artifact id never silently turns
+// into "send the newest screenshot".
+const DESKTOP_CAPTURE_HANDLE_RE = /desktop[_-]?capture|screen[_-]?region|screenshot/i;
+
 // The desktop agent writes screenshots under <desktopControlDir>/screenshots
 // (resolved from CONFIG_DIR / DESKTOP_CONTROL_DIR — see desktop-agent/paths.js).
 // We import the SAME resolver the manager passes to the Python agent so the Node
@@ -146,17 +154,37 @@ export function createMessagingToolHandlers({
         }
         images.push({ path: effectiveImagePath, mediaType: inferImageMediaType(effectiveImagePath), title: 'image' });
       } else if (imageArtifactId) {
-        const artifact = artifactServiceInstance.getArtifact?.(imageArtifactId) || null;
+        let artifact = artifactServiceInstance.getArtifact?.(imageArtifactId) || null;
         if (!artifact) {
+          // The supervisor sometimes wraps the bare id desktop_capture_window
+          // returned into a decorated handle ("artifact:<tool>:<uuid>"). Try
+          // any embedded uuid-shaped token before giving up.
+          for (const candidate of imageArtifactId.match(UUID_RE) || []) {
+            artifact = artifactServiceInstance.getArtifact?.(candidate) || null;
+            if (artifact) break;
+          }
+        }
+        if (artifact) {
+          images.push({
+            imageUrl: String(artifact.imageUrl || '').trim(),
+            path: String(artifact.path || '').trim(),
+            mediaType: String(artifact.mediaType || '').trim(),
+            title: String(artifact.title || 'image').trim(),
+            artifactId: String(artifact.id || '').trim()
+          });
+        } else if (DESKTOP_CAPTURE_HANDLE_RE.test(imageArtifactId)) {
+          // Fully fabricated desktop-capture handle. In the capture→send flow
+          // the newest screenshot IS the just-captured one — recover the same
+          // way a fabricated imagePath is recovered instead of failing the send.
+          const recovered = recoverScreenshotPath('');
+          if (!recovered.path) {
+            return { kind: 'artifact_not_found', error: `image artifact ${imageArtifactId} not found`, recoverable: true };
+          }
+          images.push({ path: recovered.path, mediaType: inferImageMediaType(recovered.path), title: 'image' });
+          recoveredImageNote = `Sent the current screenshot ("${path.basename(recovered.path)}") because image artifact "${imageArtifactId}" was not found. Tip: pass the exact imageArtifactId desktop_capture_window returned.`;
+        } else {
           return { kind: 'artifact_not_found', error: `image artifact ${imageArtifactId} not found`, recoverable: true };
         }
-        images.push({
-          imageUrl: String(artifact.imageUrl || '').trim(),
-          path: String(artifact.path || '').trim(),
-          mediaType: String(artifact.mediaType || '').trim(),
-          title: String(artifact.title || 'image').trim(),
-          artifactId: String(artifact.id || '').trim()
-        });
       }
       const wantsImage = images.length > 0;
 
