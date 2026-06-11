@@ -4,6 +4,19 @@ All notable user-facing changes should be documented in this file.
 
 This changelog is maintained from source. Published release artifacts and tags remain the source of truth for shipped binaries and npm packages.
 
+## 1.2.8 - 2026-06-11
+
+### Added
+
+- Added WeChat channel provider support and channel UI improvements.
+- Expanded Feishu and Telegram channel delivery coverage.
+- Improved desktop-agent setup, reconnect, capture, and packaged runtime handling.
+
+### Fixed
+
+- Fixed chat history/debugging flows and assistant reply language handling.
+- Improved tools/logs UI behavior and tool installer status handling.
+
 ## 1.2.4 - 2026-06-05
 
 ### Fixed
