@@ -10,6 +10,8 @@ This changelog is maintained from source. Published release artifacts and tags r
 
 - Fixed channel screenshot delivery failing with "image artifact not found": the assistant could see the captured screenshot but not its artifact id, so it fabricated an invalid handle when forwarding the image to DingTalk/Feishu/Telegram. Tool results now keep the structured fields (including `imageArtifactId`) visible to the model alongside the image.
 - Sending an image by artifact handle is now self-healing: wrapped handles (`artifact:<tool>:<id>`) resolve via the embedded id, and a fabricated desktop-capture handle falls back to the newest screenshot instead of failing the send.
+- Fixed the scheduled-task create/edit dialog overflowing on small screens with no way to scroll, which made the Save button unreachable. Dialogs now cap to the window height with a fixed header, a scrollable body, and an always-visible action bar.
+- Restored missing size utility styles used across the dashboard (account quota details, skills lists, API explorer output, assistant workbench), so capped lists scroll inside their panel again instead of stretching the page.
 
 ## 1.2.9 - 2026-06-11
 

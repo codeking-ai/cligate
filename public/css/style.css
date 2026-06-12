@@ -2345,6 +2345,59 @@ textarea.input {
     font-weight: 600;
 }
 
+/* Modal layout system: header and action bar stay visible, only the body
+   scrolls. The panel is capped to the viewport, and the overlay itself
+   scrolls as a last resort (margin:auto keeps an oversized panel reachable
+   from the top), so Save/Cancel can never end up off-screen on short
+   displays — e.g. the scheduled-task editor on small laptop screens. */
+.modal-overlay {
+    position: fixed;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 50;
+    display: flex;
+    padding: 1rem;
+    background: rgba(0, 0, 0, 0.7);
+    backdrop-filter: blur(4px);
+    overflow-y: auto;
+}
+
+.modal-panel {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    max-width: 42rem;
+    margin: auto;
+    min-height: 0;
+    max-height: calc(100vh - 2rem);
+    max-height: calc(100dvh - 2rem);
+    padding: 0;
+}
+
+.modal-panel-head {
+    flex: 0 0 auto;
+    padding: 1.25rem 1.5rem 0.75rem;
+}
+
+.modal-panel-body {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding: 0.25rem 1.5rem 1rem;
+}
+
+.modal-panel-foot {
+    flex: 0 0 auto;
+    display: flex;
+    justify-content: flex-end;
+    gap: 0.5rem;
+    padding: 0.75rem 1.5rem 1.25rem;
+    border-top: 1px solid var(--color-space-border);
+}
+
 dialog {
     background: transparent;
     color: #e5e7eb;
@@ -3821,7 +3874,38 @@ html.light .chat-runtime-summary {
 .max-w-xl { max-width: 36rem; }
 .max-w-2xl { max-width: 42rem; }
 .max-w-\[320px\] { max-width: 320px; }
-.max-w-\[60vh\] { max-height: 60vh; }
+
+/* Bracketed size utilities. This stylesheet is hand-rolled (no Tailwind
+   build), so Tailwind-style arbitrary values used in the views only work
+   when defined here — keep this list in sync with the markup. */
+.max-w-\[90\%\] { max-width: 90%; }
+.max-w-\[120px\] { max-width: 120px; }
+.max-w-\[180px\] { max-width: 180px; }
+.max-w-\[200px\] { max-width: 200px; }
+.max-w-\[220px\] { max-width: 220px; }
+.max-w-\[340px\] { max-width: 340px; }
+.max-h-\[220px\] { max-height: 220px; }
+.max-h-\[240px\] { max-height: 240px; }
+.max-h-\[400px\] { max-height: 400px; }
+.max-h-\[420px\] { max-height: 420px; }
+.max-h-\[480px\] { max-height: 480px; }
+.max-h-\[560px\] { max-height: 560px; }
+.max-h-\[28rem\] { max-height: 28rem; }
+.max-h-\[60vh\] { max-height: 60vh; }
+.max-h-\[90vh\] { max-height: 90vh; }
+.min-h-\[140px\] { min-height: 140px; }
+.min-h-\[320px\] { min-height: 320px; }
+.min-h-\[70vh\] { min-height: 70vh; }
+.min-w-\[180px\] { min-width: 180px; }
+.min-w-\[220px\] { min-width: 220px; }
+.min-w-\[240px\] { min-width: 240px; }
+.min-w-\[260px\] { min-width: 260px; }
+.min-w-\[280px\] { min-width: 280px; }
+.min-w-\[300px\] { min-width: 300px; }
+.min-w-\[700px\] { min-width: 700px; }
+.min-w-\[1120px\] { min-width: 1120px; }
+.w-\[155px\] { width: 155px; }
+.w-\[320px\] { width: 320px; }
 
 .p-1 { padding: 0.25rem; }
 .p-2 { padding: 0.5rem; }

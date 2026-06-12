@@ -176,18 +176,18 @@
 <!-- Create / edit modal -->
 <div x-show="scheduledTaskFormOpen"
     x-transition.opacity
-    class="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4"
+    class="modal-overlay"
     style="display: none;"
     @keydown.escape.window="closeScheduledTaskForm()">
-    <div class="view-card w-full max-w-2xl max-h-[90vh] overflow-y-auto p-6"
+    <div class="view-card modal-panel"
         @click.outside="closeScheduledTaskForm()">
-        <div class="flex items-center justify-between mb-4">
+        <div class="modal-panel-head flex items-center justify-between">
             <h2 class="text-lg font-semibold text-white"
                 x-text="scheduledTaskForm.id ? t('scheduledTaskFormEditTitle') : t('scheduledTaskFormCreateTitle')"></h2>
             <button class="btn btn-xs btn-surface" @click="closeScheduledTaskForm()">×</button>
         </div>
 
-        <div class="space-y-4">
+        <div class="modal-panel-body custom-scrollbar space-y-4">
             <!-- Title -->
             <label class="block">
                 <span class="session-field-label text-[11px] font-mono text-gray-500 uppercase tracking-wider block mb-1" x-text="t('scheduledTaskFormTitleLabel')"></span>
@@ -377,7 +377,7 @@
             <div class="rounded-xl border border-red-500/40 bg-red-500/10 p-3 text-sm text-red-300" x-show="scheduledTaskFormError" x-text="scheduledTaskFormError"></div>
         </div>
 
-        <div class="flex justify-end gap-2 mt-5">
+        <div class="modal-panel-foot">
             <button class="btn btn-sm btn-surface" @click="closeScheduledTaskForm()" x-text="t('cancel')"></button>
             <button class="btn btn-sm btn-primary" @click="submitScheduledTaskForm()"
                 :disabled="scheduledTaskFormSubmitting"
