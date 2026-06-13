@@ -411,6 +411,14 @@
                                                 @click="$refs.assistantAttachmentInput?.click()"
                                                 :title="t('attachHint')"
                                                 x-text="t('attachLabel')"></button>
+                                            <!-- Voice input: click to record, click again to stop + transcribe
+                                                 (server account-pool first, in-browser Whisper fallback). -->
+                                            <button type="button" class="btn btn-xs btn-surface"
+                                                :class="chatRecording ? 'text-red-300 border-red-500/40 animate-pulse' : ''"
+                                                @click="toggleVoiceRecording()"
+                                                :disabled="chatTranscribing"
+                                                :title="t('voiceHint')"
+                                                x-text="chatRecording ? t('voiceRecording') : (chatTranscribing ? t('voiceTranscribing') : t('voiceLabel'))"></button>
                                         </div>
                                     </template>
                                 </div>

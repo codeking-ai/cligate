@@ -1,3 +1,5 @@
+import { createAudioRecorder, transcribeAudio, probeServerCapability } from './speech-to-text.js';
+
 export function createChatPageModule() {
   return {
     chatAssistantRunPoller: null,
@@ -9,6 +11,10 @@ export function createChatPageModule() {
     chatInput: '',
     chatPendingImage: null,
     chatPendingFile: null,
+    chatRecording: false,
+    chatTranscribing: false,
+    chatSttRecorder: null,
+    chatSttServerAvailable: null,
     chatMessages: [],
     chatSessions: [],
     activeChatSessionId: '',
@@ -2004,6 +2010,87 @@ export function createChatPageModule() {
     clearAssistantPendingFile() {
       this.chatPendingFile = null;
       this.syncActiveChatSession();
+    },
+
+    // Push-to-talk voice input: click to record, click again to stop and
+    // transcribe. Prefers the server endpoint (account/key pool) and falls back
+    // to in-browser Whisper; the transcript is appended to the composer text.
+    async toggleVoiceRecording() {
+      if (this.chatTranscribing) return;
+
+      if (this.chatRecording) {
+        const recorder = this.chatSttRecorder;
+        this.chatRecording = false;
+        this.chatSttRecorder = null;
+        let blob = null;
+        try { blob = recorder ? await recorder.stop() : null; } catch { blob = null; }
+        if (!blob || !blob.size) {
+          this.showToast(this.t('voiceNoAudio'), 'warning');
+          return;
+        }
+        this.chatTranscribing = true;
+        try {
+          const { text } = await transcribeAudio(blob, {
+            // Let the backend/Whisper auto-detect language (handles bilingual use).
+            lang: '',
+            serverAvailable: this.chatSttServerAvailable
+          });
+          const transcript = String(text || '').trim();
+          if (!transcript) {
+            this.showToast(this.t('voiceNoSpeech'), 'warning');
+            return;
+          }
+          this.chatInput = this.chatInput && this.chatInput.trim()
+            ? `${this.chatInput.trim()} ${transcript}`
+            : transcript;
+        } catch (error) {
+          this.showToast(error?.message || this.t('voiceFailed'), 'error');
+        } finally {
+          this.chatTranscribing = false;
+        }
+        return;
+      }
+
+      // Start recording.
+      if (typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia) {
+        // mediaDevices is undefined ONLY in non-secure contexts. localhost and
+        // 127.0.0.1 ARE secure, so this branch usually means the page was opened
+        // on a plain-http LAN IP / hostname rather than localhost.
+        const insecure = typeof window !== 'undefined' && window.isSecureContext === false;
+        this.showToast(insecure ? this.t('voiceInsecure') : this.t('voiceUnsupported'), 'error');
+        return;
+      }
+      // Probe server capability once per session so the orchestrator can skip a
+      // doomed server round-trip when no key is configured.
+      if (this.chatSttServerAvailable === null) {
+        try {
+          const cap = await probeServerCapability();
+          this.chatSttServerAvailable = cap?.available === true;
+        } catch {
+          this.chatSttServerAvailable = false;
+        }
+      }
+      const recorder = createAudioRecorder();
+      try {
+        await recorder.start();
+      } catch (error) {
+        // getUserMedia rejects with a DOMException whose `name` is the real
+        // cause. Log it and surface a specific message instead of always
+        // claiming "denied" (which hid no-device / busy-device cases).
+        console.warn('[voice] getUserMedia failed:', error?.name, '-', error?.message);
+        this.showToast(this.describeMicError(error), 'error');
+        return;
+      }
+      this.chatSttRecorder = recorder;
+      this.chatRecording = true;
+    },
+
+    describeMicError(error) {
+      const name = String(error?.name || '');
+      if (name === 'NotAllowedError' || name === 'SecurityError') return this.t('voiceMicDenied');
+      if (name === 'NotFoundError' || name === 'DevicesNotFoundError') return this.t('voiceMicNotFound');
+      if (name === 'NotReadableError' || name === 'TrackStartError') return this.t('voiceMicBusy');
+      return `${this.t('voiceFailed')} (${name || error?.message || 'unknown'})`;
     },
 
     // Human-readable size for a document attachment chip ('' when unknown).

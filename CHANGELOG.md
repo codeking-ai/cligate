@@ -4,11 +4,13 @@ All notable user-facing changes should be documented in this file.
 
 This changelog is maintained from source. Published release artifacts and tags remain the source of truth for shipped binaries and npm packages.
 
-## Unreleased
+## 1.3.0 - 2026-06-13
 
 ### Added
 
 - The assistant can now search the web and read web pages with two new tools, `web_search` and `web_fetch` — free and keyless (DuckDuckGo lite / Mojeek / Baidu, with Bing as a guarded last resort, plus optional self-hosted SearXNG via `CLIGATE_SEARXNG_URL`). The assistant searches automatically for time-sensitive or unknown facts, reads the most relevant results, and cites source links in its reply. See `docs/web-search-design.md`.
+- The chat composer can now attach documents — PDF, Word (`.docx`), PowerPoint (`.pptx`), Excel (`.xlsx`), and text/markdown/csv/json/html — not just images. Files are uploaded locally to `~/.cligate/uploads` and read on demand by the assistant via a new `read_document` tool (PDF via `pdfjs-dist`; Office formats via dependency-free unzip+XML). The composer "+" entry is unified as a single **Files & photos** picker that routes images to vision and documents to text extraction. See `docs/file-attachment-design.zh-CN.md`.
+- Added voice input to the chat composer: click the microphone to record, click again to transcribe into the message box. Prefers server-side transcription through your configured OpenAI/Gemini key pool (`gpt-4o-mini-transcribe`, falling back to `whisper-1`, or Gemini), and automatically falls back to fully in-browser Whisper (transformers.js, WASM/WebGPU) when no key is available — so it works in both the browser and the desktop app, online or offline. See `docs/voice-recognition-design.zh-CN.md`.
 
 ## 1.2.11 - 2026-06-12
 

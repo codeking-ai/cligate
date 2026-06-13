@@ -12,6 +12,7 @@ import { ensureAccountsPersist as ensureAntigravityAccountsPersist, startAutoRef
 import { registerApiRoutes } from './routes/api-routes.js';
 import { handleResponses } from './routes/responses-route.js';
 import { handleChatUpload } from './routes/chat-uploads-route.js';
+import { handleTranscribe, handleTranscribeCapabilities } from './routes/chat-transcribe-route.js';
 import { setRequestLoggingEnabled } from './request-logger.js';
 import { getServerSettings } from './server-settings.js';
 import { startModelDiscovery } from './model-discovery.js';
@@ -86,6 +87,11 @@ export function createServer({ port }) {
   // also bypass express.json() (10mb cap + in-memory buffering). Same precedent
   // as /responses above. Query params (sessionId/name) are still parsed.
   app.post('/api/chat/uploads', handleChatUpload);
+
+  // Speech-to-text: POST streams raw audio bytes (must bypass express.json);
+  // the capabilities GET is registered alongside it for cohesion.
+  app.post('/api/chat/transcribe', handleTranscribe);
+  app.get('/api/chat/transcribe/capabilities', handleTranscribeCapabilities);
 
   app.use(express.json({
     limit: '10mb',
