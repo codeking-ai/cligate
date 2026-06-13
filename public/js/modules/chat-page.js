@@ -2044,6 +2044,7 @@ export function createChatPageModule() {
             ? `${this.chatInput.trim()} ${transcript}`
             : transcript;
         } catch (error) {
+          console.error('[voice] transcription failed:', error?.message || error);
           this.showToast(error?.message || this.t('voiceFailed'), 'error');
         } finally {
           this.chatTranscribing = false;

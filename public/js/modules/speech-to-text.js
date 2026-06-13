@@ -11,8 +11,19 @@
 // (the orchestration is unit-tested there with injected implementations).
 
 // Pin the v3 line: stable `pipeline()` API. Loaded on first fallback use only.
-const TRANSFORMERS_CDN = 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@3';
+// Both hosts are overridable at runtime via localStorage (no rebuild needed) so
+// users in regions where jsdelivr / huggingface.co are blocked can point at a
+// mirror, e.g. localStorage['cligate-hf-mirror'] = 'https://hf-mirror.com'.
+const DEFAULT_TRANSFORMERS_CDN = 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@3';
 const WHISPER_MODEL = 'Xenova/whisper-tiny';
+
+function sttOverride(key) {
+  try {
+    return (typeof localStorage !== 'undefined' && localStorage.getItem(key)) || '';
+  } catch {
+    return '';
+  }
+}
 const WHISPER_LANGUAGES = { zh: 'chinese', cn: 'chinese', en: 'english' };
 
 // MediaRecorder containers, best first. OpenAI accepts webm/opus directly.
@@ -100,13 +111,33 @@ let whisperPipelinePromise = null;
 async function loadWhisper(onProgress) {
   if (!whisperPipelinePromise) {
     whisperPipelinePromise = (async () => {
-      const lib = await import(TRANSFORMERS_CDN);
+      const cdn = sttOverride('cligate-transformers-cdn') || DEFAULT_TRANSFORMERS_CDN;
+      let lib;
+      try {
+        console.info('[voice] loading speech library from', cdn);
+        lib = await import(cdn);
+      } catch (error) {
+        throw new Error(`failed to load the speech library from ${cdn} — check network/CDN access (${error?.message || error})`);
+      }
       const { pipeline, env } = lib;
       // Download the model from the HF hub (cached by the browser afterwards).
-      if (env) env.allowLocalModels = false;
-      return pipeline('automatic-speech-recognition', WHISPER_MODEL, {
-        progress_callback: typeof onProgress === 'function' ? onProgress : undefined
-      });
+      if (env) {
+        env.allowLocalModels = false;
+        const mirror = sttOverride('cligate-hf-mirror');
+        if (mirror) {
+          env.remoteHost = mirror;
+          console.info('[voice] using model mirror', mirror);
+        }
+      }
+      try {
+        console.info('[voice] loading Whisper model', WHISPER_MODEL);
+        return await pipeline('automatic-speech-recognition', WHISPER_MODEL, {
+          progress_callback: typeof onProgress === 'function' ? onProgress : undefined
+        });
+      } catch (error) {
+        const host = (env && env.remoteHost) || 'huggingface.co';
+        throw new Error(`failed to download the Whisper model from ${host} — check network or set a mirror (${error?.message || error})`);
+      }
     })().catch((error) => { whisperPipelinePromise = null; throw error; });
   }
   return whisperPipelinePromise;
@@ -162,11 +193,17 @@ export async function transcribeAudio(blob, {
   if (canUseServer) {
     try {
       return await serverImpl(blob, { lang });
-    } catch {
+    } catch (error) {
       // any server failure → fall through to local Whisper
+      console.warn('[voice] server transcription failed; falling back to in-browser Whisper:', error?.kind || '', error?.message || error);
     }
   }
-  return whisperImpl(blob, { lang, onProgress: onWhisperProgress });
+  try {
+    return await whisperImpl(blob, { lang, onProgress: onWhisperProgress });
+  } catch (error) {
+    console.error('[voice] in-browser Whisper transcription failed:', error?.message || error);
+    throw error;
+  }
 }
 
 export default {
