@@ -4,6 +4,12 @@ All notable user-facing changes should be documented in this file.
 
 This changelog is maintained from source. Published release artifacts and tags remain the source of truth for shipped binaries and npm packages.
 
+## Unreleased
+
+### Added
+
+- The assistant can now search the web and read web pages with two new tools, `web_search` and `web_fetch` — free and keyless (DuckDuckGo lite / Mojeek / Baidu, with Bing as a guarded last resort, plus optional self-hosted SearXNG via `CLIGATE_SEARXNG_URL`). The assistant searches automatically for time-sensitive or unknown facts, reads the most relevant results, and cites source links in its reply. See `docs/web-search-design.md`.
+
 ## 1.2.11 - 2026-06-12
 
 ### Fixed

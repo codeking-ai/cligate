@@ -36,6 +36,8 @@ import createSendMessageToChannelToolDefinition from './send-message-to-channel.
 import createDesktopWaitForFileToolDefinition from './desktop-wait-for-file.js';
 import createDesktopWaitForProcessToolDefinition from './desktop-wait-for-process.js';
 import createDesktopWaitForWindowToolDefinition from './desktop-wait-for-window.js';
+import createWebSearchToolDefinition from './web-search.js';
+import createWebFetchToolDefinition from './web-fetch.js';
 import createListMcpServersToolDefinition from './list-mcp-servers.js';
 import createListMcpToolsToolDefinition from './list-mcp-tools.js';
 import createListMcpResourcesToolDefinition from './list-mcp-resources.js';
@@ -51,6 +53,7 @@ import createDesktopToolHandlers from '../handlers/desktop.js';
 import createAssistantRunToolHandlers from '../handlers/assistant-runs.js';
 import createMessagingToolHandlers from '../handlers/messaging.js';
 import createDesktopWaitToolHandlers from '../handlers/desktop-wait.js';
+import createWebToolHandlers from '../handlers/web.js';
 import { buildNamespacedMcpToolName } from '../mcp-service.js';
 
 function createDirectMcpToolDefinitions({ mcpService = null, handlers = {} } = {}) {
@@ -109,6 +112,7 @@ export function createBuiltinAssistantToolDefinitions({ workspaceGuard, mcpServi
     ...createDesktopWaitToolHandlers(),
     ...createAssistantRunToolHandlers(),
     ...createMessagingToolHandlers(),
+    ...createWebToolHandlers(),
     ...createMcpToolHandlers({ mcpService })
   };
   const definitions = [
@@ -149,7 +153,9 @@ export function createBuiltinAssistantToolDefinitions({ workspaceGuard, mcpServi
     createDesktopWaitForProcessToolDefinition({ handlers }),
     createDesktopWaitForWindowToolDefinition({ handlers }),
     createCancelAssistantRunToolDefinition({ handlers }),
-    createSendMessageToChannelToolDefinition({ handlers })
+    createSendMessageToChannelToolDefinition({ handlers }),
+    createWebSearchToolDefinition({ handlers }),
+    createWebFetchToolDefinition({ handlers })
   ];
   if (mcpService) {
     definitions.push(
