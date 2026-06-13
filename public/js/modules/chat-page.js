@@ -8,6 +8,7 @@ export function createChatPageModule() {
     chatSystemPrompt: '',
     chatInput: '',
     chatPendingImage: null,
+    chatPendingFile: null,
     chatMessages: [],
     chatSessions: [],
     activeChatSessionId: '',
@@ -596,7 +597,44 @@ export function createChatPageModule() {
     },
 
     persistChatSessions() {
-      localStorage.setItem(this.chatStorageKey, JSON.stringify(this.chatSessions.slice(0, 30)));
+      // Chat history is persisted to localStorage, which has a hard ~5MB quota.
+      // User-attached images live in-memory as full base64 data URLs (for the
+      // live thumbnail), but persisting them here is what broke image+text sends:
+      //   1. base64 blobs blow the quota after a couple of images, and
+      //   2. localStorage.setItem then throws QuotaExceededError.
+      // That throw used to escape uncaught. In sendAssistantConversationMessage
+      // it fires AFTER `chatLoading = true` but BEFORE the try/finally, so the
+      // finally that resets chatLoading never ran and the send button stayed
+      // stuck on "发送中" forever; the image/text POST was never even reached.
+      // The same throw then aborted newChatSession() (and every other persist
+      // site), which is why "新建聊天" stopped working too. So: never persist
+      // base64 blobs, and never let a storage failure bubble out of here.
+      const stripDataUrls = (key, value) => {
+        if ((key === 'previewUrl' || key === 'imageUrl')
+          && typeof value === 'string'
+          && value.startsWith('data:')) {
+          return '';
+        }
+        return value;
+      };
+      try {
+        localStorage.setItem(
+          this.chatStorageKey,
+          JSON.stringify(this.chatSessions.slice(0, 30), stripDataUrls)
+        );
+      } catch (error) {
+        // Last-ditch: keep fewer sessions and drop any pending image, then give
+        // up silently. In-memory state stays intact; only persistence degrades.
+        try {
+          const trimmed = this.chatSessions.slice(0, 10).map((session) => ({
+            ...session,
+            pendingImage: null
+          }));
+          localStorage.setItem(this.chatStorageKey, JSON.stringify(trimmed, stripDataUrls));
+        } catch {
+          /* storage unavailable / still over quota — degrade gracefully */
+        }
+      }
     },
 
     chatSessionTitle(session) {
@@ -638,6 +676,7 @@ export function createChatPageModule() {
         assistantMode: this.chatAssistantMode === true,
         systemPrompt: '',
         pendingImage: null,
+        pendingFile: null,
         messages: [],
         updatedAt: new Date().toISOString()
       };
@@ -691,6 +730,7 @@ export function createChatPageModule() {
       this.chatMessages = Array.isArray(session.messages) ? session.messages : [];
       this.chatInput = '';
       this.chatPendingImage = session.pendingImage || null;
+      this.chatPendingFile = session.pendingFile || null;
       session.runtimeLastEventSeq = Number(session.runtimeLastEventSeq || 0);
       session.runtimeUnread = false;
       if (!Array.isArray(session.runtimePendingApprovals)) {
@@ -1570,7 +1610,7 @@ export function createChatPageModule() {
         return true;
       }
       if (this.chatMode === 'assistant') {
-        return !String(this.chatInput || '').trim() && !this.chatPendingImage;
+        return !String(this.chatInput || '').trim() && !this.chatPendingImage && !this.chatPendingFile;
       }
       return !String(this.chatInput || '').trim();
     },
@@ -1598,6 +1638,7 @@ export function createChatPageModule() {
         if (!('systemPrompt' in session)) session.systemPrompt = '';
       }
       session.pendingImage = this.chatPendingImage || null;
+      session.pendingFile = this.chatPendingFile || null;
       session.assistantMode = this.chatAssistantMode === true;
       session.messages = [...this.chatMessages];
       session.title = this.buildChatSessionTitle(session.messages);
@@ -1621,6 +1662,7 @@ export function createChatPageModule() {
           this.chatSystemPrompt = '';
           this.chatInput = '';
           this.chatPendingImage = null;
+          this.chatPendingFile = null;
           this.newChatSession();
           return;
         }
@@ -1632,9 +1674,10 @@ export function createChatPageModule() {
     async sendChatMessage() {
       const hasText = Boolean(String(this.chatInput || '').trim());
       const hasPendingImage = Boolean(this.chatPendingImage);
+      const hasPendingFile = Boolean(this.chatPendingFile);
       if (this.chatLoading) return;
       if (this.chatMode === 'assistant') {
-        if (!hasText && !hasPendingImage) return;
+        if (!hasText && !hasPendingImage && !hasPendingFile) return;
       } else if (!hasText) {
         return;
       }
@@ -1736,7 +1779,8 @@ export function createChatPageModule() {
       const input = this.chatInput.trim();
       const session = this.getActiveChatSession();
       const pendingImage = this.chatPendingImage || null;
-      if ((!input && !pendingImage) || !session) return;
+      const pendingFile = this.chatPendingFile || null;
+      if ((!input && !pendingImage && !pendingFile) || !session) return;
 
       this.ensureAgentRuntimeSessionDefaults(session);
       if (session.runtimePendingApprovals.length > 0) {
@@ -1745,20 +1789,31 @@ export function createChatPageModule() {
       }
 
       const shouldAutoScroll = this.shouldStickChatToBottom();
-      const previewSuffix = pendingImage ? '\n[Image attached]' : '';
+      const suffixes = [];
+      if (pendingImage) suffixes.push('[Image attached]');
+      if (pendingFile) suffixes.push('[Document attached]');
       this.chatMessages.push({
         role: 'user',
-        content: `${input}${previewSuffix}`.trim() || '[Image attached]',
-        attachments: pendingImage ? [{
-          kind: 'image',
-          name: pendingImage.name || 'image',
-          mediaType: pendingImage.mediaType || '',
-          previewUrl: pendingImage.previewUrl || pendingImage.imageUrl || ''
-        }] : [],
+        content: `${input}${suffixes.length ? `\n${suffixes.join('\n')}` : ''}`.trim() || suffixes[0] || '[Attachment]',
+        attachments: [
+          ...(pendingImage ? [{
+            kind: 'image',
+            name: pendingImage.name || 'image',
+            mediaType: pendingImage.mediaType || '',
+            previewUrl: pendingImage.previewUrl || pendingImage.imageUrl || ''
+          }] : []),
+          ...(pendingFile ? [{
+            kind: 'document',
+            name: pendingFile.name || 'document',
+            mediaType: pendingFile.mediaType || '',
+            size: pendingFile.size || 0
+          }] : [])
+        ],
         _origin: 'web'
       });
       this.chatInput = '';
       this.chatPendingImage = null;
+      this.chatPendingFile = null;
       this.chatLoading = true;
       this.syncActiveChatSession();
       this.scrollChatToBottom(shouldAutoScroll);
@@ -1772,6 +1827,15 @@ export function createChatPageModule() {
           type: 'input_image',
           image_url: pendingImage.imageUrl,
           ...(pendingImage.mediaType ? { media_type: pendingImage.mediaType } : {})
+        });
+      }
+      if (pendingFile?.path) {
+        inputParts.push({
+          type: 'input_file',
+          path: pendingFile.path,
+          ...(pendingFile.name ? { name: pendingFile.name } : {}),
+          ...(pendingFile.mediaType ? { media_type: pendingFile.mediaType } : {}),
+          ...(Number.isFinite(Number(pendingFile.size)) ? { size: Number(pendingFile.size) } : {})
         });
       }
 
@@ -1851,6 +1915,23 @@ export function createChatPageModule() {
       }
     },
 
+    // Single composer entry for both images and documents. Branch by type and
+    // delegate to the existing handlers: images go inline as base64 so the model
+    // can SEE them (vision), documents are uploaded to disk and read on demand
+    // via read_document. Both delegates re-read event.target.files[0] and reset
+    // the input value themselves, so passing the same event through is safe.
+    async handleAssistantAttachmentPicked(event) {
+      const file = event?.target?.files?.[0];
+      if (!file) return;
+      const isImage = String(file.type || '').startsWith('image/')
+        || /\.(png|jpe?g|gif|webp|bmp|svg|avif|heic|heif)$/i.test(String(file.name || ''));
+      if (isImage) {
+        await this.handleAssistantImagePicked(event);
+      } else {
+        await this.handleAssistantFilePicked(event);
+      }
+    },
+
     async handleAssistantImagePicked(event) {
       const file = event?.target?.files?.[0];
       if (!file) return;
@@ -1878,9 +1959,60 @@ export function createChatPageModule() {
       }
     },
 
+    async handleAssistantFilePicked(event) {
+      const file = event?.target?.files?.[0];
+      if (!file) return;
+      const session = this.getActiveChatSession();
+      const sessionId = String(session?.id || this.activeChatSessionId || '').trim();
+      if (!sessionId) {
+        this.showToast(this.t('requestFailed'), 'error');
+        if (event?.target) event.target.value = '';
+        return;
+      }
+      try {
+        const url = `/api/chat/uploads?sessionId=${encodeURIComponent(sessionId)}&name=${encodeURIComponent(file.name || 'file')}`;
+        const response = await fetch(url, {
+          method: 'POST',
+          headers: file.type ? { 'Content-Type': file.type } : {},
+          body: file
+        });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok || payload?.success === false || !payload?.file?.path) {
+          throw new Error(payload?.error || this.t('requestFailed'));
+        }
+        this.chatPendingFile = {
+          name: payload.file.name || file.name || 'file',
+          mediaType: payload.file.mediaType || file.type || '',
+          size: Number(payload.file.size || file.size || 0),
+          path: payload.file.path
+        };
+        this.syncActiveChatSession();
+      } catch (error) {
+        this.showToast(error?.message || this.t('requestFailed'), 'error');
+      } finally {
+        if (event?.target) {
+          event.target.value = '';
+        }
+      }
+    },
+
     clearAssistantPendingImage() {
       this.chatPendingImage = null;
       this.syncActiveChatSession();
+    },
+
+    clearAssistantPendingFile() {
+      this.chatPendingFile = null;
+      this.syncActiveChatSession();
+    },
+
+    // Human-readable size for a document attachment chip ('' when unknown).
+    attachmentSizeLabel(size) {
+      const n = Number(size);
+      if (!Number.isFinite(n) || n <= 0) return '';
+      if (n < 1024) return `${n} B`;
+      if (n < 1024 * 1024) return `${Math.round(n / 1024)} KB`;
+      return `${(n / (1024 * 1024)).toFixed(1)} MB`;
     },
 
     async sendAgentRuntimeMessage() {

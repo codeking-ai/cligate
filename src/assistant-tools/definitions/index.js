@@ -1,5 +1,6 @@
 import createListDirectoryToolDefinition from './list-directory.js';
 import createReadFileToolDefinition from './read-file.js';
+import createReadDocumentToolDefinition from './read-document.js';
 import createStatPathToolDefinition from './stat-path.js';
 import createGlobSearchToolDefinition from './glob-search.js';
 import createGrepSearchToolDefinition from './grep-search.js';
@@ -118,6 +119,7 @@ export function createBuiltinAssistantToolDefinitions({ workspaceGuard, mcpServi
   const definitions = [
     createListDirectoryToolDefinition({ handlers }),
     createReadFileToolDefinition({ handlers }),
+    createReadDocumentToolDefinition({ handlers }),
     createStatPathToolDefinition({ handlers }),
     createGlobSearchToolDefinition({ handlers }),
     createGrepSearchToolDefinition({ handlers }),

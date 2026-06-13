@@ -1,5 +1,6 @@
 import path from 'node:path';
 import { readdir, readFile, stat } from 'node:fs/promises';
+import { documentExtractor } from '../../document-extraction/index.js';
 
 function clampInteger(value, { fallback, min, max }) {
   const number = Number.parseInt(value, 10);
@@ -81,6 +82,41 @@ export function createFileToolHandlers({ workspaceGuard }) {
         endLine,
         text,
         truncated: Buffer.byteLength(selected, 'utf8') > maxBytes
+      };
+    },
+
+    // read_document extracts readable TEXT from rich/binary documents (pdf,
+    // docx, pptx, xlsx) and text/html — the formats read_file cannot handle as
+    // UTF-8. Path resolution honors context.extraReadRoots exactly like
+    // read_file, and (because ~/.cligate is an always-readable write root)
+    // attachments uploaded under ~/.cligate/uploads are readable with no extra
+    // grants. Long documents page via offset/maxChars (see document-extraction).
+    async readDocument({ input = {}, context = {} } = {}) {
+      const resolvedPath = workspaceGuard.resolvePath(input.path, {
+        baseDir: context.cwd || workspaceGuard.workspaceRoot,
+        extraReadRoots: Array.isArray(context.extraReadRoots) ? context.extraReadRoots : [],
+        readOnly: true
+      });
+      const result = await documentExtractor.extract({
+        filePath: resolvedPath,
+        maxChars: input.maxChars,
+        offset: input.offset
+      });
+      if (!result.ok) {
+        // Follow the recoverable-error convention (cf. handlers/web.js) so the
+        // ReAct loop can react instead of treating it as a hard tool failure.
+        return { kind: result.kind || 'extract_failed', error: result.error, recoverable: true };
+      }
+      return {
+        kind: 'document',
+        path: workspaceGuard.toWorkspaceRelative(resolvedPath),
+        format: result.format,
+        name: result.name,
+        ...(Number.isFinite(result.pageCount) ? { pageCount: result.pageCount } : {}),
+        totalChars: result.totalChars,
+        offset: result.offset,
+        truncated: result.truncated,
+        text: result.text
       };
     },
 

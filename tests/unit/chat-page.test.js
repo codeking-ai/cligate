@@ -879,6 +879,95 @@ test('assistant mode message can send image-only inputParts', async () => {
   });
 });
 
+test('assistant mode message can send document-only inputParts', async () => {
+  const apiCalls = [];
+  const app = createHarness({
+    chatMode: 'assistant',
+    chatInput: '',
+    chatPendingFile: {
+      name: 'spec.pdf',
+      mediaType: 'application/pdf',
+      size: 1234,
+      path: 'D:\\tmp\\spec.pdf'
+    },
+    chatRuntimeProvider: 'codex',
+    activeChatSessionId: 'chat-1',
+    chatSessions: [{
+      id: 'chat-1',
+      mode: 'assistant',
+      runtimeProvider: 'codex',
+      messages: [],
+      updatedAt: '2026-05-18T10:00:00.000Z'
+    }],
+    api: async (endpoint, options = {}) => {
+      apiCalls.push([endpoint, options]);
+      return {
+        ok: true,
+        data: {
+          result: {
+            type: 'assistant_run_accepted',
+            message: 'accepted',
+            assistantRun: {
+              id: 'run-3',
+              status: 'waiting_runtime'
+            },
+            conversation: {
+              id: 'conv-3'
+            }
+          }
+        }
+      };
+    },
+    pollAssistantRunUntilFinal() {}
+  });
+
+  await app.sendChatMessage();
+
+  const [endpoint, options] = apiCalls[0];
+  assert.equal(endpoint, '/api/chat/agent-message');
+  assert.deepEqual(JSON.parse(options.body), {
+    sessionId: 'chat-1',
+    conversationId: '',
+    input: '',
+    inputParts: [{
+      type: 'input_file',
+      path: 'D:\\tmp\\spec.pdf',
+      name: 'spec.pdf',
+      media_type: 'application/pdf',
+      size: 1234
+    }],
+    provider: 'codex'
+  });
+});
+
+test('attachment picker routes images to the image handler and documents to the file handler', async () => {
+  const calls = [];
+  const app = createHarness({
+    async handleAssistantImagePicked() { calls.push('image'); },
+    async handleAssistantFilePicked() { calls.push('file'); }
+  });
+
+  // image by MIME, document by MIME, image by extension (empty MIME),
+  // document by extension (empty MIME).
+  await app.handleAssistantAttachmentPicked({ target: { files: [{ name: 'photo.png', type: 'image/png' }] } });
+  await app.handleAssistantAttachmentPicked({ target: { files: [{ name: 'spec.pdf', type: 'application/pdf' }] } });
+  await app.handleAssistantAttachmentPicked({ target: { files: [{ name: 'scan.jpg', type: '' }] } });
+  await app.handleAssistantAttachmentPicked({ target: { files: [{ name: 'data.xlsx', type: '' }] } });
+  // no file → no-op
+  await app.handleAssistantAttachmentPicked({ target: { files: [] } });
+
+  assert.deepEqual(calls, ['image', 'file', 'image', 'file']);
+});
+
+test('attachmentSizeLabel renders human-readable sizes (and nothing for unknown)', () => {
+  const app = createHarness();
+  assert.equal(app.attachmentSizeLabel(0), '');
+  assert.equal(app.attachmentSizeLabel(undefined), '');
+  assert.equal(app.attachmentSizeLabel(512), '512 B');
+  assert.equal(app.attachmentSizeLabel(2048), '2 KB');
+  assert.equal(app.attachmentSizeLabel(5 * 1024 * 1024), '5.0 MB');
+});
+
 test('legacy agent-runtime session without runtime binding normalizes to assistant mode on load', () => {
   const storage = new Map([[
     'cligate-chat-sessions-v1',

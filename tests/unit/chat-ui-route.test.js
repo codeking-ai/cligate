@@ -660,6 +660,138 @@ test('handleRouteChatAgentMessage persists structured image inputParts into inbo
   }
 });
 
+test('handleRouteChatAgentMessage persists structured document inputParts into inbound delivery history', async () => {
+  const originalRouteMessage = chatUiConversationService.routeMessage;
+  const originalGetBySessionId = chatUiConversationStore.getBySessionId;
+  const originalFindOrCreateBySessionId = chatUiConversationStore.findOrCreateBySessionId;
+  const originalSaveInbound = agentChannelDeliveryStore.saveInbound;
+  const originalCreateArtifact = artifactService.createArtifact;
+
+  const savedInbound = [];
+  const createdArtifacts = [];
+  const conversation = {
+    id: 'conversation-delivery-doc-history-1',
+    activeRuntimeSessionId: 'runtime-doc-history-1',
+    metadata: {}
+  };
+
+  chatUiConversationStore.getBySessionId = () => conversation;
+  chatUiConversationStore.findOrCreateBySessionId = () => conversation;
+  agentChannelDeliveryStore.saveInbound = (record) => {
+    savedInbound.push(record);
+    return record;
+  };
+  artifactService.createArtifact = (payload) => {
+    const artifact = { id: 'artifact-doc-1', ...payload };
+    createdArtifacts.push(artifact);
+    return artifact;
+  };
+  chatUiConversationService.routeMessage = async () => ({
+    type: 'assistant_response',
+    message: '收到文档了。',
+    assistantRun: {
+      id: 'run-doc-history-1',
+      status: 'completed'
+    },
+    conversation
+  });
+
+  try {
+    const res = mockRes();
+    await handleRouteChatAgentMessage({
+      body: {
+        sessionId: 'chat-session-doc-history-1',
+        input: '',
+        inputParts: [{
+          type: 'input_file',
+          path: 'D:\\tmp\\spec.pdf',
+          name: 'spec.pdf',
+          media_type: 'application/pdf',
+          size: 1234
+        }],
+        provider: 'codex'
+      }
+    }, res);
+
+    assert.equal(res._status, 200);
+    assert.equal(savedInbound.length, 1);
+    assert.equal(savedInbound[0].payload.text, '[document attachment]');
+    assert.deepEqual(savedInbound[0].payload.inputParts, [{
+      type: 'input_file',
+      path: 'D:\\tmp\\spec.pdf',
+      name: 'spec.pdf',
+      media_type: 'application/pdf',
+      size: 1234
+    }]);
+    assert.equal(createdArtifacts.length, 1);
+    assert.equal(createdArtifacts[0].kind, 'document');
+    // createArtifact (domain/models.js) persists `path`, not `filePath`.
+    assert.equal(createdArtifacts[0].path, 'D:\\tmp\\spec.pdf');
+    assert.deepEqual(savedInbound[0].payload.artifactRefs, ['artifact-doc-1']);
+  } finally {
+    chatUiConversationService.routeMessage = originalRouteMessage;
+    chatUiConversationStore.getBySessionId = originalGetBySessionId;
+    chatUiConversationStore.findOrCreateBySessionId = originalFindOrCreateBySessionId;
+    agentChannelDeliveryStore.saveInbound = originalSaveInbound;
+    artifactService.createArtifact = originalCreateArtifact;
+  }
+});
+
+test('handleRouteChatAgentMessage injects an attachment manifest (paths, not content) into the assistant turn for document inputParts', async () => {
+  const originalRouteMessage = chatUiConversationService.routeMessage;
+  const originalGetBySessionId = chatUiConversationStore.getBySessionId;
+  const originalFindOrCreateBySessionId = chatUiConversationStore.findOrCreateBySessionId;
+  const originalCreateArtifact = artifactService.createArtifact;
+
+  const conversation = { id: 'conversation-doc-manifest-1', metadata: {} };
+  let capturedPayload = null;
+
+  chatUiConversationStore.getBySessionId = () => conversation;
+  chatUiConversationStore.findOrCreateBySessionId = () => conversation;
+  artifactService.createArtifact = (payload) => ({ id: 'artifact-doc-manifest-1', ...payload });
+  chatUiConversationService.routeMessage = async (payload) => {
+    capturedPayload = payload;
+    return {
+      type: 'assistant_response',
+      message: 'ok',
+      assistantRun: { id: 'run-doc-manifest-1', status: 'completed' },
+      conversation
+    };
+  };
+
+  try {
+    const res = mockRes();
+    await handleRouteChatAgentMessage({
+      body: {
+        sessionId: 'chat-session-doc-manifest-1',
+        input: '总结这个文档',
+        inputParts: [{
+          type: 'input_file',
+          path: 'D:\\tmp\\uploads\\spec.pdf',
+          name: 'spec.pdf',
+          media_type: 'application/pdf',
+          size: 2048
+        }],
+        provider: 'codex'
+      }
+    }, res);
+
+    assert.equal(res._status, 200);
+    const sentText = String(capturedPayload?.text || '');
+    // User's instruction is preserved …
+    assert.match(sentText, /总结这个文档/);
+    // … and the manifest names the tool + the on-disk path, but NOT the content.
+    assert.match(sentText, /read_document/);
+    assert.match(sentText, /spec\.pdf/);
+    assert.match(sentText, /D:\\tmp\\uploads\\spec\.pdf/);
+  } finally {
+    chatUiConversationService.routeMessage = originalRouteMessage;
+    chatUiConversationStore.getBySessionId = originalGetBySessionId;
+    chatUiConversationStore.findOrCreateBySessionId = originalFindOrCreateBySessionId;
+    artifactService.createArtifact = originalCreateArtifact;
+  }
+});
+
 test('handleRouteChatAgentMessage accepts structured inputParts for assistant image input', async () => {
   const originalRouteMessage = chatUiConversationService.routeMessage;
   const originalGetBySessionId = chatUiConversationStore.getBySessionId;

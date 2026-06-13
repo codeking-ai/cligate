@@ -312,12 +312,28 @@
                                         </div>
                                         <div class="chat-message-attachments mt-3 flex flex-wrap gap-2"
                                             x-show="Array.isArray(message.attachments) && message.attachments.length > 0">
-                                            <template x-for="attachment in message.attachments" :key="attachment.previewUrl || attachment.name">
-                                                <div class="rounded-xl border border-space-border/40 bg-space-900/70 p-2">
-                                                    <img class="block h-24 w-auto max-w-[180px] rounded-lg object-cover"
-                                                        :src="attachment.previewUrl"
-                                                        :alt="attachment.name || 'attachment'">
-                                                    <div class="mt-2 text-[10px] font-mono text-gray-400 truncate max-w-[180px]" x-text="attachment.name || attachment.mediaType || 'image'"></div>
+                                            <template x-for="attachment in message.attachments" :key="attachment.previewUrl || attachment.path || attachment.name">
+                                                <div>
+                                                    <!-- Image attachment → thumbnail. -->
+                                                    <template x-if="attachment.kind === 'image' || attachment.previewUrl">
+                                                        <div class="rounded-xl border border-space-border/40 bg-space-900/70 p-2">
+                                                            <img class="block h-24 w-auto max-w-[180px] rounded-lg object-cover"
+                                                                :src="attachment.previewUrl"
+                                                                :alt="attachment.name || 'attachment'">
+                                                            <div class="mt-2 text-[10px] font-mono text-gray-400 truncate max-w-[180px]" x-text="attachment.name || attachment.mediaType || 'image'"></div>
+                                                        </div>
+                                                    </template>
+                                                    <!-- Document attachment → file chip, NOT an <img> (avoids the broken-image placeholder). -->
+                                                    <template x-if="attachment.kind !== 'image' && !attachment.previewUrl">
+                                                        <div class="flex items-center gap-2 rounded-xl border border-space-border/40 bg-space-900/70 px-3 py-2 max-w-[240px]">
+                                                            <div class="h-9 w-9 shrink-0 rounded-lg border border-space-border/30 bg-space-950/70 flex items-center justify-center text-[9px] font-mono text-gray-400">DOC</div>
+                                                            <div class="min-w-0">
+                                                                <div class="text-xs font-mono text-gray-200 truncate" x-text="attachment.name || 'document'"></div>
+                                                                <div class="text-[10px] font-mono text-gray-500 truncate"
+                                                                    x-text="[attachment.mediaType || 'file', attachmentSizeLabel(attachment.size)].filter(Boolean).join(' · ')"></div>
+                                                            </div>
+                                                        </div>
+                                                    </template>
                                                 </div>
                                             </template>
                                         </div>
@@ -362,6 +378,19 @@
                                 <button class="btn btn-xs btn-surface shrink-0"
                                     @click="clearAssistantPendingImage()" x-text="t('cancel')"></button>
                             </div>
+                            <div x-show="chatMode === 'assistant' && chatPendingFile"
+                                class="flex items-center justify-between gap-3 rounded-xl border border-space-border/30 bg-space-900/60 px-3 py-2">
+                                <div class="flex items-center gap-3 min-w-0">
+                                    <div class="h-12 w-12 rounded-lg border border-space-border/30 bg-space-950/70 flex items-center justify-center text-[11px] font-mono text-gray-400 shrink-0">FILE</div>
+                                    <div class="min-w-0">
+                                        <div class="text-xs font-mono text-gray-200 truncate" x-text="chatPendingFile?.name || 'document'"></div>
+                                        <div class="text-[10px] font-mono text-gray-500 truncate"
+                                            x-text="[chatPendingFile?.mediaType || '', chatPendingFile?.size ? (chatPendingFile.size + ' B') : ''].filter(Boolean).join(' · ')"></div>
+                                    </div>
+                                </div>
+                                <button class="btn btn-xs btn-surface shrink-0"
+                                    @click="clearAssistantPendingFile()" x-text="t('cancel')"></button>
+                            </div>
                             <textarea x-ref="chatComposerInput" x-model="chatInput" rows="4"
                                 class="chat-composer-input input bg-space-800 border-space-border text-white font-sans text-sm resize-y"
                                 :placeholder="chatMode !== 'direct-chat' ? t('agentRuntimeInputPlaceholder') : t('chatInputPlaceholder')"
@@ -372,11 +401,16 @@
                                     <div class="chat-composer-hint text-xs text-gray-500" x-text="chatMode !== 'direct-chat' ? t('agentRuntimeShortcutHint') : t('chatShortcutHint')"></div>
                                     <template x-if="chatMode === 'assistant'">
                                         <div class="shrink-0">
-                                            <input type="file" accept="image/*" class="hidden" x-ref="assistantImageInput"
-                                                @change="handleAssistantImagePicked($event)">
+                                            <!-- One entry for both images and documents; handleAssistantAttachmentPicked
+                                                 branches by file type (image → vision/base64, document → upload/read_document). -->
+                                            <input type="file"
+                                                accept="image/*,.txt,.md,.markdown,.csv,.tsv,.json,.jsonl,.log,.xml,.yaml,.yml,.ini,.conf,.html,.htm,.pdf,.docx,.pptx,.xlsx,text/*,application/pdf,application/json,application/xml,text/html,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.presentationml.presentation,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                                                class="hidden" x-ref="assistantAttachmentInput"
+                                                @change="handleAssistantAttachmentPicked($event)">
                                             <button type="button" class="btn btn-xs btn-surface"
-                                                @click="$refs.assistantImageInput?.click()"
-                                                x-text="t('imageLabel')"></button>
+                                                @click="$refs.assistantAttachmentInput?.click()"
+                                                :title="t('attachHint')"
+                                                x-text="t('attachLabel')"></button>
                                         </div>
                                     </template>
                                 </div>

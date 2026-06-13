@@ -452,6 +452,24 @@ function normalizeChatAgentInputParts(inputParts = []) {
           ? { media_type: String(part.media_type || '').trim() }
           : {})
       });
+      continue;
+    }
+    if (part.type === 'input_file') {
+      const filePath = String(part.path || '').trim();
+      if (!filePath) continue;
+      normalized.push({
+        type: 'input_file',
+        path: filePath,
+        ...(String(part.name || '').trim()
+          ? { name: String(part.name || '').trim() }
+          : {}),
+        ...(String(part.media_type || part.mediaType || '').trim()
+          ? { media_type: String(part.media_type || part.mediaType || '').trim() }
+          : {}),
+        ...(Number.isFinite(Number(part.size))
+          ? { size: Number(part.size) }
+          : {})
+      });
     }
   }
   return normalized;
@@ -466,6 +484,34 @@ function coerceChatAgentTextInput(input, inputParts = []) {
     .map((part) => String(part.text || '').trim())
     .filter(Boolean);
   return textParts.join('\n').trim();
+}
+
+function formatAttachmentSize(bytes) {
+  const n = Number(bytes);
+  if (!Number.isFinite(n) || n <= 0) return '';
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${Math.round(n / 1024)} KB`;
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+// Render a compact manifest of attached documents to append to the assistant's
+// view of the turn. We inject the PATHS (not the content): the model learns
+// what is available and reads only what it needs via read_document, keeping the
+// context bounded — the "upload ≠ stuff into the prompt" guarantee from
+// docs/file-attachment-design.zh-CN.md. Returns '' when there are no documents.
+function buildChatAttachmentManifest(inputParts = []) {
+  const files = (Array.isArray(inputParts) ? inputParts : []).filter(
+    (part) => part?.type === 'input_file' && String(part.path || '').trim()
+  );
+  if (files.length === 0) return '';
+  const lines = files.map((part, index) => {
+    const meta = [part.media_type || 'file', formatAttachmentSize(part.size)].filter(Boolean).join(', ');
+    return `${index + 1}. ${String(part.name || 'file')} (${meta}) — ${part.path}`;
+  });
+  return [
+    '[Attached files — use the read_document tool to read any that are relevant to the request; do not assume their contents]',
+    ...lines
+  ].join('\n');
 }
 
 function rebuildPendingActionFromRun(conversation = null) {
@@ -1631,25 +1677,52 @@ export async function handleRouteChatAgentMessage(req, res) {
     // with autoApproveTools=true yet zero downstream runs.
     let conversation = existingConversation || chatUiConversationStore.findOrCreateBySessionId(sessionId);
     const createdArtifacts = normalizedInputParts
-      .filter((part) => part.type === 'input_image' && String(part.image_url || '').trim())
-      .map((part, index) => artifactService.createArtifact({
-        kind: 'image',
-        source: 'chat_ui_upload',
-        conversationId: conversation.id,
-        role: 'user',
-        title: normalizedInputText || `chat image ${index + 1}`,
-        summary: normalizedInputText || 'User attached an image in chat-ui.',
-        mediaType: String(part.media_type || '').trim()
-          || (String(part.image_url || '').match(/^data:([^;]+);base64,/i)?.[1] || ''),
-        imageUrl: String(part.image_url || '').trim(),
-        metadata: {
-          sourceType: 'chat-ui',
-          sessionId
+      .flatMap((part, index) => {
+        if (part.type === 'input_image' && String(part.image_url || '').trim()) {
+          return [artifactService.createArtifact({
+            kind: 'image',
+            source: 'chat_ui_upload',
+            conversationId: conversation.id,
+            role: 'user',
+            title: normalizedInputText || `chat image ${index + 1}`,
+            summary: normalizedInputText || 'User attached an image in chat-ui.',
+            mediaType: String(part.media_type || '').trim()
+              || (String(part.image_url || '').match(/^data:([^;]+);base64,/i)?.[1] || ''),
+            imageUrl: String(part.image_url || '').trim(),
+            metadata: {
+              sourceType: 'chat-ui',
+              sessionId
+            }
+          })];
         }
-      }));
+        if (part.type === 'input_file' && String(part.path || '').trim()) {
+          return [artifactService.createArtifact({
+            kind: 'document',
+            source: 'chat_ui_upload',
+            conversationId: conversation.id,
+            role: 'user',
+            title: String(part.name || '').trim() || `chat document ${index + 1}`,
+            summary: normalizedInputText || 'User attached a document in chat-ui.',
+            mediaType: String(part.media_type || '').trim(),
+            // `path` is the field createArtifact (domain/models.js) persists —
+            // `filePath` would be silently dropped. The assistant reads the file
+            // from here on demand via read_document.
+            path: String(part.path || '').trim(),
+            metadata: {
+              sourceType: 'chat-ui',
+              sessionId,
+              size: Number.isFinite(Number(part.size)) ? Number(part.size) : undefined
+            }
+          })];
+        }
+        return [];
+      });
     saveChatUiInboundDelivery(conversation, {
       sessionId,
-      text: normalizedInputText || '[image attachment]',
+      text: normalizedInputText
+        || (normalizedInputParts.some((part) => part.type === 'input_file')
+          ? '[document attachment]'
+          : '[image attachment]'),
       inputParts: normalizedInputParts,
       artifactRefs: createdArtifacts.map((entry) => entry.id)
     });
@@ -1729,9 +1802,15 @@ export async function handleRouteChatAgentMessage(req, res) {
       });
     }
 
+    // The agent's view of the turn = the user's text plus a manifest of any
+    // attached documents (paths only). The stored inbound delivery above keeps
+    // the clean user text; only what the assistant reads is augmented.
+    const attachmentManifest = buildChatAttachmentManifest(normalizedInputParts);
+    const agentInputText = [normalizedInputText, attachmentManifest].filter(Boolean).join('\n\n');
+
     const result = await chatUiConversationService.routeMessage({
       sessionId,
-      text: normalizedInputText,
+      text: agentInputText,
       inputParts: normalizedInputParts,
       defaultRuntimeProvider: String(provider || 'codex'),
       cwd: String(cwd || '').trim() || resolveDefaultChatUiWorkspaceRoot(),
