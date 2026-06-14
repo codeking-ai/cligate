@@ -78,6 +78,23 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # The keyless voice-input fallback runs Whisper in the browser; the model
+      # is bundled into the app (public/models) rather than fetched at runtime.
+      # It is gitignored, so CI downloads it here before packaging. Cached so it
+      # is fetched at most once per model/script change.
+      - name: Cache bundled Whisper voice model
+        uses: actions/cache@v4
+        with:
+          path: public/models
+          key: whisper-tiny-onnx-${{ hashFiles('scripts/fetch-whisper-model.mjs') }}
+
+      - name: Fetch bundled Whisper voice model
+        run: npm run fetch:stt-model
+        env:
+          # Optional: define repo variable STT_MODEL_BASE_URL to point at a
+          # different mirror if ModelScope is unreachable from the runner.
+          CLIGATE_STT_MODEL_BASE_URL: ${{ vars.STT_MODEL_BASE_URL }}
+
       - name: Build desktop app
         run: npx electron-builder --${{ matrix.platform }} --publish never
         env:

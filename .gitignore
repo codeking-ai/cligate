@@ -15,6 +15,9 @@ yarn-error.log*
 .env
 pentagi
 apps/portfolio/dist/
+# Bundled speech-to-text model — fetched at build time via
+# `npm run fetch:stt-model` (electron:build runs it), not committed.
+public/models/
 # Electron build output
 dist-electron/
 .test-config/

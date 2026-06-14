@@ -120,23 +120,28 @@ async function loadWhisper(onProgress) {
         throw new Error(`failed to load the speech library from ${cdn} — check network/CDN access (${error?.message || error})`);
       }
       const { pipeline, env } = lib;
-      // Download the model from the HF hub (cached by the browser afterwards).
       if (env) {
-        env.allowLocalModels = false;
+        // Prefer the model BUNDLED with CliGate (public/models → served at
+        // /models/), so the packaged desktop app transcribes fully offline with
+        // no huggingface.co / CDN fetch. Remote stays enabled only as a fallback
+        // when the bundle is absent; an optional mirror covers blocked regions.
+        env.allowLocalModels = true;
+        env.localModelPath = '/models/';
         const mirror = sttOverride('cligate-hf-mirror');
         if (mirror) {
           env.remoteHost = mirror;
-          console.info('[voice] using model mirror', mirror);
+          console.info('[voice] model mirror (remote fallback)', mirror);
         }
       }
       try {
-        console.info('[voice] loading Whisper model', WHISPER_MODEL);
+        console.info('[voice] loading Whisper model', WHISPER_MODEL, '(local /models first)');
+        // dtype 'q8' → loads the *_quantized.onnx files we bundle under public/models.
         return await pipeline('automatic-speech-recognition', WHISPER_MODEL, {
+          dtype: 'q8',
           progress_callback: typeof onProgress === 'function' ? onProgress : undefined
         });
       } catch (error) {
-        const host = (env && env.remoteHost) || 'huggingface.co';
-        throw new Error(`failed to download the Whisper model from ${host} — check network or set a mirror (${error?.message || error})`);
+        throw new Error(`failed to load the Whisper model — ensure it is bundled under public/models (run "npm run fetch:stt-model") or reachable (${error?.message || error})`);
       }
     })().catch((error) => { whisperPipelinePromise = null; throw error; });
   }
