@@ -2595,44 +2595,6 @@ export function createChatPageModule() {
       return citation.title || '';
     },
 
-    async confirmChatPendingAction(message) {
-      if (!message?.pendingAction?.confirmToken || message._confirming) return;
-      message._confirming = true;
-      this.chatMessages = [...this.chatMessages];
-
-      const { ok, data, error } = await this.api('/api/chat/tool-confirm', {
-        method: 'POST',
-        body: JSON.stringify({
-          confirmToken: message.pendingAction.confirmToken
-        })
-      });
-
-      message._confirming = false;
-
-      if (ok && data?.success) {
-        const suffix = data.configPath ? `\n${data.configPath}` : '';
-        const resultText = data.result || data.routeResult?.message || 'Confirmed.';
-        message.content = `${message.content}\n\n${resultText}${suffix}`.trim();
-        message.pendingAction = null;
-        this.chatMessages = [...this.chatMessages];
-        this.syncActiveChatSession();
-        this.scrollChatToBottom(true);
-        return;
-      }
-
-      const errorMessage = data?.error || error || this.t('requestFailed');
-      this.showToast(errorMessage, 'error');
-      this.chatMessages = [...this.chatMessages];
-    },
-
-    dismissChatPendingAction(message) {
-      if (!message) return;
-      message.pendingAction = null;
-      this.chatMessages = [...this.chatMessages];
-      this.syncActiveChatSession();
-      this.scrollChatToBottom(true);
-    },
-
     toggleChatHistory() {
       this.chatHistoryOpen = !this.chatHistoryOpen;
       if (this.chatHistoryOpen && typeof this.loadChannelConversations === 'function') {

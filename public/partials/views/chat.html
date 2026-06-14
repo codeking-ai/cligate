@@ -337,18 +337,17 @@
                                                 </div>
                                             </template>
                                         </div>
+                                        <!-- Assistant tool-approval is text-only by design. The assistant's message already
+                                             tells the user to reply 「同意 / 全部同意 / 拒绝」, and the supervisor resolves that
+                                             reply semantically (isAffirmativeConfirmation / sticky-approval). We deliberately do
+                                             NOT render a clickable approve button here: the button path didn't drive the
+                                             continuation visibly, so a click looked stuck and the user had to retype "同意" anyway.
+                                             One consistent channel (text) avoids that click-then-still-retype confusion. -->
                                         <div class="chat-message-callout chat-message-callout-approval mt-3 rounded-xl border border-amber-500/30 bg-amber-500/10 p-3" x-show="message.pendingAction">
                                             <div class="text-[10px] font-mono uppercase tracking-wider text-amber-300 mb-2" x-text="t('assistantPendingAction')"></div>
                                             <div class="chat-message-callout-title text-sm text-white" x-text="message.pendingAction?.title || ''"></div>
                                             <div class="text-xs text-amber-100/80 mt-2" x-text="message.pendingAction?.summary || ''"></div>
-                                            <div class="mt-3 flex items-center gap-2">
-                                                <button class="btn btn-sm btn-confirm"
-                                                    @click="confirmChatPendingAction(message)" :disabled="message._confirming === true">
-                                                    <span x-text="message._confirming ? t('sending') : t('confirmAction')"></span>
-                                                </button>
-                                                <button class="btn btn-sm btn-surface"
-                                                    @click="dismissChatPendingAction(message)" x-text="t('cancel')"></button>
-                                            </div>
+                                            <div class="mt-2 text-xs text-amber-100/70" x-text="t('assistantPendingActionReplyHint')"></div>
                                         </div>
                                         <div class="mt-3 text-[10px] font-mono text-gray-500" x-show="message.usage">
                                             <span x-text="'in ' + (message.usage?.prompt_tokens || 0)"></span>
