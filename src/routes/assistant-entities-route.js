@@ -523,9 +523,12 @@ export function handleListAssistantScheduledTasks(req, res) {
       if (toText(req.query.taskId) && entry.taskId !== toText(req.query.taskId)) return false;
       if (stateList && !stateList.includes(toText(entry.state))) return false;
       if (conversationId) {
+        const targets = Array.isArray(entry?.notifyTargets) ? entry.notifyTargets : [];
         const cid = toText(entry?.payload?.conversationId)
           || toText(entry?.metadata?.conversationId);
-        if (cid !== conversationId) return false;
+        const matched = cid === conversationId
+          || targets.some((target) => toText(target?.conversationId) === conversationId);
+        if (!matched) return false;
       }
       return true;
     }

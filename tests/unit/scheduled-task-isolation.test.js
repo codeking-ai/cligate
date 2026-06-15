@@ -133,16 +133,20 @@ test('notify_user fans out to every notifyTarget with kind=scheduled_task_notifi
     ]
   });
 
-  await messageService.runScheduledTask(task);
+  const result = await messageService.runScheduledTask(task);
 
-  assert.equal(sentMessages.length, 2);
+  assert.equal(result.delivered, 2);
+  assert.equal(sentMessages.length, 1);
   for (const sent of sentMessages) {
     assert.equal(sent.payload.kind, 'scheduled_task_notification');
     assert.equal(sent.payload.scheduledTaskId, task.id);
     assert.match(String(sent.payload.text || ''), /该吃饭了/);
   }
-  const convIds = sentMessages.map((s) => s.conversation.id).sort();
-  assert.deepEqual(convIds, [convA.id, convB.id].sort());
+  assert.equal(sentMessages[0].conversation.id, convA.id);
+  const convBMessages = conversationStore.get(convB.id)?.metadata?.uiChatMessages || [];
+  assert.equal(convBMessages.length, 1);
+  assert.equal(convBMessages[0].scheduledTaskId, task.id);
+  assert.match(String(convBMessages[0].content || ''), /该吃饭了/);
 });
 
 test('notify_user with empty notifyTargets refuses to deliver (background-only is invalid for notify_user)', async () => {

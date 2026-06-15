@@ -409,8 +409,13 @@ const TOOL_SCHEMAS = Object.freeze({
   },
   list_scheduled_tasks: {
     type: 'object',
-    description: '列出当前会话下还在生效的定时任务。当用户问 "我有哪些提醒/几个定时任务" 时使用。',
+    description: '列出定时提醒/任务。默认查全局所有仍在生效的提醒；当用户问 "我有哪些提醒/几个定时任务" 时直接使用默认 scope=all。只有用户明确说"当前会话/这个聊天里的提醒"时才传 scope=current_conversation。',
     properties: {
+      scope: {
+        type: 'string',
+        enum: ['all', 'current_conversation'],
+        description: '默认 all。current_conversation 只查当前聊天绑定的提醒。'
+      },
       includeCompleted: { type: 'boolean', description: '默认 false（只看还在生效的）。true 时也返回 completed/cancelled/failed 的历史记录。' },
       limit: { type: 'integer', minimum: 1, maximum: 200 }
     }

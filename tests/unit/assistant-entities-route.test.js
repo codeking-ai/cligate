@@ -417,8 +417,10 @@ test('assistant entity routes list and fetch projects, task dashboards, and exec
         kind: 'check_in',
         title: 'Daily check-in',
         schedule: {
-          type: 'once',
-          triggerAt: '2026-05-13T00:00:00.000Z'
+          recurrence: 'once',
+          date: '2026-05-13',
+          localTime: '08:00',
+          timezone: 'Asia/Shanghai'
         }
       }
     }, scheduledCreateRes);
@@ -433,6 +435,30 @@ test('assistant entity routes list and fetch projects, task dashboards, and exec
     }, scheduledListRes);
     assert.equal(scheduledListRes._status, 200);
     assert.equal(scheduledListRes._body.scheduledTasks.length >= 1, true);
+
+    const scheduledByNotifyTargetRes = mockRes();
+    handleListAssistantScheduledTasks({
+      query: {
+        conversationId: 'notify-conversation-1'
+      }
+    }, scheduledByNotifyTargetRes);
+    assert.equal(scheduledByNotifyTargetRes._status, 200);
+    assert.equal(scheduledByNotifyTargetRes._body.scheduledTasks.length, 0);
+
+    coordinator.updateScheduledTask({
+      id: scheduledCreateRes._body.scheduledTask.id,
+      notifyTargets: [{ kind: 'conversation', conversationId: 'notify-conversation-1' }]
+    });
+
+    const scheduledByUpdatedNotifyTargetRes = mockRes();
+    handleListAssistantScheduledTasks({
+      query: {
+        conversationId: 'notify-conversation-1'
+      }
+    }, scheduledByUpdatedNotifyTargetRes);
+    assert.equal(scheduledByUpdatedNotifyTargetRes._status, 200);
+    assert.equal(scheduledByUpdatedNotifyTargetRes._body.scheduledTasks.length, 1);
+    assert.equal(scheduledByUpdatedNotifyTargetRes._body.scheduledTasks[0].id, scheduledCreateRes._body.scheduledTask.id);
 
     coordinator.updateScheduledTaskState({
       id: scheduledCreateRes._body.scheduledTask.id,
@@ -464,7 +490,8 @@ test('assistant entity routes list and fetch projects, task dashboards, and exec
         params: { id: scheduledCreateRes._body.scheduledTask.id }
       }, scheduledRunRes);
       assert.equal(scheduledRunRes._status, 200);
-      assert.equal(scheduledRunRes._body.task.state, 'completed');
+      assert.equal(scheduledRunRes._body.queued, true);
+      assert.equal(scheduledRunRes._body.taskId, scheduledCreateRes._body.scheduledTask.id);
     } finally {
       schedulerSingleton.runTask = originalRunTask;
     }

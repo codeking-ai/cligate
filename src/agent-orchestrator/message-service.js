@@ -1212,7 +1212,15 @@ export class AgentOrchestratorMessageService {
     const states = includeCompleted
       ? ['scheduled', 'running', 'paused', 'completed', 'cancelled', 'failed']
       : ['scheduled', 'running', 'paused'];
-    return store.listByConversation(String(conversationId || '').trim(), { limit, states });
+    const normalizedConversationId = String(conversationId || '').trim();
+    if (normalizedConversationId) {
+      return store.listByConversation(normalizedConversationId, { limit, states });
+    }
+    const stateSet = new Set(states);
+    return store.list({
+      limit,
+      predicate: (entry) => stateSet.has(String(entry?.state || '').trim())
+    });
   }
 
   // Lazily build (and cache) the AssistantModeService used to drive scheduled

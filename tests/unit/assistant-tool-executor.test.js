@@ -166,9 +166,32 @@ function stubScheduledTaskMessageService({ scheduledTaskFactory } = {}) {
       },
       listScheduledTasks(input) {
         calls.push({ tool: 'list_scheduled_tasks', input });
-        return [
-          { id: 'scheduled-1', title: 'A', schedule: { recurrence: 'daily', timezone: 'Asia/Shanghai', localTime: '20:00' }, payload: { message: 'do A' }, state: 'scheduled', nextRunAt: '2026-05-15T12:00:00.000Z' }
+        const all = [
+          {
+            id: 'scheduled-1',
+            title: 'A',
+            schedule: { recurrence: 'daily', timezone: 'Asia/Shanghai', localTime: '20:00' },
+            payload: { message: 'do A' },
+            notifyTargets: [{ kind: 'conversation', conversationId: 'conv-list' }],
+            state: 'scheduled',
+            nextRunAt: '2026-05-15T12:00:00.000Z'
+          },
+          {
+            id: 'scheduled-other-channel',
+            title: '提醒准备下班',
+            schedule: { recurrence: 'daily', timezone: 'Asia/Shanghai', localTime: '17:55' },
+            payload: { message: '准备下班啦' },
+            notifyTargets: [{ kind: 'conversation', conversationId: 'feishu-conv' }],
+            state: 'scheduled',
+            nextRunAt: '2026-06-15T09:55:00.000Z'
+          }
         ];
+        const conversationId = String(input?.conversationId || '').trim();
+        if (!conversationId) return all;
+        return all.filter((entry) => (
+          Array.isArray(entry.notifyTargets)
+          && entry.notifyTargets.some((target) => target.conversationId === conversationId)
+        ));
       },
       stateCoordinator: {
         scheduledTaskStore: {
@@ -506,20 +529,40 @@ test('cancel_scheduled_task: requires scheduledTaskId, otherwise calls messageSe
   assert.equal(calls[0].input.reason, 'user_no_longer_needs');
 });
 
-test('list_scheduled_tasks: returns conversation-scoped list with humanReadable strings', async () => {
+test('list_scheduled_tasks: defaults to global reminders, including other notification targets', async () => {
   const { calls, service } = stubScheduledTaskMessageService();
   const registry = createDefaultAssistantToolRegistry({ messageService: service });
 
   const result = await registry.get('list_scheduled_tasks').execute({
     input: {},
-    context: { conversation: { id: 'conv-list' } }
+    context: { conversation: { id: 'dingtalk-conv' } }
   });
 
-  assert.equal(result.count, 1);
+  assert.equal(result.scope, 'all');
+  assert.equal(result.conversationId, '');
+  assert.equal(result.count, 2);
   assert.equal(result.items[0].scheduledTaskId, 'scheduled-1');
   assert.match(String(result.items[0].humanReadable || ''), /Asia\/Shanghai/);
+  assert.equal(result.items[1].scheduledTaskId, 'scheduled-other-channel');
+  assert.equal(result.items[1].notifyTargets[0].conversationId, 'feishu-conv');
   assert.equal(calls.length, 1);
-  assert.equal(calls[0].input.conversationId, 'conv-list');
+  assert.equal(calls[0].input.conversationId, '');
+});
+
+test('list_scheduled_tasks: can still scope explicitly to the current conversation', async () => {
+  const { calls, service } = stubScheduledTaskMessageService();
+  const registry = createDefaultAssistantToolRegistry({ messageService: service });
+
+  const result = await registry.get('list_scheduled_tasks').execute({
+    input: { scope: 'current_conversation' },
+    context: { conversation: { id: 'dingtalk-conv' } }
+  });
+
+  assert.equal(result.scope, 'current_conversation');
+  assert.equal(result.conversationId, 'dingtalk-conv');
+  assert.equal(result.count, 0);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].input.conversationId, 'dingtalk-conv');
 });
 
 test('assistant tool registry exposes execution handoff tools through message service', async () => {

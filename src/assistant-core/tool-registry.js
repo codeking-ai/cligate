@@ -731,19 +731,25 @@ export function createDefaultAssistantToolRegistry({
 
   registry.register({
     name: 'list_scheduled_tasks',
-    description: '列出当前会话下还在生效的定时任务（state=scheduled/running/paused）。可选 includeCompleted=true 时附带 completed/cancelled/failed 的历史记录。conversationId 由系统自动注入。当用户问"我都有什么提醒/我有几个定时任务"时使用。',
+    description: '列出定时提醒/任务。默认 scope="all" 查询全局所有仍在生效的定时任务（state=scheduled/running/paused），适合用户问"我有哪些提醒/几个定时任务"。只有用户明确说"当前会话/这个聊天里的提醒"时才传 scope="current_conversation" 或 conversationId。可选 includeCompleted=true 时附带 completed/cancelled/failed 的历史记录。',
     execute: async ({ input = {}, context = {} } = {}) => {
-      const conversationId = String(
-        input?.conversationId
-        || context?.conversation?.id
-        || ''
-      ).trim();
+      const scope = String(input?.scope || '').trim().toLowerCase();
+      const explicitConversationId = String(input?.conversationId || '').trim();
+      const currentConversationId = String(context?.conversation?.id || '').trim();
+      const shouldScopeToConversation = Boolean(explicitConversationId)
+        || scope === 'current_conversation'
+        || scope === 'conversation';
+      const conversationId = shouldScopeToConversation
+        ? (explicitConversationId || currentConversationId)
+        : '';
       const list = messageService.listScheduledTasks({
         conversationId,
         includeCompleted: input?.includeCompleted === true,
         limit: Math.min(Math.max(Number(input?.limit || 50), 1), 200)
       });
       return {
+        scope: conversationId ? 'current_conversation' : 'all',
+        conversationId,
         count: list.length,
         items: list.map((entry) => buildScheduledTaskReply(entry))
       };
