@@ -5,7 +5,7 @@ import path from 'node:path';
 
 import { CONFIG_DIR } from '../../src/account-manager.js';
 import { desktopControlDir, desktopScreenshotsDir } from '../../src/desktop-agent/paths.js';
-import { createDesktopToolHandlers } from '../../src/assistant-tools/handlers/desktop.js';
+import { createDesktopToolHandlers, enrichDesktopError } from '../../src/assistant-tools/handlers/desktop.js';
 import assistantArtifactService from '../../src/assistant-core/artifact-service.js';
 
 import { getServerSettings, setServerSettings, normalizeDesktopAgentConfig } from '../../src/server-settings.js';
@@ -755,6 +755,75 @@ test('desktop-control switch: ON prepares once, OFF never tears the machine prep
     cap.getStatus = saved.getStatus; cap.prepare = saved.prepare; cap.enable = saved.enable; cap.disable = saved.disable;
     svc.start = saved.start; svc.stop = saved.stop; svc.updateSettings = saved.updateSettings; svc.getSettings = saved.getSettings; svc.manager = saved.manager;
   }
+});
+
+test('DesktopAgentHttpClient passes an AbortSignal and surfaces an aborted fetch as AGENT_TIMEOUT', async () => {
+  // Regression guard for the "桌面代理断开" bug: a hung server-side action used to
+  // leave the fetch waiting on undici's ~5-minute default before reporting a
+  // misleading "fetch failed / AgentUnreachable". Every request must now carry a
+  // deadline, and a deadline hit must be labelled AGENT_TIMEOUT (alive-but-stuck),
+  // NOT AgentUnreachable (process down).
+  const client = new DesktopAgentHttpClient({
+    getSettings: () => ({ baseUrl: 'http://127.0.0.1:8765', token: 'abc' }),
+    fetchImpl: async (url, init) => {
+      assert.ok(init.signal, 'every desktop request must pass an AbortSignal');
+      const err = new Error('This operation was aborted');
+      err.name = 'AbortError';
+      throw err;
+    }
+  });
+
+  await assert.rejects(
+    () => client.health(),
+    (err) => {
+      assert.equal(err.code, 'AGENT_TIMEOUT');
+      assert.match(err.message, /desktop_agent_timeout/);
+      return true;
+    }
+  );
+});
+
+test('DesktopAgentHttpClient aborts a genuinely hung request once its deadline elapses', async () => {
+  let aborted = false;
+  const client = new DesktopAgentHttpClient({
+    getSettings: () => ({ baseUrl: 'http://127.0.0.1:8765' }),
+    // Never resolves on its own — only the AbortController can end it.
+    fetchImpl: (url, init) => new Promise((_resolve, reject) => {
+      init.signal.addEventListener('abort', () => {
+        aborted = true;
+        const err = new Error('aborted');
+        err.name = 'AbortError';
+        reject(err);
+      });
+    })
+  });
+
+  await assert.rejects(
+    () => client.request('/health', { timeoutMs: 1000 }),
+    (err) => err.code === 'AGENT_TIMEOUT'
+  );
+  assert.equal(aborted, true, 'the controller must fire on the hung request');
+});
+
+test('enrichDesktopError separates UAC/secure-desktop, timeout, and busy from AgentUnreachable', () => {
+  // A Windows security dialog during an install produces these three; each needs
+  // a DIFFERENT recovery than "the agent is down, restart it".
+  const secure = enrichDesktopError({ code: 'SECURE_DESKTOP_ACTIVE', message: 'secure desktop active (UAC prompt)' });
+  assert.match(secure, /error_kind: SecureDesktopActive/);
+  assert.doesNotMatch(secure, /AgentUnreachable/);
+
+  const timeout = enrichDesktopError({ code: 'AGENT_TIMEOUT', message: 'desktop_agent_timeout: no response from /screenshot within 25000ms' });
+  assert.match(timeout, /error_kind: AgentTimeout/);
+  assert.match(timeout, /desktop_health/);
+  assert.doesNotMatch(timeout, /AgentUnreachable/);
+
+  const busy = enrichDesktopError({ code: 'AGENT_BUSY', message: 'desktop agent busy: another action (/screenshot) has held the action lock' });
+  assert.match(busy, /error_kind: AgentBusy/);
+  assert.doesNotMatch(busy, /AgentUnreachable/);
+
+  // A real connection failure still maps to AgentUnreachable (process down).
+  const down = enrichDesktopError({ message: 'fetch failed' });
+  assert.match(down, /error_kind: AgentUnreachable/);
 });
 
 test('DesktopAgentService ensureReady auto-starts and waits for health', async () => {

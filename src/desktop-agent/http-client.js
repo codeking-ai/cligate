@@ -1,5 +1,25 @@
 import { getDesktopAgentSettings } from './settings.js';
 
+// Every desktop request is capped with an AbortController. Without a deadline a
+// hung server-side action (classically a Windows UAC / "secure desktop" prompt
+// or an elevated installer window a medium-integrity agent cannot drive) left
+// the fetch waiting on undici's ~5-minute default header timeout, then surfaced
+// as a misleading "fetch failed / AgentUnreachable" minutes later — even though
+// the agent process was alive the whole time (its lock-free /health kept
+// answering in milliseconds). A bounded, per-endpoint timeout turns that into a
+// fast, correctly-labelled AGENT_TIMEOUT.
+const DEFAULT_TIMEOUT_MS = 30000;
+const QUICK_TIMEOUT_MS = 8000;
+
+// UIA/wait endpoints carry a server-side action budget (timeout_ms, default
+// 4s). The client deadline must sit safely ABOVE that budget plus headroom for
+// the COM round-trip, screenshot encoding, and disk IO, so it never fires
+// before a legitimately slow-but-progressing action.
+function uiaTimeout(spec = {}, headroomMs = 15000) {
+  const serverBudget = Number(spec?.timeoutMs ?? spec?.timeout_ms) || 4000;
+  return serverBudget + headroomMs;
+}
+
 function normalizeBaseUrl(value) {
   const text = String(value || '').trim();
   return text || 'http://127.0.0.1:8765';
@@ -57,15 +77,42 @@ export class DesktopAgentHttpClient {
     return normalizeBaseUrl(this.getSettings()?.baseUrl);
   }
 
-  async request(path, { method = 'GET', body } = {}) {
+  async request(path, { method = 'GET', body, timeoutMs = DEFAULT_TIMEOUT_MS } = {}) {
     if (typeof this.fetchImpl !== 'function') {
       throw new Error('fetch is not available');
     }
-    const response = await this.fetchImpl(`${this.baseUrl()}${path}`, {
-      method,
-      headers: this.buildHeaders(),
-      body: body === undefined ? undefined : JSON.stringify(body)
-    });
+    const deadlineMs = Math.max(1000, Number(timeoutMs) || DEFAULT_TIMEOUT_MS);
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), deadlineMs);
+    let response;
+    try {
+      response = await this.fetchImpl(`${this.baseUrl()}${path}`, {
+        method,
+        headers: this.buildHeaders(),
+        body: body === undefined ? undefined : JSON.stringify(body),
+        signal: controller.signal
+      });
+    } catch (error) {
+      // An aborted fetch means the agent did not respond in time. Surface this
+      // as AGENT_TIMEOUT (NOT AgentUnreachable): the process is usually alive
+      // but an action is stuck — most often a UAC/secure-desktop prompt. The
+      // distinction drives a very different recovery path in handlers/desktop.js
+      // (don't retry-spam; check session_locked; ask the user to handle the
+      // prompt) versus "the server is down, restart it".
+      if (error?.name === 'AbortError' || controller.signal.aborted) {
+        const timeoutError = new Error(
+          `desktop_agent_timeout: no response from ${path} within ${deadlineMs}ms `
+          + '(the desktop agent is likely alive but an action is stuck — e.g. a Windows UAC / '
+          + 'secure-desktop prompt, an elevated window, or a locked screen a normal-privilege '
+          + 'agent cannot drive)'
+        );
+        timeoutError.code = 'AGENT_TIMEOUT';
+        throw timeoutError;
+      }
+      throw error;
+    } finally {
+      clearTimeout(timer);
+    }
     let payload = null;
     try {
       payload = await response.json();
@@ -86,62 +133,72 @@ export class DesktopAgentHttpClient {
   }
 
   health() {
-    return this.request('/health');
+    return this.request('/health', { timeoutMs: QUICK_TIMEOUT_MS });
   }
 
   windows({ title = '', match = 'contains' } = {}) {
     if (String(title || '').trim()) {
       return this.request('/windows', {
         method: 'POST',
-        body: { title, match, ...withTransportMeta({ title, match }) }
+        body: { title, match, ...withTransportMeta({ title, match }) },
+        timeoutMs: 12000
       });
     }
-    return this.request('/windows');
+    return this.request('/windows', { timeoutMs: 12000 });
   }
 
   focusWindow({ hwnd = 0, title = '', match = 'contains' } = {}) {
     if (Number.isFinite(hwnd) && Number(hwnd) > 0) {
       return this.request('/focus', {
         method: 'POST',
-        body: { hwnd: Number(hwnd), ...withTransportMeta({ hwnd }) }
+        body: { hwnd: Number(hwnd), ...withTransportMeta({ hwnd }) },
+        timeoutMs: 15000
       });
     }
     return this.request('/focus', {
       method: 'POST',
-      body: { title, match, ...withTransportMeta({ title, match }) }
+      body: { title, match, ...withTransportMeta({ title, match }) },
+      timeoutMs: 15000
     });
   }
 
   uiFind(spec = {}) {
     return this.request('/ui/find', {
       method: 'POST',
-      body: normalizeWindowSpec(spec)
+      body: normalizeWindowSpec(spec),
+      timeoutMs: uiaTimeout(spec)
     });
   }
 
   uiAct(spec = {}) {
     return this.request('/ui/act', {
       method: 'POST',
-      body: normalizeWindowSpec(spec)
+      body: normalizeWindowSpec(spec),
+      timeoutMs: uiaTimeout(spec)
     });
   }
 
   uiWait(spec = {}) {
     return this.request('/ui/wait', {
       method: 'POST',
-      body: normalizeWindowSpec(spec)
+      body: normalizeWindowSpec(spec),
+      timeoutMs: uiaTimeout(spec)
     });
   }
 
   uiFindAll(spec = {}) {
     return this.request('/ui/find_all', {
       method: 'POST',
-      body: normalizeWindowSpec(spec)
+      body: normalizeWindowSpec(spec),
+      timeoutMs: uiaTimeout(spec)
     });
   }
 
   uiTree(spec = {}) {
     return this.request('/ui/tree', {
+      // Tree walks the full control hierarchy and, in inspect mode, also takes
+      // and annotates a screenshot — give it more headroom than a plain find.
+      timeoutMs: uiaTimeout(spec, 30000),
       method: 'POST',
       body: {
         ...normalizeWindowSpec(spec),
@@ -162,7 +219,8 @@ export class DesktopAgentHttpClient {
       body: {
         ...input,
         ...withTransportMeta(input)
-      }
+      },
+      timeoutMs: 20000
     });
   }
 
@@ -172,7 +230,8 @@ export class DesktopAgentHttpClient {
       body: {
         ...input,
         ...withTransportMeta(input)
-      }
+      },
+      timeoutMs: 25000
     });
   }
 
@@ -185,7 +244,8 @@ export class DesktopAgentHttpClient {
       body: {
         key: String(input?.key || '').trim(),
         ...withTransportMeta(input)
-      }
+      },
+      timeoutMs: 20000
     });
   }
 
@@ -198,7 +258,8 @@ export class DesktopAgentHttpClient {
       body: {
         keys,
         ...withTransportMeta(input)
-      }
+      },
+      timeoutMs: 20000
     });
   }
 
@@ -209,7 +270,8 @@ export class DesktopAgentHttpClient {
         text: String(input?.text ?? ''),
         ...(input?.preserveClipboard === false ? { preserve_clipboard: false } : {}),
         ...withTransportMeta(input)
-      }
+      },
+      timeoutMs: 20000
     });
   }
 
@@ -231,7 +293,8 @@ export class DesktopAgentHttpClient {
         ...(input?.previewHeight ? { preview_height: Number(input.previewHeight) } : {}),
         ...(input?.verifyHover === true ? { verify_hover: true } : {}),
         ...withTransportMeta(input)
-      }
+      },
+      timeoutMs: 20000
     });
   }
 
@@ -246,7 +309,8 @@ export class DesktopAgentHttpClient {
         ...(input?.previewWidth ? { preview_width: Number(input.previewWidth) } : {}),
         ...(input?.previewHeight ? { preview_height: Number(input.previewHeight) } : {}),
         ...withTransportMeta(input)
-      }
+      },
+      timeoutMs: 20000
     });
   }
 
@@ -256,7 +320,8 @@ export class DesktopAgentHttpClient {
       body: {
         amount: Number(input?.amount) || 0,
         ...withTransportMeta(input)
-      }
+      },
+      timeoutMs: 15000
     });
   }
 
@@ -270,12 +335,15 @@ export class DesktopAgentHttpClient {
         ...(Number.isFinite(input?.threshold) ? { threshold: Number(input.threshold) } : {}),
         ...(Number.isFinite(input?.signatureSize) ? { signature_size: Number(input.signatureSize) } : {}),
         ...withTransportMeta(input)
-      }
+      },
+      // /wait_change blocks server-side for up to its own timeout_ms (default
+      // 1500) while polling — wait at least that long plus headroom.
+      timeoutMs: uiaTimeout({ timeoutMs: Number(input?.timeoutMs) || 1500 })
     });
   }
 
   cursorInfo() {
-    return this.request('/cursor_info');
+    return this.request('/cursor_info', { timeoutMs: QUICK_TIMEOUT_MS });
   }
 
   findText(input = {}) {
@@ -288,7 +356,11 @@ export class DesktopAgentHttpClient {
         ...(Number.isFinite(input?.maxResults) ? { max_results: Number(input.maxResults) } : {}),
         ...(input?.region ? { region: input.region } : {}),
         ...withTransportMeta(input)
-      }
+      },
+      // OCR is the slowest endpoint: the first call lazily downloads the RapidOCR
+      // ONNX models (~30 MB), and inference over a large region is seconds. Give
+      // it a generous ceiling so a legitimate first run is never aborted.
+      timeoutMs: 90000
     });
   }
 }

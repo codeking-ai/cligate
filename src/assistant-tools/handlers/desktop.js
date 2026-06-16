@@ -44,6 +44,40 @@ function enrichDesktopError(rawError) {
   const message = String(rawError?.message || rawError || 'desktop tool failed').trim();
   const code = String(rawError?.code || rawError?.payload?.type || '').trim();
 
+  // --- Secure desktop / UAC, action timeout, and "busy" come FIRST -----------
+  // These three are the failure modes a Windows security dialog produces during
+  // an install. They must be matched before the generic "AgentUnreachable"
+  // branch below, because that branch's old regex (`fetch failed|ETIMEDOUT`)
+  // used to swallow all of them and tell the user to "restart the agent" — wrong
+  // advice when the agent is alive but an action is stuck on a UAC prompt.
+
+  if (code === 'SECURE_DESKTOP_ACTIVE' || /secure desktop|session[ _]?locked/i.test(message)) {
+    return [
+      message,
+      `error_kind: SecureDesktopActive`,
+      `recovery: A Windows secure desktop is up (UAC elevation prompt, lock screen, or login). A normal-privilege desktop agent CANNOT screenshot or operate it — this is a Windows security boundary, not a bug.`,
+      `next_step: Do NOT retry. Tell the user to click the prompt themselves (e.g. "运行"/"Run", "是"/"Yes"), unlock the screen, or — for installs that need elevation — run CliGate as administrator so the agent can drive the elevated installer. Wait for the user to confirm before continuing.`
+    ].join('\n');
+  }
+
+  if (code === 'AGENT_TIMEOUT' || /desktop_agent_timeout/i.test(message)) {
+    return [
+      message,
+      `error_kind: AgentTimeout`,
+      `recovery: The action did not return in time. The desktop-agent process is usually still ALIVE (desktop_health uses a lock-free endpoint and will likely succeed) — an action is stuck, most often on a Windows UAC / secure-desktop prompt, an elevated installer window, or a locked screen.`,
+      `next_step: Do NOT immediately retry the same action. Call desktop_health and read session_locked / interactive / elevated. If session_locked is true, a secure-desktop/UAC prompt is blocking input — ask the user to click it manually (or run CliGate as administrator). If health itself also fails, then ask the user to restart the desktop agent.`
+    ].join('\n');
+  }
+
+  if (code === 'AGENT_BUSY' || /desktop agent busy|another (desktop )?action|lease busy/i.test(message)) {
+    return [
+      message,
+      `error_kind: AgentBusy`,
+      `recovery: Another desktop action is still running — or an earlier one is wedged (often stuck on a UAC / secure-desktop prompt).`,
+      `next_step: Wait a few seconds and retry once. If it keeps returning busy, an action is stuck: call desktop_health to check session_locked, ask the user to handle any on-screen security prompt, and only restart the desktop agent as a last resort.`
+    ].join('\n');
+  }
+
   const moduleMatch = /No module named ['"]?([\w.]+)['"]?/i.exec(message);
   if (moduleMatch) {
     const moduleName = moduleMatch[1];

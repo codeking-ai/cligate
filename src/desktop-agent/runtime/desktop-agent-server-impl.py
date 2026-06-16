@@ -26,6 +26,13 @@ DEFAULT_PORT = 8765
 DEFAULT_PREVIEW_WIDTH = 1280
 AUTH_TOKEN = ""
 _action_lock = threading.Lock()
+# Max seconds a new action waits for the single action lock before returning a
+# clean 409 AGENT_BUSY. A wedged action (classically a UIA/clipboard call stuck
+# on a UAC / secure-desktop prompt) must never make later POSTs hang for minutes
+# while the lock-free /health keeps reporting "ok".
+_LOCK_ACQUIRE_TIMEOUT = 5.0
+_lock_acquired_at = 0.0
+_lock_holder_path = ""
 _active_lease_id = ""
 _SCREENSHOT_CONTEXT_LIMIT = 32
 _SHOT_CTX_BY_KEY: dict[str, dict] = {}
@@ -358,6 +365,27 @@ def _input_desktop_state() -> dict:
         return {"input_desktop": "", "interactive": True, "session_locked": False}
 
 
+def _ensure_interactive_desktop() -> None:
+    """Fail fast (instead of hanging) when the input desktop is the secure
+    desktop / lock screen / a UAC elevation prompt. A medium-integrity agent
+    cannot read or drive those: UIA cross-process COM calls against an elevated
+    or non-pumping window can block far past SetGlobalSearchTimeout, and a single
+    such block used to wedge the one global action lock for the whole process.
+    Raising here keeps the lock held for only microseconds and hands the caller
+    an actionable, correctly-labelled error instead of a multi-minute timeout."""
+    state = _input_desktop_state()
+    if state.get("session_locked"):
+        err = RuntimeError(
+            "secure desktop active (Windows UAC elevation prompt, lock screen, "
+            "or login). A normal-privilege desktop agent cannot screenshot or "
+            "operate it — this is a Windows security boundary. Ask the user to "
+            "click the prompt manually (Run / Yes / 运行 / 是), unlock the "
+            "screen, or run CliGate as administrator for elevated installs."
+        )
+        err.code = "SECURE_DESKTOP_ACTIVE"  # type: ignore[attr-defined]
+        raise err
+
+
 def _process_integrity_level() -> str:
     """Best-effort string for the agent process's integrity level.
     Returns one of: 'high', 'medium', 'low', 'system', 'unknown'."""
@@ -634,6 +662,10 @@ def scroll(amount: int) -> None:
 
 
 def paste_text(text: str, preserve_clipboard: bool = True) -> str:
+    # Clipboard paste needs an interactive desktop, and OpenClipboard itself can
+    # block on the secure desktop / during contention — fail fast for the same
+    # reason as the UIA guards below.
+    _ensure_interactive_desktop()
     try:
         import pyperclip  # type: ignore
     except Exception as exc:
@@ -1007,6 +1039,7 @@ def _try_get_text(ctrl) -> str | None:
 
 
 def uia_find(spec: dict) -> dict:
+    _ensure_interactive_desktop()
     auto = _uia()
     timeout = float(spec.get("timeout_ms", 4000)) / 1000.0
     win = _find_window_ctrl(auto, spec, timeout)
@@ -1020,6 +1053,7 @@ def uia_find(spec: dict) -> dict:
 
 
 def uia_act(spec: dict) -> dict:
+    _ensure_interactive_desktop()
     auto = _uia()
     timeout = float(spec.get("timeout_ms", 4000)) / 1000.0
     action = (spec.get("act") or spec.get("action") or "click").lower()
@@ -1099,6 +1133,7 @@ def uia_act(spec: dict) -> dict:
 
 
 def uia_tree(spec: dict) -> dict:
+    _ensure_interactive_desktop()
     auto = _uia()
     timeout = float(spec.get("timeout_ms", 4000)) / 1000.0
     inspect_mode = bool(spec.get("inspect_window"))
@@ -1196,6 +1231,7 @@ def uia_tree(spec: dict) -> dict:
 
 
 def uia_wait(spec: dict) -> dict:
+    _ensure_interactive_desktop()
     auto = _uia()
     timeout = float(spec.get("timeout_ms", 4000)) / 1000.0
     started_at = time.time()
@@ -1212,6 +1248,7 @@ def uia_wait(spec: dict) -> dict:
 
 
 def uia_find_all(spec: dict) -> dict:
+    _ensure_interactive_desktop()
     auto = _uia()
     timeout = float(spec.get("timeout_ms", 4000)) / 1000.0
     max_items = int(spec.get("max_items", 50))
@@ -1893,6 +1930,43 @@ def _release_lease(payload: dict) -> None:
         _active_lease_id = ""
 
 
+class _TimedActionLock:
+    """Acquire the global action lock with a bounded wait. If a previous action
+    is wedged (holding the lock and never returning — e.g. a UIA/clipboard call
+    stuck on a UAC / secure-desktop prompt), __enter__ raises AGENT_BUSY after
+    _LOCK_ACQUIRE_TIMEOUT instead of letting the request hang for minutes. On
+    that failure __exit__ is NOT called (Python context-manager semantics), so
+    the held lock is never erroneously released."""
+
+    def __init__(self, path: str):
+        self.path = path
+
+    def __enter__(self):
+        global _lock_acquired_at, _lock_holder_path
+        if not _action_lock.acquire(timeout=_LOCK_ACQUIRE_TIMEOUT):
+            held_for = max(0.0, time.monotonic() - (_lock_acquired_at or time.monotonic()))
+            err = RuntimeError(
+                f"desktop agent busy: another action ({_lock_holder_path or 'unknown'}) "
+                f"has held the action lock for ~{held_for:.0f}s without returning. "
+                "It may be stuck on a UAC / secure-desktop prompt. Retry shortly; "
+                "if it never clears, restart the desktop agent."
+            )
+            err.code = "AGENT_BUSY"  # type: ignore[attr-defined]
+            err.http_status = 409  # type: ignore[attr-defined]
+            err.held_seconds = round(held_for, 1)  # type: ignore[attr-defined]
+            raise err
+        _lock_acquired_at = time.monotonic()
+        _lock_holder_path = self.path
+        return self
+
+    def __exit__(self, *_exc):
+        global _lock_acquired_at, _lock_holder_path
+        _lock_acquired_at = 0.0
+        _lock_holder_path = ""
+        _action_lock.release()
+        return False
+
+
 def read_json(handler: BaseHTTPRequestHandler) -> dict:
     length = int(handler.headers.get("Content-Length") or "0")
     if length <= 0:
@@ -1978,7 +2052,7 @@ class DesktopAgentHandler(BaseHTTPRequestHandler):
         path = urlparse(self.path).path
         try:
             payload = read_json(self)
-            with _action_lock:
+            with _TimedActionLock(path):
                 _require_lease(payload)
                 if path == "/screenshot":
                     result = _with_meta(take_screenshot(payload), payload)
@@ -2141,13 +2215,21 @@ class DesktopAgentHandler(BaseHTTPRequestHandler):
         except Exception as exc:
             payload = locals().get("payload", {}) or {}
             _release_lease(payload)
-            json_response(self, 500, {
+            # Honour an explicit HTTP status carried by the exception (AGENT_BUSY
+            # → 409); default to 500 for everything else, preserving prior shape.
+            status = int(getattr(exc, "http_status", 500) or 500)
+            body = {
                 "ok": False,
                 "error": str(exc),
                 "type": exc.__class__.__name__,
                 "code": str(getattr(exc, "code", "") or exc.__class__.__name__.upper()),
                 **_meta_from_payload(payload)
-            })
+            }
+            held_seconds = getattr(exc, "held_seconds", None)
+            if held_seconds is not None:
+                body["held_seconds"] = held_seconds
+                body["busy_path"] = _lock_holder_path
+            json_response(self, status, body)
 
 
 def _load_token_from_file(path: str) -> str:
