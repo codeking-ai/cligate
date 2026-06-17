@@ -1,33 +1,13 @@
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
-import { existsSync } from 'node:fs';
 import { request as httpRequest } from 'node:http';
 import { getDesktopAgentSettings } from './settings.js';
 import { ensureDesktopAgentToken } from './token-store.js';
 import { desktopControlDir } from './paths.js';
-
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const DEFAULT_SCRIPT = join(__dirname, 'runtime', 'desktop-agent-server.py');
-
-function resolveRuntimeScript() {
-  const unpackedCandidate = DEFAULT_SCRIPT.includes('app.asar')
-    ? DEFAULT_SCRIPT.replace('app.asar', 'app.asar.unpacked')
-    : DEFAULT_SCRIPT;
-  if (existsSync(unpackedCandidate)) {
-    return unpackedCandidate;
-  }
-  return DEFAULT_SCRIPT;
-}
-
-function parsePort(baseUrl) {
-  try {
-    const parsed = new URL(baseUrl);
-    return parsed.port ? Number(parsed.port) : 8765;
-  } catch {
-    return 8765;
-  }
-}
+import { resolveDesktopBackend } from './backends/index.js';
+// Re-exported for backward compatibility: these used to live here and are kept
+// importable from manager.js even though the launch logic now lives in
+// backends/. They resolve the Python runtime script (Windows/Linux default).
+import { DEFAULT_SCRIPT, resolveRuntimeScript } from './backends/python-http.js';
 
 const STDERR_RING_LIMIT = 4096;
 
@@ -93,6 +73,9 @@ export class DesktopAgentManager {
     this.recentStderr = '';
     this.recentStdout = '';
     this.external = false;
+    // Which backend the current/last spawn used ('python-http' | 'macos-native'),
+    // surfaced in status for diagnostics. Empty until the first start().
+    this.backendId = '';
   }
 
   getStatus() {
@@ -104,7 +87,8 @@ export class DesktopAgentManager {
         lastError: this.lastError,
         recentStderr: this.recentStderr,
         recentStdout: this.recentStdout,
-        external: true
+        external: true,
+        backend: this.backendId
       };
     }
     return {
@@ -114,7 +98,8 @@ export class DesktopAgentManager {
       lastError: this.lastError,
       recentStderr: this.recentStderr,
       recentStdout: this.recentStdout,
-      external: false
+      external: false,
+      backend: this.backendId
     };
   }
 
@@ -124,6 +109,15 @@ export class DesktopAgentManager {
     }
     const settings = this.getSettings();
     const token = this.ensureToken();
+    // Decoupled per-platform launch: Windows/Linux keep the Python HTTP agent,
+    // macOS uses our native helper. Command/args precedence (explicit settings
+    // override > per-platform default) is unchanged from the original logic.
+    // Resolve it up front and record the backend id BEFORE the external-agent
+    // probe, so status reports the platform backend even when we reuse an
+    // already-running agent (and so it never depends on whether the probe finds
+    // a live listener).
+    const { command, args, id } = resolveDesktopBackend({ settings, token });
+    this.backendId = id;
     // An *external* agent (typically the elevated scheduled task installed via
     // scripts/desktop-agent/install-elevated-task.ps1) may already own the port.
     // Spawning a second one would EADDRINUSE and silently leave the dashboard
@@ -140,10 +134,6 @@ export class DesktopAgentManager {
       return this.getStatus();
     }
     this.external = false;
-    const command = String(settings.command || '').trim() || 'python';
-    const args = Array.isArray(settings.args) && settings.args.length > 0
-      ? [...settings.args]
-      : [resolveRuntimeScript(), '--port', String(parsePort(settings.baseUrl)), '--token', token];
     this.child = this.spawnImpl(command, args, {
       stdio: 'pipe',
       windowsHide: true,

@@ -51,7 +51,7 @@ export function createSettingsPageModule() {
     assistantAgentTestResult: null,
     // Desktop control — single on/off switch. The backend orchestrates runtime
     // agent + (when elevated) machine preparation behind one toggle.
-    desktopControl: { supported: true, enabled: false, running: false, elevated: false, machinePrepared: false, needsAdminForFullSupport: false, busy: false },
+    desktopControl: { supported: true, enabled: false, running: false, elevated: false, machinePrepared: false, needsAdminForFullSupport: false, busy: false, platform: '', permissions: null },
     localModelRoutingEnabled: false,
     localModelRoutingSaving: false,
     localRuntime: null,
@@ -586,7 +586,10 @@ export function createSettingsPageModule() {
           running: data.running === true,
           elevated: data.elevated === true,
           machinePrepared: data.machinePrepared === true,
-          needsAdminForFullSupport: data.needsAdminForFullSupport === true
+          needsAdminForFullSupport: data.needsAdminForFullSupport === true,
+          // macOS only; absent/ignored on Windows so the Windows view is unchanged.
+          platform: data.platform || '',
+          permissions: data.permissions || null
         };
       }
     },

@@ -120,6 +120,20 @@
                                         x-text="t('desktopControlPrepareBtn')"></button>
                                 </div>
                             </template>
+                            <!-- macOS ONLY: TCC permission guidance. Renders solely when
+                                 platform === 'darwin' and the helper reports a missing grant,
+                                 so the Windows view (platform 'win32') is never affected. -->
+                            <template x-if="desktopControl.platform === 'darwin' && desktopControl.enabled && desktopControl.permissions && (!desktopControl.permissions.accessibility || !desktopControl.permissions.screenRecording)">
+                                <div class="mt-2 space-y-1">
+                                    <div class="text-[11px] font-mono text-yellow-400/80" x-text="t('desktopControlMacPermHint')"></div>
+                                    <div class="flex flex-wrap items-center gap-3 text-[11px] font-mono">
+                                        <span :class="desktopControl.permissions.accessibility ? 'text-neon-green' : 'text-red-400'"
+                                            x-text="(desktopControl.permissions.accessibility ? '✓ ' : '✗ ') + t('desktopControlMacPermAccessibility')"></span>
+                                        <span :class="desktopControl.permissions.screenRecording ? 'text-neon-green' : 'text-red-400'"
+                                            x-text="(desktopControl.permissions.screenRecording ? '✓ ' : '✗ ') + t('desktopControlMacPermScreenRecording')"></span>
+                                    </div>
+                                </div>
+                            </template>
                         </div>
 
                         <div class="space-y-3">

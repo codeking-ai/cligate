@@ -92,7 +92,8 @@
     ],
     "asarUnpack": [
       "public/**/*",
-      "src/desktop-agent/runtime/**/*"
+      "src/desktop-agent/runtime/**/*",
+      "src/desktop-agent/runtime-macos/**/*"
     ],
     "win": {
       "icon": "public/icon-dark.ico",

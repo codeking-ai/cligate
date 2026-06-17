@@ -78,6 +78,28 @@ function enrichDesktopError(rawError) {
     ].join('\n');
   }
 
+  // --- macOS TCC permission gates -------------------------------------------
+  // The native macOS helper returns these when Accessibility / Screen Recording
+  // has not been granted. Like the Windows secure-desktop case, a normal process
+  // CANNOT bypass them — they are OS security gates the user must clear once.
+  if (code === 'ACCESSIBILITY_DENIED' || /accessibility permission not granted/i.test(message)) {
+    return [
+      message,
+      `error_kind: AccessibilityNotGranted`,
+      `recovery: On macOS the desktop agent needs the Accessibility permission to read the UI tree and drive controls (desktop_find_control / desktop_click_control / desktop_fill_text_field). This is a macOS security gate, not a bug.`,
+      `next_step: Do NOT retry. Ask the user to enable CliGate under System Settings › Privacy & Security › Accessibility, then call desktop_health and confirm "accessibility": true before continuing.`
+    ].join('\n');
+  }
+
+  if (code === 'SCREEN_RECORDING_DENIED' || /screen recording permission not granted/i.test(message)) {
+    return [
+      message,
+      `error_kind: ScreenRecordingNotGranted`,
+      `recovery: On macOS, screenshots and OCR (desktop_capture_window / desktop_find_text / desktop_click_text) require the Screen Recording permission.`,
+      `next_step: Do NOT retry. Ask the user to enable CliGate under System Settings › Privacy & Security › Screen Recording (a relaunch may be required), then call desktop_health and confirm "screen_recording": true.`
+    ].join('\n');
+  }
+
   const moduleMatch = /No module named ['"]?([\w.]+)['"]?/i.exec(message);
   if (moduleMatch) {
     const moduleName = moduleMatch[1];

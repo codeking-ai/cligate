@@ -12,13 +12,16 @@ import { getServerSettings, setServerSettings, normalizeDesktopAgentConfig } fro
 import {
   handleGetDesktopAgentSettings,
   handleSetDesktopAgentSettings,
-  handleSetDesktopControl
+  handleGetDesktopControl,
+  handleSetDesktopControl,
+  buildDesktopControlStatus
 } from '../../src/routes/desktop-agent-route.js';
 import { AssistantDesktopClient } from '../../src/assistant-tools/desktop/client.js';
 import { DesktopAgentService } from '../../src/desktop-agent/service.js';
 import desktopAgentService from '../../src/desktop-agent/service.js';
 import { DesktopAgentHttpClient } from '../../src/desktop-agent/http-client.js';
 import desktopCaptureSetup, { manualCommand, removeLegacyCommand, uninstallCommand } from '../../src/desktop-agent/capture-setup.js';
+import { DesktopAgentManager } from '../../src/desktop-agent/manager.js';
 
 function mockRes() {
   return {
@@ -714,6 +717,61 @@ test('capture-setup exposes an idempotent prepare() entry point for the single s
   assert.equal(typeof desktopCaptureSetup.prepare, 'function');
 });
 
+test('DesktopAgentManager status includes the resolved backend id after start()', async () => {
+  const manager = new DesktopAgentManager({
+    getSettings: () => ({
+      baseUrl: 'http://127.0.0.1:8765',
+      command: '',
+      args: []
+    }),
+    ensureToken: () => 'tok-manager-test',
+    spawnImpl: () => ({
+      pid: 4321,
+      exitCode: null,
+      stdout: { on() {} },
+      stderr: { on() {} },
+      on() {},
+      kill() {}
+    })
+  });
+
+  const status = await manager.start();
+
+  assert.equal(status.running, true);
+  assert.equal(status.backend, process.platform === 'darwin' ? 'macos-native' : 'python-http');
+});
+
+test('desktop-control route reports platform and darwin support without Windows machine-prep fields', async () => {
+  if (process.platform !== 'darwin') {
+    return;
+  }
+
+  const svc = desktopAgentService;
+  const saved = {
+    getSettings: svc.getSettings,
+    manager: svc.manager
+  };
+
+  try {
+    svc.getSettings = () => ({ enabled: true });
+    svc.manager = { getStatus: () => ({ running: true, backend: 'macos-native' }) };
+
+    const res = mockRes();
+    await handleGetDesktopControl(mockReq(), res);
+
+    assert.equal(res._status, 200);
+    assert.equal(res._body.success, true);
+    assert.equal(res._body.platform, 'darwin');
+    assert.equal(res._body.supported, true);
+    assert.equal(res._body.elevated, false);
+    assert.equal(res._body.machinePrepared, false);
+    assert.equal(res._body.needsAdminForFullSupport, false);
+  } finally {
+    svc.getSettings = saved.getSettings;
+    svc.manager = saved.manager;
+  }
+});
+
 test('desktop-control switch: ON prepares once, OFF never tears the machine prep down', { skip: process.platform !== 'win32' }, async () => {
   // The product contract: enabling triggers the IDEMPOTENT one-time prep
   // (prepare(), not the legacy -Uninstall-coupled enable()), and DISABLING only
@@ -824,6 +882,77 @@ test('enrichDesktopError separates UAC/secure-desktop, timeout, and busy from Ag
   // A real connection failure still maps to AgentUnreachable (process down).
   const down = enrichDesktopError({ message: 'fetch failed' });
   assert.match(down, /error_kind: AgentUnreachable/);
+});
+
+test('enrichDesktopError maps macOS TCC permission denials to actionable guidance', () => {
+  // The native macOS helper returns ACCESSIBILITY_DENIED / SCREEN_RECORDING_DENIED
+  // when the user has not granted the system permissions. These must NOT be told
+  // to "restart the agent" — recovery is granting permission in System Settings.
+  const ax = enrichDesktopError({
+    code: 'ACCESSIBILITY_DENIED',
+    message: 'Accessibility permission not granted — enable it in System Settings.'
+  });
+  assert.match(ax, /error_kind: AccessibilityNotGranted/);
+  assert.match(ax, /Privacy & Security › Accessibility/);
+  assert.doesNotMatch(ax, /AgentUnreachable/);
+
+  const screen = enrichDesktopError({
+    code: 'SCREEN_RECORDING_DENIED',
+    message: 'Screen Recording permission not granted — required to OCR the screen.'
+  });
+  assert.match(screen, /error_kind: ScreenRecordingNotGranted/);
+  assert.match(screen, /Privacy & Security › Screen Recording/);
+  assert.doesNotMatch(screen, /AgentUnreachable/);
+});
+
+test('buildDesktopControlStatus surfaces macOS TCC permissions from the helper /health probe', async () => {
+  const status = await buildDesktopControlStatus({
+    platform: 'darwin',
+    service: {
+      getSettings: () => ({ enabled: true }),
+      manager: { getStatus: () => ({ running: true, backend: 'macos-native' }) },
+      client: { health: async () => ({ ok: true, accessibility: false, screen_recording: true }) }
+    },
+    // Must never be consulted on macOS — capture-setup is Windows-only.
+    captureSetup: { getStatus: async () => { throw new Error('captureSetup must not run on darwin'); } }
+  });
+
+  assert.equal(status.platform, 'darwin');
+  assert.equal(status.supported, true);
+  assert.equal(status.needsAdminForFullSupport, false);
+  assert.deepEqual(status.permissions, { accessibility: false, screenRecording: true });
+});
+
+test('buildDesktopControlStatus omits permissions when the macOS helper is not running', async () => {
+  const status = await buildDesktopControlStatus({
+    platform: 'darwin',
+    service: {
+      getSettings: () => ({ enabled: true }),
+      manager: { getStatus: () => ({ running: false }) },
+      client: { health: async () => { throw new Error('ECONNREFUSED'); } }
+    }
+  });
+
+  assert.equal(status.supported, true);
+  assert.equal(status.permissions, undefined); // unknown -> field omitted
+});
+
+test('buildDesktopControlStatus keeps the Windows shape unchanged and never probes helper health', async () => {
+  const status = await buildDesktopControlStatus({
+    platform: 'win32',
+    service: {
+      getSettings: () => ({ enabled: true }),
+      manager: { getStatus: () => ({ running: true }) },
+      client: { health: async () => { throw new Error('health must not be probed on win32'); } }
+    },
+    captureSetup: { getStatus: async () => ({ supported: true, elevated: false, prepared: false }) }
+  });
+
+  assert.equal(status.platform, 'win32');
+  assert.equal(status.supported, true);
+  assert.equal(status.permissions, undefined);
+  // enabled && win32 && !prepared && !elevated -> true (unchanged Windows logic)
+  assert.equal(status.needsAdminForFullSupport, true);
 });
 
 test('DesktopAgentService ensureReady auto-starts and waits for health', async () => {

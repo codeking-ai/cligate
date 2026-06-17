@@ -109,36 +109,65 @@ export async function handleRemoveLegacyDesktopTasks(req, res) {
 // elevated, the runtime agent still works; only the "survive RDP disconnect"
 // extra needs admin, surfaced as a single short hint (no command, no file path).
 
-async function buildDesktopControlStatus() {
-  const settings = desktopAgentService.getSettings();
+// Dependencies are injectable purely so the per-platform branches (notably the
+// macOS one, which never executes on a Windows CI box) stay unit-testable. The
+// defaults preserve the exact production behaviour.
+export async function buildDesktopControlStatus({
+  platform = process.platform,
+  service = desktopAgentService,
+  captureSetup = desktopCaptureSetup
+} = {}) {
+  const settings = service.getSettings();
   const enabled = settings?.enabled === true;
-  const manager = desktopAgentService.manager?.getStatus?.() || {};
+  const manager = service.manager?.getStatus?.() || {};
   const running = manager.running === true;
 
   let supported = false;
   let elevated = false;
   let machinePrepared = false;
-  if (process.platform === 'win32') {
+  let permissions = null;
+  if (platform === 'win32') {
     supported = true;
     try {
-      const cap = await desktopCaptureSetup.getStatus();
+      const cap = await captureSetup.getStatus();
       supported = cap.supported !== false;
       elevated = cap.elevated === true;
       machinePrepared = cap.prepared === true;
     } catch {
       /* leave defaults */
     }
+  } else if (platform === 'darwin') {
+    // macOS is supported via our native helper backend. There is no admin /
+    // "machine preparation" step here — the only gate is TCC (Accessibility +
+    // Screen Recording). When the helper is running it reports both through
+    // /health; probe it best-effort (a plain client.health() that does NOT start
+    // the agent) so the dashboard can guide the one-time permission grant.
+    // elevated/machinePrepared stay false and never trigger the Windows admin hint.
+    supported = true;
+    try {
+      const health = await service.client.health();
+      permissions = {
+        accessibility: health?.accessibility === true,
+        screenRecording: health?.screen_recording === true
+      };
+    } catch {
+      permissions = null; // helper not running yet → permission state unknown
+    }
   }
 
   return {
     success: true,
+    platform,
     supported,
     enabled,
     running,
     elevated,
     machinePrepared,
+    // Only present on macOS once the helper has answered /health; omitted when
+    // unknown or on Windows, so the existing Windows status shape is untouched.
+    ...(permissions ? { permissions } : {}),
     // Runtime works without admin; only the RDP-disconnect→console fallback needs it.
-    needsAdminForFullSupport: enabled && process.platform === 'win32' && !machinePrepared && !elevated
+    needsAdminForFullSupport: enabled && platform === 'win32' && !machinePrepared && !elevated
   };
 }
 
