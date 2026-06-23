@@ -44,6 +44,18 @@ import {
 import { handleGetRuntimeCredentials, handleGetRoutingDecisions, handleGetRoutingPreview, handleGetLocalRoutingStatus } from './runtime-route.js';
 import { handleGetLocalRuntimeStatus, handleSetLocalRuntimeEnabled, handleUpdateLocalRuntime, handleCheckLocalRuntime, handleRefreshLocalRuntimeModels } from './local-runtimes-route.js';
 import {
+  handleGetImageGenStatus,
+  handleListImageGenModels,
+  handleAddImageGenModel,
+  handleUpdateImageGenModel,
+  handleRemoveImageGenModel,
+  handleSetImageGenModelEnabled,
+  handleGetImageGenSettings,
+  handleUpdateImageGenSettings,
+  handleGenerateImage
+} from './image-gen-route.js';
+import { handleGetArtifact } from './artifacts-route.js';
+import {
   handleGetDesktopAgentStatus,
   handleStartDesktopAgent,
   handleStopDesktopAgent,
@@ -429,6 +441,20 @@ export function registerApiRoutes(app, { port }) {
   app.post('/api/local-runtimes/enabled', handleSetLocalRuntimeEnabled);
   app.post('/api/local-runtimes/check', handleCheckLocalRuntime);
   app.post('/api/local-runtimes/refresh-models', handleRefreshLocalRuntimeModels);
+
+  // ─── Image Generation (independent of the chat API-key pool) ─────────────
+  app.get('/api/image-gen/status', handleGetImageGenStatus);
+  app.get('/api/image-gen/models', handleListImageGenModels);
+  app.post('/api/image-gen/models', handleAddImageGenModel);
+  app.put('/api/image-gen/models/:id', handleUpdateImageGenModel);
+  app.delete('/api/image-gen/models/:id', handleRemoveImageGenModel);
+  app.post('/api/image-gen/models/:id/enabled', handleSetImageGenModelEnabled);
+  app.get('/api/image-gen/settings', handleGetImageGenSettings);
+  app.put('/api/image-gen/settings', handleUpdateImageGenSettings);
+  app.post('/api/image-gen/generate', handleGenerateImage);
+
+  // Serve generated/captured artifact files by id (used by chat <img> + UI).
+  app.get('/api/artifacts/:id', handleGetArtifact);
 
   // ─── Agent Runtime Orchestrator ──────────────────────────────────────────
   app.get('/api/agent-runtimes/providers', handleListAgentRuntimeProviders);

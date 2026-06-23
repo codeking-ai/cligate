@@ -1,5 +1,6 @@
 import { i18n } from './i18n.js';
 import { createApiKeysPageModule } from './modules/api-keys-page.js';
+import { createImageGenPageModule } from './modules/image-gen-page.js';
 import { createAssistantTasksPageModule } from './modules/assistant-tasks-page.js';
 import { createAssistantWorkbenchPageModule } from './modules/assistant-workbench-page.js';
 import { createScheduledTasksPageModule } from './modules/scheduled-tasks-page.js';
@@ -42,6 +43,7 @@ function createShellModule() {
       scheduledTasks: '/partials/views/scheduled-tasks.html',
       localModels: '/partials/views/local-models.html',
       apikeys: '/partials/views/api-keys.html',
+      imageGen: '/partials/views/image-gen.html',
       usage: '/partials/views/usage.html',
       pricing: '/partials/views/pricing.html',
       apiExplorer: '/partials/views/api-explorer.html',
@@ -343,6 +345,7 @@ function createShellModule() {
         this.refreshAntigravityAccounts();
       }
       if (tab === 'apikeys') this.loadApiKeys();
+      if (tab === 'imageGen') this.loadImageGenStatus();
       if (tab === 'usage') this.loadUsageData();
       if (tab === 'pricing') this.loadPricingData();
       if (tab === 'apiExplorer' && !this.apiExplorerResponse) this.loadApiExplorerPreset(this.apiExplorerPresetIndex);
@@ -665,6 +668,7 @@ function registerApp() {
     createUsagePricingPageModule(),
     createToolsPageModule(),
     createApiKeysPageModule(),
+    createImageGenPageModule(),
     createChannelsPageModule()
   ));
 }

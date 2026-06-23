@@ -245,6 +245,27 @@ GET /health
 | `/api/local-runtimes/check` | POST | Check local runtime health |
 | `/api/local-runtimes/refresh-models` | POST | Refresh discovered local models and routing targets |
 
+## Image Generation
+
+Independent of the chat API-key pool — image models have their own store
+(`~/.cligate/image-gen/`), parameters and per-image billing. The assistant calls
+them through a single `generate_image` tool; this surface manages the model
+entries and a test/playground generate. See
+`docs/assistant-image-generation-design.zh-CN.md`.
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/image-gen/status` | GET | Settings, model entries (secrets masked), available backend kinds (`openai-images`, `volcengine-images` for 即梦/Seedream, `wanxiang` for 通义万相), configured flag |
+| `/api/image-gen/models` | GET | List image model entries |
+| `/api/image-gen/models` | POST | Add an image model entry |
+| `/api/image-gen/models/:id` | PUT | Update an image model entry (apiKey preserved if omitted/masked) |
+| `/api/image-gen/models/:id` | DELETE | Remove an image model entry |
+| `/api/image-gen/models/:id/enabled` | POST | Enable/disable an entry (`{ enabled: boolean }`) |
+| `/api/image-gen/settings` | GET | Get image-gen settings (`requireApproval`, `defaultModelId`, `maxImagesPerCall`) |
+| `/api/image-gen/settings` | PUT | Update image-gen settings |
+| `/api/image-gen/generate` | POST | Manual generation (dashboard test); returns artifact download URLs |
+| `/api/artifacts/:id` | GET | Stream a generated/captured artifact file by id (path restricted to the config dir) |
+
 ## Agent Runtime Orchestrator
 
 | Endpoint | Method | Description |

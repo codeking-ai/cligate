@@ -1,0 +1,238 @@
+<div class="workspace-header flex items-center justify-between gap-4 mb-6">
+                    <div>
+                        <div class="workspace-eyebrow text-xs font-mono uppercase tracking-[0.32em]" x-text="t('credentials')"></div>
+                        <div class="flex flex-wrap items-center gap-4 mt-2">
+                            <h1 class="text-2xl font-bold text-white tracking-tight" x-text="t('imageGen')"></h1>
+                            <div class="meta-chip flex items-center h-6 px-3 rounded-full bg-space-800/80 border border-space-border/50 shadow-sm backdrop-blur-sm">
+                                <span class="text-[10px] font-mono uppercase tracking-wider" x-text="t('imageGenSettingsTitle')"></span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="meta-chip flex items-center h-6 px-3 rounded-full bg-space-800/80 border border-space-border/50 shadow-sm backdrop-blur-sm"
+                        :class="imageGenConfigured ? 'text-neon-green' : 'text-amber-300'">
+                        <span class="text-[10px] font-mono uppercase tracking-wider" x-text="imageGenConfigured ? t('imageGenConfiguredYes') : t('imageGenConfiguredNo')"></span>
+                    </div>
+                </div>
+
+                <div class="view-card overview-card overview-card-accent-green mb-6">
+                    <div class="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                        <div class="min-w-0">
+                            <div class="text-xs font-mono text-gray-400 uppercase tracking-widest" x-text="t('imageGenKicker')"></div>
+                            <h2 class="overview-title text-xl font-semibold text-white mt-2" x-text="t('imageGenOverviewTitle')"></h2>
+                            <p class="overview-copy text-sm text-gray-400 mt-3" x-text="t('imageGenOverviewDesc')"></p>
+                        </div>
+                        <div class="overview-meta flex flex-wrap gap-2">
+                            <span class="meta-chip" x-text="imageGenModels.length + ' ' + t('models')"></span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Global settings -->
+                <div class="view-card mb-6">
+                    <div class="flex items-center gap-2.5 mb-4">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" class="w-4 h-4 text-emerald-400">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path>
+                        </svg>
+                        <h3 class="text-xs font-mono text-gray-400 uppercase tracking-widest" x-text="t('imageGenSettingsTitle')"></h3>
+                    </div>
+                    <div class="flex flex-wrap items-center justify-between gap-4 mb-4">
+                        <div>
+                            <div class="text-sm text-gray-300" x-text="t('imageGenRequireApproval')"></div>
+                            <div class="text-xs text-gray-500 font-mono" x-text="t('imageGenRequireApprovalDesc')"></div>
+                        </div>
+                        <div class="inline-flex items-center gap-3">
+                            <span class="text-xs font-mono" :class="imageGenSettings.requireApproval ? 'text-neon-green' : 'text-gray-400'" x-text="imageGenSettings.requireApproval ? t('enabled') : t('disabled')"></span>
+                            <button class="relative inline-flex h-6 w-11 items-center rounded-full transition-colors duration-200 focus:outline-none"
+                                :class="imageGenSettings.requireApproval ? 'bg-neon-green' : 'bg-space-700'"
+                                @click="imageGenSettings.requireApproval = !imageGenSettings.requireApproval; saveImageGenSettings()">
+                                <span class="inline-block h-4 w-4 transform rounded-full bg-white transition-transform duration-200"
+                                    :class="imageGenSettings.requireApproval ? 'translate-x-6' : 'translate-x-1'"></span>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                            <label class="text-xs text-gray-500 mb-1 block" x-text="t('imageGenDefaultModel')"></label>
+                            <select class="select select-sm w-full bg-space-800 border-space-border text-white"
+                                x-model="imageGenSettings.defaultModelId"
+                                @change="saveImageGenSettings()">
+                                <option value="" x-text="t('imageGenTestUseDefault')"></option>
+                                <template x-for="m in imageGenModels" :key="'def-' + m.id">
+                                    <option :value="m.id" x-text="m.displayName"></option>
+                                </template>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="text-xs text-gray-500 mb-1 block" x-text="t('imageGenMaxPerCall')"></label>
+                            <input type="number" min="1" max="4"
+                                class="input input-sm w-full bg-space-900/80 border-space-border text-white"
+                                x-model.number="imageGenSettings.maxImagesPerCall"
+                                @change="saveImageGenSettings()">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Models -->
+                <div class="view-card mb-6">
+                    <div class="flex items-center justify-between gap-4 mb-4">
+                        <div class="flex items-center gap-2.5">
+                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" class="w-4 h-4 text-emerald-400">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"></path>
+                            </svg>
+                            <div>
+                                <h3 class="text-xs font-mono text-gray-400 uppercase tracking-widest" x-text="t('imageGenModelsTitle')"></h3>
+                                <p class="text-xs text-gray-500 mt-1" x-text="t('imageGenModelsDesc')"></p>
+                            </div>
+                        </div>
+                        <button class="btn btn-sm btn-accent-cyan" @click="showAddImageModel = !showAddImageModel" x-text="t('imageGenAddModel')"></button>
+                    </div>
+
+                    <!-- Add form -->
+                    <div x-show="showAddImageModel" x-transition class="rounded-xl border border-space-border/30 bg-space-900/40 p-4 mb-4">
+                        <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                            <div>
+                                <label class="text-xs text-gray-500 mb-1 block" x-text="t('imageGenDisplayName')"></label>
+                                <input type="text" class="input input-sm w-full bg-space-900/80 border-space-border text-white"
+                                    x-model="newImageModel.displayName" placeholder="OpenAI gpt-image-1">
+                            </div>
+                            <div>
+                                <label class="text-xs text-gray-500 mb-1 block" x-text="t('imageGenBackend')"></label>
+                                <select class="select select-sm w-full bg-space-800 border-space-border text-white" x-model="newImageModel.backendKind" @change="onImageGenBackendChange()">
+                                    <template x-for="kind in imageGenBackendKinds" :key="'kind-' + kind">
+                                        <option :value="kind" x-text="imageGenBackendLabel(kind)"></option>
+                                    </template>
+                                </select>
+                            </div>
+                            <div>
+                                <label class="text-xs text-gray-500 mb-1 block" x-text="t('imageGenNativeModel')"></label>
+                                <input type="text" class="input input-sm w-full bg-space-900/80 border-space-border text-white"
+                                    x-model="newImageModel.nativeModel" placeholder="gpt-image-1 / dall-e-3">
+                            </div>
+                            <div>
+                                <label class="text-xs text-gray-500 mb-1 block" x-text="t('imageGenBaseUrl')"></label>
+                                <input type="text" class="input input-sm w-full bg-space-900/80 border-space-border text-white"
+                                    x-model="newImageModel.baseUrl" placeholder="https://api.openai.com/v1">
+                            </div>
+                            <div class="lg:col-span-2">
+                                <label class="text-xs text-gray-500 mb-1 block" x-text="t('imageGenApiKey')"></label>
+                                <input type="password" class="input input-sm w-full bg-space-900/80 border-space-border text-white"
+                                    x-model="newImageModel.apiKey" placeholder="sk-...">
+                            </div>
+                        </div>
+                        <div class="mt-4 flex flex-wrap gap-2">
+                            <button class="btn btn-sm btn-accent-cyan" :disabled="imageGenSaving"
+                                @click="addImageGenModel()" x-text="imageGenSaving ? t('saving') : t('imageGenSave')"></button>
+                            <button class="btn btn-sm btn-surface" @click="showAddImageModel = false; resetNewImageModel()" x-text="t('imageGenCancel')"></button>
+                        </div>
+                    </div>
+
+                    <template x-if="imageGenModels.length === 0">
+                        <div class="text-xs text-gray-500 text-center py-6" x-text="t('imageGenNoModels')"></div>
+                    </template>
+
+                    <div class="flex flex-col gap-3" x-show="imageGenModels.length > 0">
+                        <template x-for="m in imageGenModels" :key="'img-model-' + m.id">
+                            <div class="rounded-xl border border-space-border/25 bg-space-900/35 p-4 flex flex-wrap items-center justify-between gap-3">
+                                <div class="min-w-0">
+                                    <div class="flex items-center gap-2">
+                                        <span class="text-sm font-semibold text-white" x-text="m.displayName"></span>
+                                        <span class="inline-flex items-center rounded-full border border-emerald-500/20 bg-emerald-500/10 px-2 py-0.5 text-[10px] font-mono text-emerald-300" x-text="m.backendKind"></span>
+                                        <span x-show="m.id === imageGenSettings.defaultModelId" class="inline-flex items-center rounded-full border border-cyan-500/20 bg-cyan-500/10 px-2 py-0.5 text-[10px] font-mono text-cyan-300" x-text="t('imageGenDefaultBadge')"></span>
+                                    </div>
+                                    <div class="text-xs text-gray-500 font-mono mt-1">
+                                        <span x-text="m.nativeModel || '—'"></span>
+                                        <span> · </span>
+                                        <span x-text="m.baseUrl || 'https://api.openai.com/v1'"></span>
+                                    </div>
+                                    <div class="text-[11px] text-gray-600 font-mono mt-1">
+                                        <span x-text="t('imageGenStatImages')"></span>: <span x-text="m.totalImages || 0"></span>
+                                        · $<span x-text="(m.totalCost || 0).toFixed(3)"></span>
+                                        · <span x-text="t('imageGenStatErrors')"></span>: <span x-text="m.errors || 0"></span>
+                                    </div>
+                                </div>
+                                <div class="flex flex-wrap items-center gap-2">
+                                    <span class="text-xs font-mono" :class="m.enabled ? 'text-neon-green' : 'text-red-400'" x-text="m.enabled ? t('enabled') : t('disabled')"></span>
+                                    <button class="btn btn-xs btn-surface" @click="toggleImageGenModel(m)" x-text="m.enabled ? t('imageGenDisable') : t('imageGenEnable')"></button>
+                                    <button class="btn btn-xs btn-surface" x-show="m.id !== imageGenSettings.defaultModelId" @click="setImageGenDefault(m)" x-text="t('imageGenSetDefault')"></button>
+                                    <button class="btn btn-xs btn-surface text-red-400" @click="removeImageGenModel(m)" x-text="t('imageGenRemove')"></button>
+                                </div>
+                            </div>
+                        </template>
+                    </div>
+                </div>
+
+                <!-- Test / playground -->
+                <div class="view-card">
+                    <div class="flex items-center gap-2.5 mb-4">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" class="w-4 h-4 text-emerald-400">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"></path>
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                        </svg>
+                        <div>
+                            <h3 class="text-xs font-mono text-gray-400 uppercase tracking-widest" x-text="t('imageGenTestTitle')"></h3>
+                            <p class="text-xs text-gray-500 mt-1" x-text="t('imageGenTestDesc')"></p>
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-1 gap-4">
+                        <div>
+                            <label class="text-xs text-gray-500 mb-1 block" x-text="t('imageGenPrompt')"></label>
+                            <textarea rows="2" class="input input-sm w-full bg-space-900/80 border-space-border text-white"
+                                x-model="imageGenTest.prompt" placeholder="a watercolor fox in a misty forest"></textarea>
+                        </div>
+                        <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+                            <div>
+                                <label class="text-xs text-gray-500 mb-1 block" x-text="t('imageGenAspect')"></label>
+                                <select class="select select-sm w-full bg-space-800 border-space-border text-white" x-model="imageGenTest.aspectRatio">
+                                    <template x-for="r in ['1:1','16:9','9:16','4:3','3:4']" :key="'ar-' + r">
+                                        <option :value="r" x-text="r"></option>
+                                    </template>
+                                </select>
+                            </div>
+                            <div>
+                                <label class="text-xs text-gray-500 mb-1 block" x-text="t('imageGenQuality')"></label>
+                                <select class="select select-sm w-full bg-space-800 border-space-border text-white" x-model="imageGenTest.quality">
+                                    <template x-for="q in ['draft','standard','high']" :key="'q-' + q">
+                                        <option :value="q" x-text="q"></option>
+                                    </template>
+                                </select>
+                            </div>
+                            <div>
+                                <label class="text-xs text-gray-500 mb-1 block" x-text="t('imageGenCount')"></label>
+                                <input type="number" min="1" max="4" class="input input-sm w-full bg-space-900/80 border-space-border text-white" x-model.number="imageGenTest.n">
+                            </div>
+                            <div>
+                                <label class="text-xs text-gray-500 mb-1 block" x-text="t('imageGenModelSelect')"></label>
+                                <select class="select select-sm w-full bg-space-800 border-space-border text-white" x-model="imageGenTest.modelId">
+                                    <option value="" x-text="t('imageGenTestUseDefault')"></option>
+                                    <template x-for="m in imageGenModels" :key="'test-' + m.id">
+                                        <option :value="m.id" x-text="m.displayName"></option>
+                                    </template>
+                                </select>
+                            </div>
+                        </div>
+                        <div>
+                            <button class="btn btn-sm btn-accent-cyan" :disabled="imageGenTest.loading || !imageGenConfigured"
+                                @click="runImageGenTest()" x-text="imageGenTest.loading ? t('imageGenRunning') : t('imageGenRun')"></button>
+                        </div>
+                    </div>
+
+                    <div x-show="imageGenTest.error" class="mt-4 text-xs text-red-400 font-mono" x-text="imageGenTest.error"></div>
+
+                    <div x-show="imageGenTest.notes.length > 0" class="mt-4 rounded-xl border border-amber-500/20 bg-amber-500/5 p-3">
+                        <div class="text-[10px] uppercase tracking-[0.24em] text-amber-300 mb-2" x-text="t('imageGenNotes')"></div>
+                        <ul class="text-xs text-amber-200/80 font-mono list-disc list-inside space-y-1">
+                            <template x-for="(note, i) in imageGenTest.notes" :key="'note-' + i">
+                                <li x-text="note"></li>
+                            </template>
+                        </ul>
+                    </div>
+
+                    <div x-show="imageGenTest.results.length > 0" class="mt-4 flex flex-wrap gap-3">
+                        <template x-for="(img, i) in imageGenTest.results" :key="'res-' + i">
+                            <a :href="img.url" target="_blank" class="block rounded-xl border border-space-border/40 bg-space-900/60 p-2">
+                                <img class="block h-40 w-auto max-w-[260px] rounded-lg object-contain" :src="img.url" :alt="'generated ' + i">
+                            </a>
+                        </template>
+                    </div>
+                </div>

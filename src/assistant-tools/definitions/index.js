@@ -8,6 +8,7 @@ import createWriteFileToolDefinition from './write-file.js';
 import createReplaceInFileToolDefinition from './replace-in-file.js';
 import createRunShellCommandToolDefinition from './run-shell-command.js';
 import createViewImageToolDefinition from './view-image.js';
+import createGenerateImageToolDefinition from './generate-image.js';
 import createDesktopHealthToolDefinition from './desktop-health.js';
 import createDesktopListWindowsToolDefinition from './desktop-list-windows.js';
 import createDesktopLaunchAppToolDefinition from './desktop-launch-app.js';
@@ -49,6 +50,7 @@ import createSearchToolHandlers from '../handlers/search.js';
 import createMutationToolHandlers from '../handlers/mutations.js';
 import createShellToolHandlers from '../handlers/shell.js';
 import createImageToolHandlers from '../handlers/images.js';
+import createImageGenToolHandlers from '../handlers/image-gen.js';
 import createMcpToolHandlers from '../handlers/mcp.js';
 import createDesktopToolHandlers from '../handlers/desktop.js';
 import createAssistantRunToolHandlers from '../handlers/assistant-runs.js';
@@ -109,6 +111,7 @@ export function createBuiltinAssistantToolDefinitions({ workspaceGuard, mcpServi
     ...createMutationToolHandlers({ workspaceGuard }),
     ...createShellToolHandlers({ workspaceGuard }),
     ...createImageToolHandlers({ workspaceGuard }),
+    ...createImageGenToolHandlers(),
     ...createDesktopToolHandlers(),
     ...createDesktopWaitToolHandlers(),
     ...createAssistantRunToolHandlers(),
@@ -127,6 +130,7 @@ export function createBuiltinAssistantToolDefinitions({ workspaceGuard, mcpServi
     createReplaceInFileToolDefinition({ handlers }),
     createRunShellCommandToolDefinition({ handlers }),
     createViewImageToolDefinition({ handlers }),
+    createGenerateImageToolDefinition({ handlers }),
     createDesktopHealthToolDefinition({ handlers }),
     createDesktopListWindowsToolDefinition({ handlers }),
     createDesktopLaunchAppToolDefinition({ handlers }),

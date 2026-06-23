@@ -143,6 +143,7 @@ cligate/
 | `translators/` | Shared request/response/SSE protocol translation kernel |
 | `usage-tracker.js` | Per-request cost estimation and usage aggregation |
 | `request-logger.js` | Persistent request/response logging with daily rotation |
+| `image-gen/` | Image-generation subsystem (canonical params → backend adapters → model store → service); backs the `generate_image` assistant tool and `/api/image-gen/*` |
 
 ## Data Flow
 
@@ -182,3 +183,5 @@ Haiku routing target is configurable from the dashboard Settings page.
 | Server settings | `~/.cligate/settings.json` |
 | Usage data | `~/.cligate/usage/` |
 | Request logs | `~/.cligate/request-logs/` |
+| Image-gen models & settings | `~/.cligate/image-gen/models.json`, `~/.cligate/image-gen/settings.json` |
+| Generated image files | `~/.cligate/artifacts/` (served via `/api/artifacts/:id`) |
