@@ -268,14 +268,6 @@
                                 </svg>
                                 <span class="sidebar-label" x-text="t('imageGen')"></span>
                             </button>
-                            <button class="nav-item"
-                                :class="{'active': activeTab === 'mascot'}" @click="setActiveTab('mascot')" :title="sidebarCollapsed ? t('mascotTitle') : ''">
-                                <svg class="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12a1 1 0 11-2 0 1 1 0 012 0zM17 12a1 1 0 11-2 0 1 1 0 012 0z" />
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 2a7 7 0 00-7 7v4a7 7 0 0014 0V9a7 7 0 00-7-7zM9 19l-1 3m8-3l1 3" />
-                                </svg>
-                                <span class="sidebar-label" x-text="t('mascotTitle')"></span>
-                            </button>
                         </nav>
                     </div>
 
@@ -321,6 +313,14 @@
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
                                 </svg>
                                 <span class="sidebar-label" x-text="t('generalSettings')"></span>
+                            </button>
+                            <button class="nav-item"
+                                :class="{'active': activeTab === 'mascot'}" @click="setActiveTab('mascot')" :title="sidebarCollapsed ? t('mascotTitle') : ''">
+                                <svg class="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12a1 1 0 11-2 0 1 1 0 012 0zM17 12a1 1 0 11-2 0 1 1 0 012 0z" />
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 2a7 7 0 00-7 7v4a7 7 0 0014 0V9a7 7 0 00-7-7zM9 19l-1 3m8-3l1 3" />
+                                </svg>
+                                <span class="sidebar-label" x-text="t('mascotTitle')"></span>
                             </button>
                         </nav>
                     </div>

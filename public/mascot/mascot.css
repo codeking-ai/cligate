@@ -199,3 +199,38 @@ html, body {
 @keyframes wave { 0%,100% { transform: rotate(0deg); } 25% { transform: rotate(-5deg); } 75% { transform: rotate(5deg); } }
 
 .dragging .character { animation: none; }
+
+/* ── Character-pack palette (CSS vars set per pack) + body shapes ─────────── */
+.character .head { background: linear-gradient(160deg, var(--m-head-1, #8ea2ff) 0%, var(--m-head-2, #6c5ce7) 100%); }
+.character .body { background: linear-gradient(160deg, var(--m-body-1, #aab6ff) 0%, var(--m-body-2, #7d6ef0) 100%); }
+.character .antenna { background: var(--m-head-2, #6c5ce7); }
+.character .antenna::after { background: var(--m-accent, #ffd36e); box-shadow: 0 0 8px var(--m-accent, #ffd36e); }
+.character .pupil { background: var(--m-eye, #1b1f3a); }
+
+/* Antenna only on robots; ears only on cats. */
+.antenna { display: none; }
+.shape-robot .antenna { display: block; }
+
+.ear {
+  display: none;
+  position: absolute;
+  top: 4px;
+  width: 0; height: 0;
+  border-left: 11px solid transparent;
+  border-right: 11px solid transparent;
+  border-bottom: 18px solid var(--m-head-2, #6c5ce7);
+  z-index: 1;
+}
+.ear-left { left: 16px; transform: rotate(-18deg); }
+.ear-right { right: 16px; transform: rotate(18deg); }
+.shape-cat .ear { display: block; }
+
+/* Ghost: no body, rounded wavy bottom, gentle float. */
+.shape-ghost .body { display: none; }
+.shape-ghost .head { border-radius: 30px 30px 46% 46% / 30px 30px 72% 72%; height: 74px; }
+.shape-ghost .character { animation: float 3.8s ease-in-out infinite; }
+@keyframes float { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-5px); } }
+
+/* Blob: rounder, no antenna/ears. */
+.shape-blob .antenna, .shape-blob .ear { display: none; }
+.shape-blob .head { border-radius: 40px; }

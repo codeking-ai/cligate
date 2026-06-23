@@ -45,12 +45,15 @@
   }
 
   // ── Placeholder renderer (CSS) ──────────────────────────────────────────────
+  const SHAPES = ['robot', 'cat', 'ghost', 'blob'];
   const PlaceholderRenderer = {
     pupils: [],
-    mount(container) {
+    mount(container, manifest) {
       container.innerHTML = `
         <div class="character">
           <div class="antenna"></div>
+          <div class="ear ear-left"></div>
+          <div class="ear ear-right"></div>
           <div class="head">
             <div class="eye eye-left"><div class="pupil"></div></div>
             <div class="eye eye-right"><div class="pupil"></div></div>
@@ -60,6 +63,15 @@
           <div class="body"></div>
           <div class="shadow"></div>
         </div>`;
+      // Apply the pack's palette (CSS custom props) + body shape.
+      const character = container.querySelector('.character');
+      const style = (manifest && manifest.style) || {};
+      for (const [k, v] of Object.entries(style)) {
+        if (/^--m-[a-z0-9-]+$/i.test(k)) character.style.setProperty(k, String(v));
+      }
+      const shape = SHAPES.includes(manifest && manifest.shape) ? manifest.shape : 'robot';
+      for (const s of SHAPES) mascotEl.classList.remove('shape-' + s);
+      mascotEl.classList.add('shape-' + shape);
       this.pupils = [...container.querySelectorAll('.pupil')];
       this.setState('idle');
     },
@@ -77,7 +89,10 @@
         pupil.style.transform = `translate(${dx}px, ${dy}px)`;
       }
     },
-    destroy() { this.pupils = []; }
+    destroy() {
+      this.pupils = [];
+      for (const s of SHAPES) mascotEl.classList.remove('shape-' + s);
+    }
   };
 
   // ── Live2D renderer (pixi-live2d-display) ───────────────────────────────────

@@ -1,0 +1,16 @@
+{
+  "id": "bloom",
+  "name": "Bloom",
+  "gender": "neutral",
+  "renderer": "placeholder",
+  "greeting": "Hello there!",
+  "shape": "ghost",
+  "style": {
+    "--m-head-1": "#b8f5d8",
+    "--m-head-2": "#46cc9c",
+    "--m-body-1": "#cffbe6",
+    "--m-body-2": "#5fd9ad",
+    "--m-accent": "#ffffff",
+    "--m-eye": "#15402f"
+  }
+}

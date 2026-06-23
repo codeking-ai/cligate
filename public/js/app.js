@@ -26,7 +26,7 @@ function composeApp(...parts) {
 
 function createShellModule() {
   return {
-    version: '1.5.0',
+    version: '1.4.2',
     connectionStatus: 'connecting',
     activeTab: 'dashboard',
     taskSubTab: 'workbench',

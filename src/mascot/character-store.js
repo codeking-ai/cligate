@@ -19,7 +19,10 @@ export const VALID_RENDERERS = Object.freeze(['placeholder', 'live2d', 'lottie',
 
 // Known built-in packs (their files are served statically from public/).
 const BUILTIN = [
-  { id: 'placeholder', name: 'Pal', gender: 'neutral', renderer: 'placeholder', source: 'builtin', baseUrl: '/mascot/characters/placeholder', thumbnail: '' }
+  { id: 'placeholder', name: 'Pal', gender: 'neutral', renderer: 'placeholder', source: 'builtin', baseUrl: '/mascot/characters/placeholder', thumbnail: '' },
+  { id: 'nova', name: 'Nova', gender: 'neutral', renderer: 'placeholder', source: 'builtin', baseUrl: '/mascot/characters/nova', thumbnail: '' },
+  { id: 'mochi', name: 'Mochi', gender: 'neutral', renderer: 'placeholder', source: 'builtin', baseUrl: '/mascot/characters/mochi', thumbnail: '' },
+  { id: 'bloom', name: 'Bloom', gender: 'neutral', renderer: 'placeholder', source: 'builtin', baseUrl: '/mascot/characters/bloom', thumbnail: '' }
 ];
 
 function toText(v) { return String(v ?? '').trim(); }

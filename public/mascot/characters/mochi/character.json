@@ -1,0 +1,16 @@
+{
+  "id": "mochi",
+  "name": "Mochi",
+  "gender": "neutral",
+  "renderer": "placeholder",
+  "greeting": "Nya~ tap me!",
+  "shape": "cat",
+  "style": {
+    "--m-head-1": "#ffd1e8",
+    "--m-head-2": "#ff8fc4",
+    "--m-body-1": "#ffe3f1",
+    "--m-body-2": "#ff9ecb",
+    "--m-accent": "#ff6aa9",
+    "--m-eye": "#3a1b2f"
+  }
+}

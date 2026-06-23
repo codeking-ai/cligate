@@ -4,11 +4,13 @@
   "gender": "neutral",
   "renderer": "placeholder",
   "greeting": "Hi! Click me to chat.",
-  "states": {
-    "idle": "breathe",
-    "listening": "perk",
-    "thinking": "spin",
-    "talking": "talk",
-    "notify": "wave"
+  "shape": "robot",
+  "style": {
+    "--m-head-1": "#8ea2ff",
+    "--m-head-2": "#6c5ce7",
+    "--m-body-1": "#aab6ff",
+    "--m-body-2": "#7d6ef0",
+    "--m-accent": "#ffd36e",
+    "--m-eye": "#1b1f3a"
   }
 }

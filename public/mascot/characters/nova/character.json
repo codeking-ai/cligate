@@ -1,0 +1,16 @@
+{
+  "id": "nova",
+  "name": "Nova",
+  "gender": "neutral",
+  "renderer": "placeholder",
+  "greeting": "Beep! Need something?",
+  "shape": "robot",
+  "style": {
+    "--m-head-1": "#6fe3ff",
+    "--m-head-2": "#2bb3e0",
+    "--m-body-1": "#a6eeff",
+    "--m-body-2": "#46c6e6",
+    "--m-accent": "#ffe066",
+    "--m-eye": "#06283d"
+  }
+}
