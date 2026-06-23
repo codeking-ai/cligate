@@ -1,6 +1,6 @@
 {
   "name": "cligate",
-  "version": "1.4.0",
+  "version": "1.4.1",
   "description": "Local AI control plane with a resident private assistant for task execution and a unified model proxy API for Claude Code, Codex CLI, Gemini CLI, OpenClaw, accounts, API keys, logs, and usage.",
   "type": "module",
   "main": "electron-main.cjs",
@@ -35,6 +35,7 @@
     "start": "node src/index.js",
     "electron": "electron .",
     "fetch:stt-model": "node scripts/fetch-whisper-model.mjs",
+    "fetch:mascot-runtime": "node scripts/fetch-mascot-runtime.mjs",
     "electron:build": "npm run fetch:stt-model && electron-builder --win",
     "electron:build:all": "npm run fetch:stt-model && electron-builder --win --mac --linux",
     "pack:dry-run": "node scripts/release-check.js --pack-only",

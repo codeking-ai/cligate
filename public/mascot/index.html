@@ -8,24 +8,12 @@
 </head>
 <body>
   <!-- The whole body is transparent; only #mascot is opaque/interactive.
-       Hit-testing in mascot.js toggles Electron click-through so empty areas
-       pass clicks through to the desktop. -->
+       The active character pack's renderer fills #mascot (placeholder = CSS,
+       live2d = a <canvas>). Hit-testing in mascot.js toggles Electron
+       click-through so empty areas pass clicks through to the desktop. -->
   <div id="stage">
     <div id="bubble" class="bubble" hidden><span id="bubble-text"></span></div>
-
-    <div id="mascot" class="mascot state-idle" title="CliGate">
-      <div class="character">
-        <div class="antenna"></div>
-        <div class="head">
-          <div class="eye eye-left"></div>
-          <div class="eye eye-right"></div>
-          <div class="mouth"></div>
-          <div class="thinking-dots"><span></span><span></span><span></span></div>
-        </div>
-        <div class="body"></div>
-        <div class="shadow"></div>
-      </div>
-    </div>
+    <div id="mascot" class="mascot state-idle" title="CliGate"></div>
   </div>
 
   <script src="/mascot/mascot.js"></script>

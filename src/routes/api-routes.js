@@ -60,8 +60,12 @@ import {
   handleUpdateMascotConfig,
   handleGetMascotState,
   handleSetMascotState,
-  handleMascotEvents
+  handleMascotEvents,
+  handleListMascotCharacters,
+  handleSetMascotCharacter,
+  handleImportMascotCharacter
 } from './mascot-route.js';
+import { ensureUserCharactersDir } from '../mascot/character-store.js';
 import {
   handleGetDesktopAgentStatus,
   handleStartDesktopAgent,
@@ -254,6 +258,9 @@ export function registerApiRoutes(app, { port }) {
     ? publicDir.replace('app.asar', 'app.asar.unpacked')
     : publicDir;
   app.use(express.static(staticDir));
+  // User-imported mascot character packs live outside the bundle, under the
+  // config dir — serve them so the mascot window can load their assets.
+  app.use('/mascot-characters', express.static(ensureUserCharactersDir()));
 
   // ─── Health ────────────────────────────────────────────────────────────────
   app.get('/health', (req, res) => {
@@ -469,6 +476,9 @@ export function registerApiRoutes(app, { port }) {
   app.get('/api/mascot/state', handleGetMascotState);
   app.post('/api/mascot/state', handleSetMascotState);
   app.get('/api/mascot/events', handleMascotEvents);
+  app.get('/api/mascot/characters', handleListMascotCharacters);
+  app.post('/api/mascot/character', handleSetMascotCharacter);
+  app.post('/api/mascot/characters/import', handleImportMascotCharacter);
 
   // ─── Agent Runtime Orchestrator ──────────────────────────────────────────
   app.get('/api/agent-runtimes/providers', handleListAgentRuntimeProviders);

@@ -278,7 +278,10 @@ applicable to plain server/web mode). See
 | `/api/mascot/config` | PUT | Update mascot config (persisted in `server-settings.mascot`) |
 | `/api/mascot/state` | GET | Current mascot state (`idle`/`listening`/`thinking`/`talking`/`notify`) |
 | `/api/mascot/state` | POST | Set mascot state (`{ state, text }`) — for demo / incremental wiring |
-| `/api/mascot/events` | GET | SSE stream of mascot state changes (the mascot window subscribes) |
+| `/api/mascot/events` | GET | SSE stream of mascot state changes + a `{directive:'reload'}` frame when the character switches |
+| `/api/mascot/characters` | GET | List available character packs (built-in + `~/.cligate/mascot-characters/`) + the active one |
+| `/api/mascot/character` | POST | Switch active character (`{ character }`); broadcasts a reload to the live window |
+| `/api/mascot/characters/import` | POST | Import a local character-pack folder (`{ path }`) into the user characters dir |
 
 ## Agent Runtime Orchestrator
 

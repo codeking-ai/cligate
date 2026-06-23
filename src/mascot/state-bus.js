@@ -52,6 +52,18 @@ export class MascotStateBus extends EventEmitter {
     this.on('state', listener);
     return () => this.off('state', listener);
   }
+
+  /** Ask any connected mascot window to reload (e.g. after switching character). */
+  requestReload() {
+    this.emit('reload');
+  }
+
+  /** Subscribe to reload directives. Returns an unsubscribe function. */
+  subscribeReload(listener) {
+    if (typeof listener !== 'function') return () => {};
+    this.on('reload', listener);
+    return () => this.off('reload', listener);
+  }
 }
 
 export const mascotStateBus = new MascotStateBus();

@@ -268,6 +268,14 @@
                                 </svg>
                                 <span class="sidebar-label" x-text="t('imageGen')"></span>
                             </button>
+                            <button class="nav-item"
+                                :class="{'active': activeTab === 'mascot'}" @click="setActiveTab('mascot')" :title="sidebarCollapsed ? t('mascotTitle') : ''">
+                                <svg class="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12a1 1 0 11-2 0 1 1 0 012 0zM17 12a1 1 0 11-2 0 1 1 0 012 0z" />
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 2a7 7 0 00-7 7v4a7 7 0 0014 0V9a7 7 0 00-7-7zM9 19l-1 3m8-3l1 3" />
+                                </svg>
+                                <span class="sidebar-label" x-text="t('mascotTitle')"></span>
+                            </button>
                         </nav>
                     </div>
 
@@ -457,6 +465,8 @@
                     <div x-show="activeTab === 'apikeys'" x-transition class="view-container workspace-view" data-partial-view="apikeys"></div>
 
                     <div x-show="activeTab === 'imageGen'" x-transition class="view-container workspace-view" data-partial-view="imageGen"></div>
+
+                    <div x-show="activeTab === 'mascot'" x-transition class="view-container workspace-view" data-partial-view="mascot"></div>
 
                     <div x-show="activeTab === 'usage'" x-transition class="view-container usage-workspace-view" data-partial-view="usage"></div>
 

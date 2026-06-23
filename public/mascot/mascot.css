@@ -104,14 +104,34 @@ html, body {
 
 .eye {
   position: absolute;
-  top: 24px;
-  width: 10px; height: 12px;
-  background: #1b1f3a;
+  top: 22px;
+  width: 15px; height: 17px;
+  background: #f4f6ff;
   border-radius: 50%;
+  overflow: hidden;
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.18);
   animation: blink 5s infinite;
 }
-.eye-left { left: 18px; }
-.eye-right { right: 18px; }
+.eye-left { left: 15px; }
+.eye-right { right: 15px; }
+.pupil {
+  position: absolute;
+  top: 50%; left: 50%;
+  width: 8px; height: 9px;
+  margin: -4.5px 0 0 -4px;
+  background: #1b1f3a;
+  border-radius: 50%;
+  transition: transform 80ms linear;
+}
+.pupil::after {
+  content: "";
+  position: absolute;
+  top: 1px; right: 1px;
+  width: 3px; height: 3px;
+  background: rgba(255, 255, 255, 0.85);
+  border-radius: 50%;
+}
+.l2d-canvas { width: 100%; height: 100%; display: block; }
 
 .mouth {
   position: absolute;
@@ -171,7 +191,7 @@ html, body {
 .state-notify .antenna::after { background: #ff7a90; box-shadow: 0 0 10px rgba(255,122,144,0.9); }
 
 /* ── Keyframes ───────────────────────────────────────────────────────────── */
-@keyframes breathe { 0%,100% { transform: scale(1); } 50% { transform: scale(1.035); } }
+@keyframes breathe { 0%,100% { transform: translateY(0) scale(1); } 50% { transform: translateY(-2px) scale(1.035); } }
 @keyframes blink { 0%,92%,100% { transform: scaleY(1); } 96% { transform: scaleY(0.1); } }
 @keyframes dot { 0%,100% { transform: translateY(0); opacity: 0.5; } 50% { transform: translateY(-4px); opacity: 1; } }
 @keyframes talk { 0% { transform: translateX(-50%) scaleY(0.6); } 100% { transform: translateX(-50%) scaleY(1); } }

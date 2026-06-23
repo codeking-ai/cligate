@@ -1,6 +1,7 @@
 import { i18n } from './i18n.js';
 import { createApiKeysPageModule } from './modules/api-keys-page.js';
 import { createImageGenPageModule } from './modules/image-gen-page.js';
+import { createMascotPageModule } from './modules/mascot-page.js';
 import { createAssistantTasksPageModule } from './modules/assistant-tasks-page.js';
 import { createAssistantWorkbenchPageModule } from './modules/assistant-workbench-page.js';
 import { createScheduledTasksPageModule } from './modules/scheduled-tasks-page.js';
@@ -25,7 +26,7 @@ function composeApp(...parts) {
 
 function createShellModule() {
   return {
-    version: '1.4.0',
+    version: '1.5.0',
     connectionStatus: 'connecting',
     activeTab: 'dashboard',
     taskSubTab: 'workbench',
@@ -44,6 +45,7 @@ function createShellModule() {
       localModels: '/partials/views/local-models.html',
       apikeys: '/partials/views/api-keys.html',
       imageGen: '/partials/views/image-gen.html',
+      mascot: '/partials/views/mascot.html',
       usage: '/partials/views/usage.html',
       pricing: '/partials/views/pricing.html',
       apiExplorer: '/partials/views/api-explorer.html',
@@ -346,6 +348,7 @@ function createShellModule() {
       }
       if (tab === 'apikeys') this.loadApiKeys();
       if (tab === 'imageGen') this.loadImageGenStatus();
+      if (tab === 'mascot') this.loadMascotCharacters();
       if (tab === 'usage') this.loadUsageData();
       if (tab === 'pricing') this.loadPricingData();
       if (tab === 'apiExplorer' && !this.apiExplorerResponse) this.loadApiExplorerPreset(this.apiExplorerPresetIndex);
@@ -669,6 +672,7 @@ function registerApp() {
     createToolsPageModule(),
     createApiKeysPageModule(),
     createImageGenPageModule(),
+    createMascotPageModule(),
     createChannelsPageModule()
   ));
 }

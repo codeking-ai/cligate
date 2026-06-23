@@ -10,6 +10,7 @@
 
 import { getServerSettings, setServerSettings } from '../server-settings.js';
 import mascotStateBus, { MASCOT_STATES } from '../mascot/state-bus.js';
+import { listCharacters, getCharacter, importCharacterFromPath, userCharactersDir } from '../mascot/character-store.js';
 
 const MASCOT_DEFAULTS = Object.freeze({
   enabled: true,
@@ -44,6 +45,36 @@ export function handleUpdateMascotConfig(req, res) {
   res.json({ success: true, config: readMascotConfig() });
 }
 
+export function handleListMascotCharacters(req, res) {
+  res.json({
+    success: true,
+    active: readMascotConfig().character,
+    userDir: userCharactersDir(),
+    characters: listCharacters()
+  });
+}
+
+export function handleSetMascotCharacter(req, res) {
+  const id = String((req.body || {}).character || '').trim();
+  if (!id) return res.status(400).json({ success: false, error: 'character id is required' });
+  if (!getCharacter(id)) return res.status(404).json({ success: false, error: `character "${id}" not found` });
+  const next = { ...readMascotConfig(), character: id };
+  setServerSettings({ mascot: next });
+  mascotStateBus.requestReload(); // tell the live mascot window to reload with the new pack
+  res.json({ success: true, config: readMascotConfig(), characters: listCharacters() });
+}
+
+export function handleImportMascotCharacter(req, res) {
+  const sourcePath = String((req.body || {}).path || '').trim();
+  if (!sourcePath) return res.status(400).json({ success: false, error: 'path is required' });
+  try {
+    const character = importCharacterFromPath(sourcePath);
+    res.json({ success: true, character, characters: listCharacters() });
+  } catch (error) {
+    res.status(400).json({ success: false, error: String(error?.message || error) });
+  }
+}
+
 export function handleGetMascotState(req, res) {
   res.json({ success: true, ...mascotStateBus.getState() });
 }
@@ -73,6 +104,7 @@ export function handleMascotEvents(req, res) {
 
   send(mascotStateBus.getState()); // prime the stream with the current state
   const unsubscribe = mascotStateBus.subscribe(send);
+  const unsubscribeReload = mascotStateBus.subscribeReload(() => send({ directive: 'reload' }));
   const heartbeat = setInterval(() => {
     try { res.write(': ping\n\n'); } catch { /* ignore */ }
   }, 25_000);
@@ -81,6 +113,7 @@ export function handleMascotEvents(req, res) {
   req.on('close', () => {
     clearInterval(heartbeat);
     unsubscribe();
+    unsubscribeReload();
   });
 }
 
