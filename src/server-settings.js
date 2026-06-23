@@ -19,6 +19,12 @@ const DEFAULT_SETTINGS = {
     enableFreeModels: true,              // Allow routing to system free models (Kilo)
     enableRequestLogging: true,          // Log full request/response content
     requestLogRetentionDays: 7,          // Days to keep request logs
+    mascot: {                            // Desktop mascot window (Electron desktop build only)
+        enabled: true,                   // auto-show the mascot after startup
+        character: 'placeholder',        // character pack id under public/mascot/characters/
+        clickAction: 'open-chat',        // 'open-chat' — what clicking the mascot does
+        position: null                   // { x, y } last window position; null = default bottom-right
+    },
     assistantAgent: {
         enabled: true,
         bindingConfigured: false,
@@ -247,6 +253,33 @@ function normalizeDesktopAgentConfig(config = {}) {
     };
 }
 
+function normalizeMascotConfig(config = {}) {
+    const current = config && typeof config === 'object' && !Array.isArray(config)
+        ? config
+        : {};
+    let position = null;
+    if (current.position && typeof current.position === 'object' && !Array.isArray(current.position)) {
+        const x = Number(current.position.x);
+        const y = Number(current.position.y);
+        if (Number.isFinite(x) && Number.isFinite(y)) {
+            position = { x: Math.round(x), y: Math.round(y) };
+        }
+    }
+
+    return {
+        enabled: typeof current.enabled === 'boolean'
+            ? current.enabled
+            : DEFAULT_SETTINGS.mascot.enabled,
+        character: typeof current.character === 'string' && current.character.trim()
+            ? current.character.trim()
+            : DEFAULT_SETTINGS.mascot.character,
+        clickAction: typeof current.clickAction === 'string' && current.clickAction.trim()
+            ? current.clickAction.trim()
+            : DEFAULT_SETTINGS.mascot.clickAction,
+        position
+    };
+}
+
 const ASSISTANT_CREDENTIAL_TYPES = new Set(['api-key', 'chatgpt-account', 'claude-account']);
 const ASSISTANT_FALLBACKS_MAX = 3;
 const ASSISTANT_BREAKER_DEFAULTS = Object.freeze({
@@ -346,6 +379,7 @@ export {
     normalizeFallbacks,
     normalizeCircuitBreaker,
     normalizeDesktopAgentConfig,
+    normalizeMascotConfig,
     normalizeSkillsConfig,
     ASSISTANT_CREDENTIAL_TYPES,
     ASSISTANT_FALLBACKS_MAX,
@@ -375,6 +409,7 @@ export function getServerSettings() {
             appRouting: normalizeAppRoutingConfig(data.appRouting),
             assistantAgent: normalizeAssistantAgentConfig(data.assistantAgent),
             desktopAgent: normalizeDesktopAgentConfig(data.desktopAgent),
+            mascot: normalizeMascotConfig(data.mascot),
             skills: normalizeSkillsConfig(data.skills),
             channels: normalizeChannelsConfig(data.channels)
         };
@@ -393,6 +428,7 @@ export function setServerSettings(patch = {}) {
         appRouting: normalizeAppRoutingConfig(patch.appRouting || current.appRouting),
         assistantAgent: normalizeAssistantAgentConfig(patch.assistantAgent || current.assistantAgent),
         desktopAgent: normalizeDesktopAgentConfig(patch.desktopAgent || current.desktopAgent),
+        mascot: normalizeMascotConfig(patch.mascot || current.mascot),
         skills: normalizeSkillsConfig(patch.skills || current.skills),
         channels: normalizeChannelsConfig(patch.channels || current.channels)
     };
@@ -469,5 +505,6 @@ export default {
     SETTINGS_FILE,
     normalizeChannelsConfig,
     normalizeSkillsConfig,
-    normalizeDesktopAgentConfig
+    normalizeDesktopAgentConfig,
+    normalizeMascotConfig
 };

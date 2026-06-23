@@ -56,6 +56,13 @@ import {
 } from './image-gen-route.js';
 import { handleGetArtifact } from './artifacts-route.js';
 import {
+  handleGetMascotConfig,
+  handleUpdateMascotConfig,
+  handleGetMascotState,
+  handleSetMascotState,
+  handleMascotEvents
+} from './mascot-route.js';
+import {
   handleGetDesktopAgentStatus,
   handleStartDesktopAgent,
   handleStopDesktopAgent,
@@ -455,6 +462,13 @@ export function registerApiRoutes(app, { port }) {
 
   // Serve generated/captured artifact files by id (used by chat <img> + UI).
   app.get('/api/artifacts/:id', handleGetArtifact);
+
+  // ─── Desktop Mascot (Electron desktop build) ─────────────────────────────
+  app.get('/api/mascot/config', handleGetMascotConfig);
+  app.put('/api/mascot/config', handleUpdateMascotConfig);
+  app.get('/api/mascot/state', handleGetMascotState);
+  app.post('/api/mascot/state', handleSetMascotState);
+  app.get('/api/mascot/events', handleMascotEvents);
 
   // ─── Agent Runtime Orchestrator ──────────────────────────────────────────
   app.get('/api/agent-runtimes/providers', handleListAgentRuntimeProviders);

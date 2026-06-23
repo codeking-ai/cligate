@@ -1,0 +1,181 @@
+/* Transparent, borderless surface — only the mascot itself is visible. */
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body {
+  width: 100%; height: 100%;
+  background: transparent;
+  overflow: hidden;
+  font-family: -apple-system, "Segoe UI", system-ui, sans-serif;
+  user-select: none;
+  -webkit-user-select: none;
+  cursor: default;
+}
+
+#stage {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  padding: 8px;
+}
+
+/* ── Speech bubble ───────────────────────────────────────────────────────── */
+.bubble {
+  max-width: 200px;
+  margin-bottom: 8px;
+  padding: 8px 12px;
+  background: rgba(20, 22, 34, 0.92);
+  color: #eef1ff;
+  font-size: 12px;
+  line-height: 1.4;
+  border: 1px solid rgba(120, 130, 200, 0.4);
+  border-radius: 12px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
+  backdrop-filter: blur(6px);
+  position: relative;
+  animation: bubble-in 160ms ease-out;
+}
+.bubble::after {
+  content: "";
+  position: absolute;
+  bottom: -6px; left: 50%;
+  transform: translateX(-50%) rotate(45deg);
+  width: 10px; height: 10px;
+  background: rgba(20, 22, 34, 0.92);
+  border-right: 1px solid rgba(120, 130, 200, 0.4);
+  border-bottom: 1px solid rgba(120, 130, 200, 0.4);
+}
+@keyframes bubble-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+
+/* ── Mascot ──────────────────────────────────────────────────────────────── */
+.mascot {
+  width: 96px;
+  height: 116px;
+  position: relative;
+  cursor: pointer;
+}
+.character {
+  position: absolute;
+  inset: 0;
+  transform-origin: 50% 90%;
+  animation: breathe 3.6s ease-in-out infinite;
+}
+
+.head {
+  position: absolute;
+  top: 14px; left: 50%;
+  transform: translateX(-50%);
+  width: 72px; height: 60px;
+  border-radius: 28px;
+  background: linear-gradient(160deg, #8ea2ff 0%, #6c5ce7 100%);
+  box-shadow: inset 0 -6px 12px rgba(0,0,0,0.18), 0 4px 10px rgba(76,70,160,0.4);
+  z-index: 2;
+}
+.body {
+  position: absolute;
+  bottom: 8px; left: 50%;
+  transform: translateX(-50%);
+  width: 58px; height: 46px;
+  border-radius: 22px 22px 18px 18px;
+  background: linear-gradient(160deg, #aab6ff 0%, #7d6ef0 100%);
+  box-shadow: inset 0 -4px 10px rgba(0,0,0,0.15);
+  z-index: 1;
+}
+.antenna {
+  position: absolute;
+  top: 0; left: 50%;
+  transform: translateX(-50%);
+  width: 4px; height: 16px;
+  background: #6c5ce7;
+  border-radius: 2px;
+  z-index: 1;
+}
+.antenna::after {
+  content: "";
+  position: absolute;
+  top: -6px; left: 50%;
+  transform: translateX(-50%);
+  width: 10px; height: 10px;
+  border-radius: 50%;
+  background: #ffd36e;
+  box-shadow: 0 0 8px rgba(255, 211, 110, 0.8);
+}
+
+.eye {
+  position: absolute;
+  top: 24px;
+  width: 10px; height: 12px;
+  background: #1b1f3a;
+  border-radius: 50%;
+  animation: blink 5s infinite;
+}
+.eye-left { left: 18px; }
+.eye-right { right: 18px; }
+
+.mouth {
+  position: absolute;
+  bottom: 12px; left: 50%;
+  transform: translateX(-50%);
+  width: 18px; height: 8px;
+  border-bottom: 3px solid #1b1f3a;
+  border-radius: 0 0 12px 12px;
+}
+
+/* thinking dots inside the head, hidden unless thinking */
+.thinking-dots {
+  position: absolute;
+  bottom: 10px; left: 50%;
+  transform: translateX(-50%);
+  display: none;
+  gap: 4px;
+}
+.thinking-dots span {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: #1b1f3a;
+  display: inline-block;
+  animation: dot 1.2s infinite ease-in-out;
+}
+.thinking-dots span:nth-child(2) { animation-delay: 0.2s; }
+.thinking-dots span:nth-child(3) { animation-delay: 0.4s; }
+
+.shadow {
+  position: absolute;
+  bottom: 2px; left: 50%;
+  transform: translateX(-50%);
+  width: 60px; height: 10px;
+  background: rgba(0,0,0,0.25);
+  border-radius: 50%;
+  filter: blur(3px);
+  z-index: 0;
+}
+
+/* ── State variations ────────────────────────────────────────────────────── */
+.state-thinking .mouth { display: none; }
+.state-thinking .thinking-dots { display: flex; }
+.state-thinking .character { animation: breathe 1.8s ease-in-out infinite; }
+.state-thinking .antenna::after { animation: pulse 0.9s infinite; }
+
+.state-talking .mouth {
+  height: 12px;
+  border: 3px solid #1b1f3a;
+  border-radius: 12px;
+  background: #2a2f55;
+  animation: talk 0.28s steps(2) infinite;
+}
+
+.state-listening .head { background: linear-gradient(160deg, #7df3c0 0%, #2fb98a 100%); }
+.state-listening .body { background: linear-gradient(160deg, #aef6da 0%, #46cc9c 100%); }
+
+.state-notify .character { animation: wave 0.9s ease-in-out infinite; }
+.state-notify .antenna::after { background: #ff7a90; box-shadow: 0 0 10px rgba(255,122,144,0.9); }
+
+/* ── Keyframes ───────────────────────────────────────────────────────────── */
+@keyframes breathe { 0%,100% { transform: scale(1); } 50% { transform: scale(1.035); } }
+@keyframes blink { 0%,92%,100% { transform: scaleY(1); } 96% { transform: scaleY(0.1); } }
+@keyframes dot { 0%,100% { transform: translateY(0); opacity: 0.5; } 50% { transform: translateY(-4px); opacity: 1; } }
+@keyframes talk { 0% { transform: translateX(-50%) scaleY(0.6); } 100% { transform: translateX(-50%) scaleY(1); } }
+@keyframes pulse { 0%,100% { transform: translateX(-50%) scale(1); } 50% { transform: translateX(-50%) scale(1.4); } }
+@keyframes wave { 0%,100% { transform: rotate(0deg); } 25% { transform: rotate(-5deg); } 75% { transform: rotate(5deg); } }
+
+.dragging .character { animation: none; }

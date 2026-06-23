@@ -144,6 +144,7 @@ cligate/
 | `usage-tracker.js` | Per-request cost estimation and usage aggregation |
 | `request-logger.js` | Persistent request/response logging with daily rotation |
 | `image-gen/` | Image-generation subsystem (canonical params → backend adapters → model store → service); backs the `generate_image` assistant tool and `/api/image-gen/*` |
+| `mascot/` | Desktop-mascot state bus (assistant "mood" pub/sub); backs `/api/mascot/*` and the Electron mascot window (`public/mascot/`, `electron-mascot-preload.cjs`) |
 
 ## Data Flow
 

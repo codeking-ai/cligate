@@ -15,7 +15,7 @@ const _nativeHeaders = globalThis.Headers;
 const _nativeRequest = globalThis.Request;
 const _nativeResponse = globalThis.Response;
 
-const { app, BrowserWindow, Tray, Menu, shell, dialog } = require('electron');
+const { app, BrowserWindow, Tray, Menu, shell, dialog, ipcMain, screen } = require('electron');
 const path = require('path');
 const net = require('net');
 
@@ -26,6 +26,12 @@ let mainWindow = null;
 let tray = null;
 let serverInstance = null;
 let actualPort = DEFAULT_PORT;
+
+// Desktop mascot (optional, controlled by /api/mascot/config)
+let mascotWindow = null;
+let mascotConfig = { enabled: true, position: null };
+let mascotIpcReady = false;
+let mascotPositionTimer = null;
 
 // ─── Version helpers ────────────────────────────────────────────────────────
 
@@ -149,26 +155,48 @@ function createWindow() {
 
 // ─── Tray ───────────────────────────────────────────────────────────────────
 
+function buildTrayMenu() {
+    return Menu.buildFromTemplate([
+        { label: 'Open CliGate', click: () => { if (mainWindow) mainWindow.show(); } },
+        {
+            label: 'Show desktop assistant',
+            type: 'checkbox',
+            checked: mascotConfig.enabled !== false && !!mascotWindow,
+            click: (item) => {
+                if (item.checked) {
+                    setMascotEnabled(true);
+                    createMascotWindow();
+                } else {
+                    setMascotEnabled(false);
+                    if (mascotWindow) mascotWindow.close();
+                }
+                refreshTrayMenu();
+            }
+        },
+        { type: 'separator' },
+        { label: `Port: ${actualPort}`, enabled: false },
+        { type: 'separator' },
+        {
+            label: 'Quit', click: () => {
+                app.isQuitting = true;
+                app.quit();
+            }
+        },
+    ]);
+}
+
+function refreshTrayMenu() {
+    if (tray) tray.setContextMenu(buildTrayMenu());
+}
+
 function createTray() {
     const iconPath = getIconPath();
     if (!iconPath) return;
 
     try {
         tray = new Tray(iconPath);
-        const contextMenu = Menu.buildFromTemplate([
-            { label: 'Open CliGate', click: () => { if (mainWindow) mainWindow.show(); } },
-            { type: 'separator' },
-            { label: `Port: ${actualPort}`, enabled: false },
-            { type: 'separator' },
-            {
-                label: 'Quit', click: () => {
-                    app.isQuitting = true;
-                    app.quit();
-                }
-            },
-        ]);
         tray.setToolTip('CliGate');
-        tray.setContextMenu(contextMenu);
+        tray.setContextMenu(buildTrayMenu());
         tray.on('double-click', () => { if (mainWindow) mainWindow.show(); });
     } catch {
         // Tray icon is optional — silently ignore if it fails
@@ -191,6 +219,129 @@ function getIconPath() {
         if (fs.existsSync(p)) return p;
     }
     return undefined;
+}
+
+// ─── Desktop Mascot ───────────────────────────────────────────────────────
+
+function openChatInMain() {
+    if (!mainWindow) return;
+    mainWindow.show();
+    mainWindow.focus();
+    mainWindow.webContents
+        .executeJavaScript("window.dispatchEvent(new CustomEvent('cligate-open-chat'))")
+        .catch(() => { /* page may not be ready; ignore */ });
+}
+
+// Persist the mascot config back to the server (debounced for position drags).
+function putMascotConfig(patch) {
+    try {
+        globalThis.fetch(`http://127.0.0.1:${actualPort}/api/mascot/config`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(patch)
+        }).catch(() => {});
+    } catch { /* fetch unavailable; ignore */ }
+}
+
+function setMascotEnabled(enabled) {
+    mascotConfig.enabled = enabled;
+    putMascotConfig({ enabled });
+}
+
+function persistMascotPosition(x, y) {
+    mascotConfig.position = { x, y };
+    if (mascotPositionTimer) clearTimeout(mascotPositionTimer);
+    mascotPositionTimer = setTimeout(() => putMascotConfig({ position: { x, y } }), 800);
+}
+
+async function loadMascotConfig() {
+    try {
+        const res = await globalThis.fetch(`http://127.0.0.1:${actualPort}/api/mascot/config`);
+        const data = await res.json();
+        if (data && data.config) mascotConfig = { ...mascotConfig, ...data.config };
+    } catch {
+        // server unreachable; keep defaults (enabled)
+    }
+}
+
+function registerMascotIpc() {
+    if (mascotIpcReady) return;
+    mascotIpcReady = true;
+
+    ipcMain.on('mascot:open-chat', () => openChatInMain());
+    ipcMain.on('mascot:set-ignore-mouse', (_e, ignore) => {
+        if (mascotWindow) mascotWindow.setIgnoreMouseEvents(!!ignore, { forward: true });
+    });
+    ipcMain.on('mascot:move-by', (_e, payload) => {
+        if (!mascotWindow) return;
+        const dx = Math.round((payload && payload.dx) || 0);
+        const dy = Math.round((payload && payload.dy) || 0);
+        const [px, py] = mascotWindow.getPosition();
+        const nx = px + dx;
+        const ny = py + dy;
+        mascotWindow.setPosition(nx, ny);
+        persistMascotPosition(nx, ny);
+    });
+    ipcMain.on('mascot:hide', () => {
+        if (mascotWindow) mascotWindow.close();
+        setMascotEnabled(false);
+        refreshTrayMenu();
+    });
+    ipcMain.on('mascot:menu', (e) => {
+        const menu = Menu.buildFromTemplate([
+            { label: 'Open chat', click: () => openChatInMain() },
+            { label: 'Open dashboard', click: () => { if (mainWindow) mainWindow.show(); } },
+            { type: 'separator' },
+            { label: 'Hide mascot', click: () => { if (mascotWindow) mascotWindow.close(); setMascotEnabled(false); refreshTrayMenu(); } },
+            { type: 'separator' },
+            { label: 'Quit', click: () => { app.isQuitting = true; app.quit(); } }
+        ]);
+        const win = BrowserWindow.fromWebContents(e.sender);
+        menu.popup({ window: win || undefined });
+    });
+}
+
+function createMascotWindow() {
+    if (mascotWindow) { mascotWindow.show(); return; }
+
+    const width = 240;
+    const height = 240;
+    const primary = screen.getPrimaryDisplay();
+    const wa = primary.workArea;
+    let x = wa.x + wa.width - width - 24;
+    let y = wa.y + wa.height - height - 24;
+    if (mascotConfig.position && Number.isFinite(mascotConfig.position.x) && Number.isFinite(mascotConfig.position.y)) {
+        x = mascotConfig.position.x;
+        y = mascotConfig.position.y;
+    }
+
+    mascotWindow = new BrowserWindow({
+        width, height, x, y,
+        frame: false,
+        transparent: true,
+        backgroundColor: '#00000000',
+        resizable: false,
+        movable: true,
+        alwaysOnTop: true,
+        skipTaskbar: true,
+        hasShadow: false,
+        fullscreenable: false,
+        maximizable: false,
+        minimizable: false,
+        title: 'CliGate Assistant',
+        webPreferences: {
+            preload: path.join(__dirname, 'electron-mascot-preload.cjs'),
+            nodeIntegration: false,
+            contextIsolation: true,
+        },
+    });
+
+    mascotWindow.setAlwaysOnTop(true, 'screen-saver');
+    // Start click-through; the page re-enables interaction while the cursor is
+    // over the mascot (hit-test in mascot.js → mascot:set-ignore-mouse).
+    mascotWindow.setIgnoreMouseEvents(true, { forward: true });
+    mascotWindow.loadURL(`http://127.0.0.1:${actualPort}/mascot/index.html`);
+    mascotWindow.on('closed', () => { mascotWindow = null; });
 }
 
 // ─── Bootstrap ──────────────────────────────────────────────────────────────
@@ -223,7 +374,11 @@ app.whenReady().then(async () => {
         });
 
         createWindow();
+        await loadMascotConfig();
         createTray();
+        registerMascotIpc();
+        if (mascotConfig.enabled !== false) createMascotWindow();
+        refreshTrayMenu();
     } catch (err) {
         if (err.message === 'UPDATE_REQUIRED') return;
         dialog.showErrorBox('Startup Error', `Failed to start CliGate:\n\n${err.message}`);

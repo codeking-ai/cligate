@@ -13,7 +13,7 @@
 </head>
 
 <body class="bg-space-950 text-gray-300 font-sans antialiased min-h-screen selection:bg-neon-purple selection:text-white"
-    x-data="app" x-init="init()">
+    x-data="app" x-init="init()" @cligate-open-chat.window="setActiveTab('chat')">
 
     <div class="fixed top-4 right-4 z-[100] flex flex-col gap-2 pointer-events-none">
         <template x-if="toast">

@@ -1,0 +1,14 @@
+{
+  "id": "placeholder",
+  "name": "Pal",
+  "gender": "neutral",
+  "renderer": "placeholder",
+  "greeting": "Hi! Click me to chat.",
+  "states": {
+    "idle": "breathe",
+    "listening": "perk",
+    "thinking": "spin",
+    "talking": "talk",
+    "notify": "wave"
+  }
+}

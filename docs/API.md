@@ -266,6 +266,20 @@ entries and a test/playground generate. See
 | `/api/image-gen/generate` | POST | Manual generation (dashboard test); returns artifact download URLs |
 | `/api/artifacts/:id` | GET | Stream a generated/captured artifact file by id (path restricted to the config dir) |
 
+## Desktop Mascot
+
+Powers the optional desktop-assistant character window in the Electron build (not
+applicable to plain server/web mode). See
+`docs/assistant-desktop-mascot-design.zh-CN.md`.
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/mascot/config` | GET | Mascot config (`enabled`, `character`, `clickAction`, `position`) |
+| `/api/mascot/config` | PUT | Update mascot config (persisted in `server-settings.mascot`) |
+| `/api/mascot/state` | GET | Current mascot state (`idle`/`listening`/`thinking`/`talking`/`notify`) |
+| `/api/mascot/state` | POST | Set mascot state (`{ state, text }`) — for demo / incremental wiring |
+| `/api/mascot/events` | GET | SSE stream of mascot state changes (the mascot window subscribes) |
+
 ## Agent Runtime Orchestrator
 
 | Endpoint | Method | Description |
