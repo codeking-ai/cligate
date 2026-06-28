@@ -122,20 +122,6 @@ Start the service, add one credential, run one-click config, and send your first
 
 Use the dashboard to manage accounts, API keys, routing priority, model mapping, local runtimes, pricing, request logs, usage, channel settings, skills, MCP, and desktop-agent settings.
 
-## Screenshots
-
-| Dashboard | Chat |
-|:--|:--|
-| ![Dashboard](./images/dashboard.png) | ![Chat](./images/chat.png) |
-
-| Routing and Settings | Channels |
-|:--|:--|
-| ![Settings](./images/settings.png) | ![Channels](./images/channel.png) |
-
-| Usage and Costs |
-|:--|
-| ![Usage and Costs](./images/usage_costs.png) |
-
 ## Documentation
 
 Start here if you want the shortest path to the right document:

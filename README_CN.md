@@ -122,20 +122,6 @@ Gemini CLI 和 OpenClaw 也可以直接在仪表盘完成配置。
 
 通过仪表盘管理账户、API Key、路由优先级、模型映射、本地运行时、定价、请求日志、用量、渠道设置、Skills、MCP 和桌面代理设置。
 
-## 界面预览
-
-| 仪表盘 | Chat |
-|:--|:--|
-| ![Dashboard](./images/dashboard.png) | ![Chat](./images/chat.png) |
-
-| 路由与设置 | 渠道管理 |
-|:--|:--|
-| ![Settings](./images/settings.png) | ![Channels](./images/channel.png) |
-
-| 用量与成本 |
-|:--|
-| ![Usage and Costs](./images/usage_costs.png) |
-
 ## 文档导航
 
 如果你想快速找到正确的说明，建议从这里开始：
