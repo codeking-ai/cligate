@@ -215,11 +215,6 @@ CliGate 本地控制平面 (localhost:8081)
 - [社区与联系方式](./docs/COMMUNITY.md)
 - [Releases](https://github.com/codeking-ai/cligate/releases)
 
-如需直接联系作者，可直接扫码添加个人微信：
-
-<img src="./images/wechat.jpg" alt="CliGate 微信" width="220">
-
-添加时建议备注 `CliGate`，便于识别。
 
 如果你准备提 PR，请先看 [CONTRIBUTING.md](./CONTRIBUTING.md)。
 
