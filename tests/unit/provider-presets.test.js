@@ -31,8 +31,9 @@ test('every preset declares the required fields and a unique id', () => {
     }
 });
 
-test('this batch ships openai_chat presets (qwen, openrouter + migrated zhipu/moonshot/minimax)', () => {
-    assert.deepEqual(presetIdsByFormat('openai_chat').sort(), ['minimax', 'moonshot', 'openrouter', 'qwen', 'zhipu']);
+test('this batch ships openai_chat presets (qwen, openrouter, zhipu/moonshot/minimax, clinepass, ollama-cloud)', () => {
+    assert.deepEqual(presetIdsByFormat('openai_chat').sort(),
+        ['clinepass', 'minimax', 'moonshot', 'ollama-cloud', 'openrouter', 'qwen', 'zhipu']);
     // Nothing in this batch should claim the Responses or Anthropic formats.
     assert.deepEqual(presetIdsByFormat('openai_responses'), []);
     assert.deepEqual(presetIdsByFormat('anthropic'), []);
@@ -190,4 +191,41 @@ test('zhipu preset declares a validateModel for vendors without GET /models', ()
     const Cls = makeOpenAICompatibleProvider(PRESET_BY_ID.zhipu);
     const instance = new Cls({ id: 'tmp_zhipu', apiKey: 'sk-test' });
     assert.equal(typeof instance.validateKey, 'function');
+});
+
+// ─── Built-in subscription presets (clinepass / ollama-cloud) ───────────────
+
+test('clinepass passes cline-pass/ slugs through and tier-maps the rest', () => {
+    // Upstream requires the full `cline-pass/` slug — never remap those.
+    assert.equal(resolveModel('clinepass', 'cline-pass/glm-5.3'), 'cline-pass/glm-5.3');
+    // An incoming Claude Code model remaps through the tier map.
+    assert.equal(resolveModel('clinepass', 'claude-sonnet-4-6'), 'cline-pass/glm-5.3');
+    assert.equal(resolveModel('clinepass', 'claude-opus-4-6'), 'cline-pass/kimi-k3');
+});
+
+test('ollama-cloud passes catalog ids through and tier-maps non-native ids', () => {
+    // Bare vendor ids (no common prefix) pass via family prefixes...
+    assert.equal(resolveModel('ollama-cloud', 'kimi-k2.6'), 'kimi-k2.6');
+    assert.equal(resolveModel('ollama-cloud', 'glm-5.3'), 'glm-5.3');
+    // ...tag-style ids via the `:` passthrough match...
+    assert.equal(resolveModel('ollama-cloud', 'gpt-oss:120b'), 'gpt-oss:120b');
+    // ...and non-native ids remap (gpt-5.x must NOT be swallowed by a bare
+    // `gpt` prefix — the family list pins `gpt-oss` exactly).
+    assert.equal(resolveModel('ollama-cloud', 'gpt-5.4'), 'glm-5.3');
+    assert.equal(resolveModel('ollama-cloud', 'claude-sonnet-4-6'), 'glm-5.3');
+});
+
+test('clinepass and ollama-cloud are registered providers with the Anthropic bridge', () => {
+    for (const id of ['clinepass', 'ollama-cloud']) {
+        const { success, id: keyId } = addApiKey({ type: id, name: `builtin-${id}`, apiKey: 'sk-test' });
+        assert.equal(success, true, `${id} must be a registered, addable provider type`);
+        try {
+            const provider = getProviderById(keyId);
+            assert.equal(provider.type, id);
+            assert.equal(typeof provider.sendAnthropicRequest, 'function', `${id} must serve /v1/messages via the bridge`);
+            assert.equal(provider.sendResponsesRequest, undefined, `${id} must NOT claim native /responses`);
+        } finally {
+            removeApiKey(keyId);
+        }
+    }
 });
