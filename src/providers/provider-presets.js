@@ -97,7 +97,8 @@ export const PROVIDER_PRESETS = [
   {
     // Migrated from the bespoke ZhipuProvider class. ZhipuAI serves no GET
     // /models, so validation probes a 1-token chat request and discovery
-    // relies on the static model list below.
+    // relies on the static model list below. Model ids verified against the
+    // OpenRouter z-ai listing (2026-10).
     id: 'zhipu',
     label: 'Zhipu (GLM)',
     labelKey: 'providerZhipu',
@@ -108,16 +109,17 @@ export const PROVIDER_PRESETS = [
     keyHint: '...',
     nativeModelPrefixes: ['glm'],
     validateModel: 'glm-4-flash',
-    models: ['glm-5', 'glm-5-turbo', 'glm-4.7', 'glm-4-plus', 'glm-4-air', 'glm-4-airx', 'glm-4-flash'],
+    models: ['glm-5.3', 'glm-5.3-flash', 'glm-5.2', 'glm-5', 'glm-4.7', 'glm-4.7-flash', 'glm-4-flash'],
     tiers: {
-      flagship: 'glm-5',
-      standard: 'glm-5-turbo',
-      fast: 'glm-4-flash',
-      reasoning: 'glm-5',
+      flagship: 'glm-5.3',
+      standard: 'glm-5.2',
+      fast: 'glm-5.3-flash',
+      reasoning: 'glm-5.3',
     },
   },
   {
-    // Migrated from the bespoke MoonshotProvider class.
+    // Migrated from the bespoke MoonshotProvider class. Model ids verified
+    // against the OpenRouter moonshotai listing (2026-10).
     id: 'moonshot',
     label: 'Moonshot (Kimi)',
     labelKey: 'providerMoonshot',
@@ -127,16 +129,18 @@ export const PROVIDER_PRESETS = [
     website: 'https://platform.moonshot.ai',
     keyHint: 'sk-...',
     nativeModelPrefixes: ['kimi', 'moonshot'],
-    models: ['kimi-k2.5', 'kimi-k2-thinking', 'kimi-k2-thinking-turbo'],
+    models: ['kimi-k3', 'kimi-k2.7-code', 'kimi-k2.7-code-highspeed', 'kimi-k2.6'],
     tiers: {
-      flagship: 'kimi-k2.5',
-      standard: 'kimi-k2.5',
-      fast: 'kimi-k2-thinking-turbo',
-      reasoning: 'kimi-k2-thinking',
+      flagship: 'kimi-k3',
+      standard: 'kimi-k2.6',
+      fast: 'kimi-k2.7-code-highspeed',
+      reasoning: 'kimi-k3',
     },
   },
   {
-    // Migrated from the bespoke MiniMaxProvider class.
+    // Migrated from the bespoke MiniMaxProvider class. Model ids verified
+    // against the OpenRouter minimax listing (2026-10): m3 is the current
+    // flagship, m2.7 the current workhorse.
     id: 'minimax',
     label: 'MiniMax',
     labelKey: 'providerMinimax',
@@ -146,12 +150,12 @@ export const PROVIDER_PRESETS = [
     website: 'https://platform.minimax.io',
     keyHint: '...',
     nativeModelPrefixes: ['minimax'],
-    models: ['MiniMax-M2.7', 'MiniMax-M2.7-highspeed', 'MiniMax-M2.5', 'MiniMax-M2.5-highspeed', 'MiniMax-M2.1', 'MiniMax-M2.1-highspeed', 'MiniMax-M2'],
+    models: ['MiniMax-M3', 'MiniMax-M2.7', 'MiniMax-M2.7-highspeed', 'MiniMax-M2.5', 'MiniMax-M2.5-highspeed', 'MiniMax-M2.1', 'MiniMax-M2.1-highspeed', 'MiniMax-M2'],
     tiers: {
-      flagship: 'MiniMax-M2.7',
-      standard: 'MiniMax-M2.5',
-      fast: 'MiniMax-M2.5-highspeed',
-      reasoning: 'MiniMax-M2.7',
+      flagship: 'MiniMax-M3',
+      standard: 'MiniMax-M2.7',
+      fast: 'MiniMax-M2.7-highspeed',
+      reasoning: 'MiniMax-M3',
     },
   },
 ];
