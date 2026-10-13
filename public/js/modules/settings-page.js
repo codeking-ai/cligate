@@ -1033,11 +1033,11 @@ export function createSettingsPageModule() {
     },
 
     normalizeModelMappingProvider(type) {
+      // Provider identity must match runtime resolveModel(providerType, ...)
+      // 1:1 — collapsing zhipu/moonshot/minimax into 'openai' made the mapping
+      // page edit a tier map the runtime never consulted for those keys.
       switch (type) {
         case 'openai':
-        case 'moonshot':
-        case 'minimax':
-        case 'zhipu':
           return 'openai';
         case 'anthropic':
           return 'anthropic';
