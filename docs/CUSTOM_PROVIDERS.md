@@ -40,7 +40,7 @@ Same schema as the built-in presets in `src/providers/provider-presets.js`:
 
 | Field                | Required | Meaning |
 |----------------------|----------|---------|
-| `id`                 | yes      | Provider type key. Lowercase letters/digits/`.`/`_`/`-`; must not collide with a built-in id (`qwen`, `openrouter`, `zhipu`, `moonshot`, `minimax`, `openai`, `anthropic`, `gemini`, `azure-openai`, `vertex-ai`, `deepseek`). |
+| `id`                 | yes      | Provider type key. Lowercase letters/digits/`.`/`_`/`-`; must not collide with a built-in id (`qwen`, `openrouter`, `zhipu`, `moonshot`, `minimax`, `clinepass`, `ollama-cloud`, `openai`, `anthropic`, `gemini`, `azure-openai`, `vertex-ai`, `deepseek`). |
 | `baseUrl`            | yes      | Upstream API base URL (chat-completions compatible). |
 | `label`, `badge`     | no       | Display name (defaults to `id`) and short UI tag (defaults to first two chars uppercased). `labelKey` adds i18n. |
 | `apiFormat`          | no       | `openai_chat` (default) \| `openai_responses` \| `anthropic` \| `gemini_native`. `openai_chat` vendors serve all three gateway surfaces (chat, Codex Responses fallback, Claude Code bridge). |

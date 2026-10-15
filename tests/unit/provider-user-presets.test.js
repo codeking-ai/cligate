@@ -43,7 +43,7 @@ test('user presets file merges built-in and user-defined providers', () => {
 
 test('absent user presets file changes nothing', () => {
   const ids = runWithPresets(null);
-  assert.deepEqual(ids.filter((id) => !['qwen', 'openrouter', 'zhipu', 'moonshot', 'minimax'].includes(id)), []);
+  assert.deepEqual(ids.filter((id) => !['qwen', 'openrouter', 'zhipu', 'moonshot', 'minimax', 'clinepass', 'ollama-cloud'].includes(id)), []);
 });
 
 test('user preset colliding with a built-in id is skipped, not merged', () => {

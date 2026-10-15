@@ -158,6 +158,125 @@ export const PROVIDER_PRESETS = [
       reasoning: 'MiniMax-M3',
     },
   },
+  {
+    // ClinePass — Cline's flat subscription ($9.99/mo) for open-weight models
+    // (GLM, Kimi, DeepSeek, MiMo, MiniMax, Qwen) via api.cline.bot. OpenAI
+    // chat-compatible only upstream — no native Anthropic endpoint — but the
+    // generic provider's Anthropic bridge serves /v1/messages anyway, so
+    // Claude Code clients work through translation. Every model id carries the
+    // mandatory `cline-pass/` slug prefix upstream, so native passthrough is a
+    // single prefix. Prices in `pricing` are reference rates used for quota
+    // measurement, not per-token billing (the subscription is flat).
+    // https://docs.cline.bot/getting-started/clinepass
+    id: 'clinepass',
+    label: 'ClinePass',
+    labelKey: 'providerClinepass',
+    badge: 'CPASS',
+    apiFormat: 'openai_chat',
+    baseUrl: 'https://api.cline.bot/api/v1',
+    website: 'https://app.cline.bot',
+    keyHint: 'API key (app.cline.bot → Settings → API Keys)',
+    nativeModelPrefixes: ['cline-pass/'],
+    models: [
+      'cline-pass/glm-5.3',
+      'cline-pass/glm-5.3-flash',
+      'cline-pass/kimi-k3',
+      'cline-pass/deepseek-v4-pro',
+      'cline-pass/deepseek-v4.1-flash',
+      'cline-pass/mimo-v2.5',
+      'cline-pass/mimo-v2.5-pro',
+      'cline-pass/minimax-m3',
+      'cline-pass/qwen3.7-max',
+      'cline-pass/qwen3.7-plus',
+      'cline-pass/qwen3.8-max',
+      'cline-pass/muse-spark-1.3-contributor',
+    ],
+    tiers: {
+      flagship: 'cline-pass/kimi-k3',
+      standard: 'cline-pass/glm-5.3',
+      fast: 'cline-pass/glm-5.3-flash',
+      reasoning: 'cline-pass/mimo-v2.5-pro',
+    },
+    pricing: {
+      'cline-pass/glm-5.3': { input: 1.40, output: 4.40, cacheRead: 0.26 },
+      'cline-pass/glm-5.3-flash': { input: 0.15, output: 0.50, cacheRead: 0.03 },
+      'cline-pass/kimi-k3': { input: 3.00, output: 15.00, cacheRead: 0.30 },
+      'cline-pass/deepseek-v4-pro': { input: 1.32, output: 3.96, cacheRead: 0.044 },
+      'cline-pass/deepseek-v4.1-flash': { input: 0.30, output: 1.20, cacheRead: 0.006 },
+      'cline-pass/mimo-v2.5': { input: 0.14, output: 0.28, cacheRead: 0.0028 },
+      'cline-pass/mimo-v2.5-pro': { input: 1.74, output: 3.48, cacheRead: 0.0145 },
+      'cline-pass/minimax-m3': { input: 0.30, output: 1.20, cacheRead: 0.06 },
+      'cline-pass/qwen3.7-max': { input: 2.50, output: 7.50, cacheRead: 0.50, cacheWrite: 3.125 },
+      'cline-pass/qwen3.7-plus': { input: 0.40, output: 1.60, cacheRead: 0.04, cacheWrite: 0.50 },
+      'cline-pass/qwen3.8-max': { input: 2.00, output: 6.00, cacheRead: 0.25, cacheWrite: 2.50 },
+      'cline-pass/muse-spark-1.3-contributor': { input: 0.10, output: 0.20, cacheRead: 0.002 },
+    },
+  },
+  {
+    // Ollama Cloud — hosted models served from ollama.com (no local install
+    // needed, unlike the local Ollama runtime which is a separate mechanism
+    // and owns the `ollama` provider id — hence `ollama-cloud` here).
+    // OpenAI-compatible /v1 (chat/completions + /models). Cloud model ids mix
+    // bare vendor names (glm-5.3, kimi-k3) and tagged ones (gpt-oss:120b), so
+    // passthrough combines a family-prefix list (kept exact — `gpt-oss`, not
+    // `gpt`, or incoming gpt-5.x from Codex would stop remapping) with a `:`
+    // match for tag-style ids. Prices from ollama.com (USD / 1M tokens).
+    // https://docs.ollama.com/api/openai-compatibility
+    id: 'ollama-cloud',
+    label: 'Ollama Cloud',
+    labelKey: 'providerOllamaCloud',
+    badge: 'OLLAMA',
+    apiFormat: 'openai_chat',
+    baseUrl: 'https://ollama.com/v1',
+    website: 'https://ollama.com',
+    keyHint: 'API key (ollama.com/settings/keys)',
+    nativeModelPrefixes: ['gpt-oss', 'glm', 'kimi', 'deepseek', 'minimax', 'gemma', 'mistral', 'nemotron', 'qwen', 'llama', 'phi', 'granite'],
+    passthroughModelMatch: ':',
+    models: [
+      'glm-5.3',
+      'glm-5.3-flash',
+      'kimi-k3',
+      'deepseek-v4-pro',
+      'glm-5.2',
+      'kimi-k2.7-code',
+      'kimi-k2.6',
+      'deepseek-v4.1-flash',
+      'minimax-m3',
+      'minimax-m2.7',
+      'gpt-oss:120b',
+      'gpt-oss:20b',
+      'gemma4',
+      'mistral-large-4',
+      'nemotron-3-ultra',
+      'nemotron-3-super',
+      'nemotron-3-nano',
+    ],
+    tiers: {
+      flagship: 'kimi-k3',
+      standard: 'glm-5.3',
+      fast: 'glm-5.3-flash',
+      reasoning: 'deepseek-v4-pro',
+    },
+    pricing: {
+      'glm-5.3': { input: 1.40, output: 4.40, cacheRead: 0.26 },
+      'glm-5.3-flash': { input: 0.15, output: 0.50, cacheRead: 0.03 },
+      'glm-5.2': { input: 1.40, output: 4.40, cacheRead: 0.26 },
+      'kimi-k3': { input: 3.00, output: 15.00, cacheRead: 0.30 },
+      'kimi-k2.7-code': { input: 0.95, output: 4.00, cacheRead: 0.19 },
+      'kimi-k2.6': { input: 0.95, output: 4.00, cacheRead: 0.16 },
+      'deepseek-v4-pro': { input: 1.32, output: 3.96, cacheRead: 0.044 },
+      'deepseek-v4.1-flash': { input: 0.30, output: 1.20, cacheRead: 0.006 },
+      'minimax-m3': { input: 0.60, output: 2.40, cacheRead: 0.12 },
+      'minimax-m2.7': { input: 0.30, output: 1.20, cacheRead: 0.06 },
+      'gpt-oss:120b': { input: 0.15, output: 0.60, cacheRead: 0.014 },
+      'gpt-oss:20b': { input: 0.07, output: 0.30, cacheRead: 0.035 },
+      'gemma4': { input: 0.14, output: 0.40, cacheRead: 0.05 },
+      'mistral-large-4': { input: 0.68, output: 2.09, cacheRead: 0.07 },
+      'nemotron-3-ultra': { input: 0.10, output: 3.00, cacheRead: 0.10 },
+      'nemotron-3-super': { input: 0.015, output: 0.60, cacheRead: 0.015 },
+      'nemotron-3-nano': { input: 0.06, output: 0.24, cacheRead: 0 },
+    },
+  },
 ];
 
 // ─── User-defined presets (~/.cligate/provider-presets.json) ────────────────
