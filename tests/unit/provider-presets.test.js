@@ -31,8 +31,8 @@ test('every preset declares the required fields and a unique id', () => {
     }
 });
 
-test('this batch ships qwen + openrouter as openai_chat presets', () => {
-    assert.deepEqual(presetIdsByFormat('openai_chat').sort(), ['openrouter', 'qwen']);
+test('this batch ships openai_chat presets (qwen, openrouter + migrated zhipu/moonshot/minimax)', () => {
+    assert.deepEqual(presetIdsByFormat('openai_chat').sort(), ['minimax', 'moonshot', 'openrouter', 'qwen', 'zhipu']);
     // Nothing in this batch should claim the Responses or Anthropic formats.
     assert.deepEqual(presetIdsByFormat('openai_responses'), []);
     assert.deepEqual(presetIdsByFormat('anthropic'), []);
@@ -158,4 +158,36 @@ test('preset pricing is merged into the registry; openrouter stays unpriced (0)'
     const qwen = getEffectivePricing('qwen', 'qwen-max');
     assert.ok(qwen && qwen.input > 0, 'qwen-max should be priced');
     assert.equal(getEffectivePricing('openrouter', 'anthropic/claude-3.7-sonnet'), null, 'openrouter has no built-in pricing');
+});
+
+// ─── Migrated bespoke providers (zhipu / moonshot / minimax) ────────────────
+
+test('migrated zhipu/moonshot/minimax presets keep their registry ids addable', () => {
+    for (const id of ['zhipu', 'moonshot', 'minimax']) {
+        const { success, id: keyId } = addApiKey({ type: id, name: `migrated-${id}`, apiKey: 'sk-test' });
+        assert.equal(success, true, `${id} must remain a registered, addable provider type`);
+        try {
+            const provider = getProviderById(keyId);
+            assert.equal(provider.type, id, `${id} keys keep their provider identity`);
+            assert.equal(typeof provider.sendAnthropicRequest, 'function', `${id} keeps the Anthropic bridge`);
+        } finally {
+            removeApiKey(keyId);
+        }
+    }
+});
+
+test('migrated providers have tier maps and remap non-native models', () => {
+    // zhipu: previously had NO tier map — claude models passed through verbatim.
+    assert.notEqual(resolveModel('zhipu', 'claude-sonnet-4-6'), 'claude-sonnet-4-6');
+    // Native model families pass through unchanged.
+    assert.equal(resolveModel('zhipu', 'glm-5'), 'glm-5');
+    assert.equal(resolveModel('moonshot', 'kimi-k2.5'), 'kimi-k2.5');
+    assert.equal(resolveModel('minimax', 'MiniMax-M2.5'), 'MiniMax-M2.5');
+});
+
+test('zhipu preset declares a validateModel for vendors without GET /models', () => {
+    assert.equal(PRESET_BY_ID.zhipu.validateModel, 'glm-4-flash');
+    const Cls = makeOpenAICompatibleProvider(PRESET_BY_ID.zhipu);
+    const instance = new Cls({ id: 'tmp_zhipu', apiKey: 'sk-test' });
+    assert.equal(typeof instance.validateKey, 'function');
 });

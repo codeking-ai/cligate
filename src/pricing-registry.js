@@ -68,8 +68,9 @@ const DEFAULT_PRICING = {
         'claude-haiku-4-5': { input: 1.00, output: 5.00, cacheRead: 0, cacheWrite: 0 }
     },
     minimax: {
-        'MiniMax-M2.7': { input: 0.30, output: 1.20, cacheRead: 0, cacheWrite: 0 },
-        'MiniMax-M2.7-highspeed': { input: 0.30, output: 2.40, cacheRead: 0, cacheWrite: 0 },
+        'MiniMax-M3': { input: 0.30, output: 1.20, cacheRead: 0.06, cacheWrite: 0 },
+        'MiniMax-M2.7': { input: 0.30, output: 1.20, cacheRead: 0.06, cacheWrite: 0 },
+        'MiniMax-M2.7-highspeed': { input: 0.60, output: 2.40, cacheRead: 0, cacheWrite: 0 },
         'MiniMax-M2.5': { input: 0.30, output: 1.20, cacheRead: 0, cacheWrite: 0 },
         'MiniMax-M2.5-highspeed': { input: 0.30, output: 2.40, cacheRead: 0, cacheWrite: 0 },
         'MiniMax-M2.1': { input: 0.20, output: 0.80, cacheRead: 0, cacheWrite: 0 },
@@ -77,18 +78,19 @@ const DEFAULT_PRICING = {
         'MiniMax-M2': { input: 0.15, output: 0.60, cacheRead: 0, cacheWrite: 0 }
     },
     moonshot: {
-        'kimi-k2.5': { input: 0.60, output: 2.50, cacheRead: 0, cacheWrite: 0 },
-        'kimi-k2-thinking': { input: 0.60, output: 2.50, cacheRead: 0, cacheWrite: 0 },
-        'kimi-k2-thinking-turbo': { input: 0.30, output: 1.20, cacheRead: 0, cacheWrite: 0 }
+        'kimi-k3': { input: 3.00, output: 15.00, cacheRead: 0.30, cacheWrite: 0 },
+        'kimi-k2.7-code': { input: 0.95, output: 4.00, cacheRead: 0.19, cacheWrite: 0 },
+        'kimi-k2.7-code-highspeed': { input: 1.90, output: 8.00, cacheRead: 0.38, cacheWrite: 0 },
+        'kimi-k2.6': { input: 0.95, output: 4.00, cacheRead: 0.16, cacheWrite: 0 }
     },
     zhipu: {
-        'glm-5': { input: 0.72, output: 2.30, cacheRead: 0, cacheWrite: 0 },
-        'glm-5-turbo': { input: 0.36, output: 1.15, cacheRead: 0, cacheWrite: 0 },
+        'glm-5.3': { input: 1.40, output: 4.40, cacheRead: 0.26, cacheWrite: 0 },
+        'glm-5.3-flash': { input: 0.15, output: 0.50, cacheRead: 0.03, cacheWrite: 0 },
+        'glm-5.2': { input: 1.40, output: 4.40, cacheRead: 0.26, cacheWrite: 0 },
+        'glm-5': { input: 1.00, output: 3.20, cacheRead: 0.20, cacheWrite: 0 },
         'glm-4.7': { input: 0.40, output: 1.20, cacheRead: 0, cacheWrite: 0 },
-        'glm-4-plus': { input: 0.30, output: 0.90, cacheRead: 0, cacheWrite: 0 },
-        'glm-4-air': { input: 0.07, output: 0.07, cacheRead: 0, cacheWrite: 0 },
-        'glm-4-airx': { input: 0.14, output: 0.14, cacheRead: 0, cacheWrite: 0 },
-        'glm-4-flash': { input: 0.01, output: 0.01, cacheRead: 0, cacheWrite: 0 }
+        'glm-4.7-flash': { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+        'glm-4-flash': { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }
     },
     deepseek: {
         'deepseek-v4-flash': { input: 0.27, output: 1.10, cacheRead: 0.07, cacheWrite: 0 },

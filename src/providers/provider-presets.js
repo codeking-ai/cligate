@@ -6,6 +6,11 @@
  * `apiFormat`, not a bespoke class. Adding an OpenAI-compatible vendor is a
  * single object here — no new class, no scattered edits.
  *
+ * User-defined presets: entries in `~/.cligate/provider-presets.json` are
+ * merged after the built-ins at module load, so adding a vendor at runtime is
+ * a JSON file — no code changes, no restart beyond server reload. Built-in ids
+ * are protected: a user preset that collides with one is skipped with a warning.
+ *
  * SCOPE (this batch): Qwen (DashScope compatible-mode) and OpenRouter, both
  * `openai_chat`. They are intentionally exposed ONLY on the OpenAI chat path
  * (`/v1/chat/completions` + gateway). The generic provider class disables the
@@ -28,7 +33,13 @@
  *   pricing               object? { <model>: { input, output, cacheRead?, cacheWrite? } } USD / 1M tokens
  *   nativeModelPrefixes   array?  model ids starting with any prefix are passed through (no tier remap)
  *   passthroughModelMatch string? if a model id includes this substring, pass it through (e.g. '/')
+ *   validateModel         string? vendors without GET /models: validateKey sends a 1-token
+ *                                 chat request with this model instead (e.g. Zhipu)
  */
+
+import { existsSync, readFileSync } from 'fs';
+import { join } from 'path';
+import { CONFIG_DIR } from '../account-manager.js';
 
 export const PROVIDER_PRESETS = [
   {
@@ -83,7 +94,166 @@ export const PROVIDER_PRESETS = [
       reasoning: 'deepseek/deepseek-r1',
     },
   },
+  {
+    // Migrated from the bespoke ZhipuProvider class. ZhipuAI serves no GET
+    // /models, so validation probes a 1-token chat request and discovery
+    // relies on the static model list below. Model ids verified against the
+    // OpenRouter z-ai listing (2026-10).
+    id: 'zhipu',
+    label: 'Zhipu (GLM)',
+    labelKey: 'providerZhipu',
+    badge: 'GLM',
+    apiFormat: 'openai_chat',
+    baseUrl: 'https://open.bigmodel.cn/api/paas/v4',
+    website: 'https://open.bigmodel.cn',
+    keyHint: '...',
+    nativeModelPrefixes: ['glm'],
+    validateModel: 'glm-4-flash',
+    models: ['glm-5.3', 'glm-5.3-flash', 'glm-5.2', 'glm-5', 'glm-4.7', 'glm-4.7-flash', 'glm-4-flash'],
+    tiers: {
+      flagship: 'glm-5.3',
+      standard: 'glm-5.2',
+      fast: 'glm-5.3-flash',
+      reasoning: 'glm-5.3',
+    },
+  },
+  {
+    // Migrated from the bespoke MoonshotProvider class. Model ids verified
+    // against the OpenRouter moonshotai listing (2026-10).
+    id: 'moonshot',
+    label: 'Moonshot (Kimi)',
+    labelKey: 'providerMoonshot',
+    badge: 'KIMI',
+    apiFormat: 'openai_chat',
+    baseUrl: 'https://api.moonshot.ai/v1',
+    website: 'https://platform.moonshot.ai',
+    keyHint: 'sk-...',
+    nativeModelPrefixes: ['kimi', 'moonshot'],
+    models: ['kimi-k3', 'kimi-k2.7-code', 'kimi-k2.7-code-highspeed', 'kimi-k2.6'],
+    tiers: {
+      flagship: 'kimi-k3',
+      standard: 'kimi-k2.6',
+      fast: 'kimi-k2.7-code-highspeed',
+      reasoning: 'kimi-k3',
+    },
+  },
+  {
+    // Migrated from the bespoke MiniMaxProvider class. Model ids verified
+    // against the OpenRouter minimax listing (2026-10): m3 is the current
+    // flagship, m2.7 the current workhorse.
+    id: 'minimax',
+    label: 'MiniMax',
+    labelKey: 'providerMinimax',
+    badge: 'MM',
+    apiFormat: 'openai_chat',
+    baseUrl: 'https://api.minimax.io/v1',
+    website: 'https://platform.minimax.io',
+    keyHint: '...',
+    nativeModelPrefixes: ['minimax'],
+    models: ['MiniMax-M3', 'MiniMax-M2.7', 'MiniMax-M2.7-highspeed', 'MiniMax-M2.5', 'MiniMax-M2.5-highspeed', 'MiniMax-M2.1', 'MiniMax-M2.1-highspeed', 'MiniMax-M2'],
+    tiers: {
+      flagship: 'MiniMax-M3',
+      standard: 'MiniMax-M2.7',
+      fast: 'MiniMax-M2.7-highspeed',
+      reasoning: 'MiniMax-M3',
+    },
+  },
 ];
+
+// ─── User-defined presets (~/.cligate/provider-presets.json) ────────────────
+
+const USER_PRESETS_FILE = join(CONFIG_DIR, 'provider-presets.json');
+const PRESET_API_FORMATS = new Set(['openai_chat', 'openai_responses', 'anthropic', 'gemini_native']);
+const PRESET_ID_PATTERN = /^[a-z0-9][a-z0-9._-]*$/;
+const PRESET_TIER_KEYS = ['flagship', 'standard', 'fast', 'reasoning'];
+
+function userPresetProblem(entry) {
+  if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+    return 'entry must be an object';
+  }
+  if (typeof entry.id !== 'string' || !PRESET_ID_PATTERN.test(entry.id)) {
+    return `invalid id "${entry.id}" (expected lowercase letters/digits/dots/dashes)`;
+  }
+  if (BUILTIN_PRESET_IDS.has(entry.id)) {
+    return `id "${entry.id}" collides with a built-in preset and is ignored`;
+  }
+  if (typeof entry.baseUrl !== 'string' || !entry.baseUrl.trim()) {
+    return `preset "${entry.id}": baseUrl is required`;
+  }
+  if (entry.apiFormat !== undefined && !PRESET_API_FORMATS.has(entry.apiFormat)) {
+    return `preset "${entry.id}": apiFormat must be one of ${[...PRESET_API_FORMATS].join(', ')}`;
+  }
+  if (entry.models !== undefined && (!Array.isArray(entry.models) || entry.models.some((m) => typeof m !== 'string'))) {
+    return `preset "${entry.id}": models must be an array of strings`;
+  }
+  if (entry.tiers !== undefined) {
+    if (!entry.tiers || typeof entry.tiers !== 'object' || Array.isArray(entry.tiers)) {
+      return `preset "${entry.id}": tiers must be an object`;
+    }
+    for (const [tier, model] of Object.entries(entry.tiers)) {
+      if (!PRESET_TIER_KEYS.includes(tier)) return `preset "${entry.id}": unknown tier "${tier}"`;
+      if (typeof model !== 'string' || !model.trim()) return `preset "${entry.id}": tier "${tier}" must map to a model id`;
+    }
+  }
+  if (entry.nativeModelPrefixes !== undefined
+    && (!Array.isArray(entry.nativeModelPrefixes) || entry.nativeModelPrefixes.some((p) => typeof p !== 'string'))) {
+    return `preset "${entry.id}": nativeModelPrefixes must be an array of strings`;
+  }
+  if (entry.passthroughModelMatch !== undefined && typeof entry.passthroughModelMatch !== 'string') {
+    return `preset "${entry.id}": passthroughModelMatch must be a string`;
+  }
+  if (entry.validateModel !== undefined && (typeof entry.validateModel !== 'string' || !entry.validateModel.trim())) {
+    return `preset "${entry.id}": validateModel must be a non-empty string`;
+  }
+  return null;
+}
+
+function normalizeUserPreset(entry) {
+  return {
+    label: entry.label || entry.id,
+    badge: entry.badge || entry.id.slice(0, 2).toUpperCase(),
+    apiFormat: entry.apiFormat || 'openai_chat',
+    ...entry,
+  };
+}
+
+function loadUserPresets() {
+  if (!existsSync(USER_PRESETS_FILE)) return [];
+
+  try {
+    const parsed = JSON.parse(readFileSync(USER_PRESETS_FILE, 'utf8'));
+    const entries = Array.isArray(parsed) ? parsed : (Array.isArray(parsed?.presets) ? parsed.presets : null);
+    if (!entries) {
+      console.warn(`[ProviderPresets] ${USER_PRESETS_FILE} must contain an array of presets (or { presets: [...] }) — ignored`);
+      return [];
+    }
+
+    const seen = new Set();
+    const result = [];
+    for (const entry of entries) {
+      const problem = userPresetProblem(entry);
+      if (problem) {
+        console.warn(`[ProviderPresets] Skipping user preset: ${problem}`);
+        continue;
+      }
+      if (seen.has(entry.id)) {
+        console.warn(`[ProviderPresets] Skipping duplicate user preset id "${entry.id}"`);
+        continue;
+      }
+      seen.add(entry.id);
+      result.push(normalizeUserPreset(entry));
+    }
+    return result;
+  } catch (err) {
+    console.warn(`[ProviderPresets] Failed to load ${USER_PRESETS_FILE}: ${err.message} — user presets ignored`);
+    return [];
+  }
+}
+
+// Built-ins first, user entries after. Ids are unique across the merged list
+// (enforced above), so PRESET_BY_ID keeps first-wins semantics for built-ins.
+const BUILTIN_PRESET_IDS = new Set(PROVIDER_PRESETS.map((p) => p.id));
+PROVIDER_PRESETS.push(...loadUserPresets());
 
 export const PRESET_BY_ID = Object.fromEntries(PROVIDER_PRESETS.map((p) => [p.id, p]));
 

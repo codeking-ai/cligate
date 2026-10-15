@@ -4,6 +4,18 @@ All notable user-facing changes should be documented in this file.
 
 This changelog is maintained from source. Published release artifacts and tags remain the source of truth for shipped binaries and npm packages.
 
+## Unreleased
+
+### Added
+
+- **Custom API-key providers without code changes**: define OpenAI-compatible vendors in `~/.cligate/provider-presets.json` (same schema as the built-in presets — `id`, `label`, `baseUrl`, `apiFormat`, optional `models`/`tiers`/`nativeModelPrefixes`/`pricing`/`validateModel`) and they become first-class everywhere: the add-key form, model mapping with their own tier maps, model discovery, protocol compatibility, pricing. Invalid entries are skipped with a warning; ids colliding with built-ins are rejected.
+
+### Changed
+
+- Zhipu (GLM), Moonshot (Kimi), and MiniMax are now declarative presets served by the generic OpenAI-compatible provider instead of bespoke classes (behavior preserved: same base URLs, ids, and pricing; Zhipu key validation probes a 1-token chat request via the new preset `validateModel` field, since Zhipu serves no `/models` endpoint).
+- Zhipu/Moonshot/MiniMax keys now also serve `/v1/chat/completions` and the Codex Responses fallback (they previously only served `/v1/messages`).
+- Zhipu/Moonshot/MiniMax now have their own tier maps and model lists, so non-native models are remapped instead of passing through verbatim, and the model-mapping page gives each its own editor instead of folding them into the OpenAI one (which the runtime never consulted for these keys).
+
 ## 1.3.1 - 2026-06-14
 
 ### Changed

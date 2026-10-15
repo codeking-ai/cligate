@@ -12,24 +12,21 @@ import { AnthropicProvider } from './providers/anthropic.js';
 import { GeminiProvider } from './providers/gemini.js';
 import { AzureOpenAIProvider } from './providers/azure-openai.js';
 import { VertexAIProvider } from './providers/vertex-ai.js';
-import { MiniMaxProvider } from './providers/minimax.js';
-import { MoonshotProvider } from './providers/moonshot.js';
-import { ZhipuProvider } from './providers/zhipu.js';
 import { DeepSeekProvider } from './providers/deepseek.js';
 import { PROVIDER_PRESETS } from './providers/provider-presets.js';
 import { makeOpenAICompatibleProvider } from './providers/openai-compatible.js';
 
 const API_KEYS_FILE = join(CONFIG_DIR, 'api-keys.json');
 
+// zhipu/moonshot/minimax used to be bespoke classes here; they are now
+// declarative presets (provider-presets.js) served by the generic
+// OpenAI-compatible class, like qwen and openrouter before them.
 const PROVIDER_CLASSES = {
     openai: OpenAIProvider,
     anthropic: AnthropicProvider,
     gemini: GeminiProvider,
     'azure-openai': AzureOpenAIProvider,
     'vertex-ai': VertexAIProvider,
-    minimax: MiniMaxProvider,
-    moonshot: MoonshotProvider,
-    zhipu: ZhipuProvider,
     deepseek: DeepSeekProvider
 };
 

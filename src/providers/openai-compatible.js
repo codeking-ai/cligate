@@ -68,6 +68,24 @@ export function makeOpenAICompatibleProvider(preset) {
       return estimateCostWithRegistry(this.type, model, inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens);
     }
 
+    // Vendors without a GET /models endpoint declare a `validateModel` in
+    // their preset; validation then probes a 1-token chat request instead.
+    async validateKey() {
+      if (!preset.validateModel) {
+        return super.validateKey();
+      }
+      try {
+        const response = await this.sendRequest({
+          model: preset.validateModel,
+          messages: [{ role: 'user', content: 'hi' }],
+          max_tokens: 1,
+        });
+        return response.status !== 401 && response.status !== 403;
+      } catch {
+        return false;
+      }
+    }
+
     static get pricing() {
       return getDefaultPricing(preset.id);
     }
