@@ -277,6 +277,37 @@ export const PROVIDER_PRESETS = [
       'nemotron-3-nano': { input: 0.06, output: 0.24, cacheRead: 0 },
     },
   },
+  {
+    // Cheaper Inference — OpenAI-compatible LLM gateway; one API key serves
+    // models from several labs. Model ids are bare (gpt-5.4, claude-sonnet-5,
+    // deepseek-v4-flash, glm-5.3). GPT, DeepSeek and GLM ids pass through.
+    // Claude Code ids (claude-sonnet-4-6) use a different spelling upstream, so
+    // they tier-map instead of passing through. No built-in pricing, same as
+    // OpenRouter: users may add overrides in the pricing page.
+    // https://cheaperinference.com/docs
+    id: 'cheaper-inference',
+    label: 'Cheaper Inference',
+    labelKey: 'providerCheaperInference',
+    badge: 'CI',
+    apiFormat: 'openai_chat',
+    baseUrl: 'https://api.cheaperinference.com/v1',
+    website: 'https://cheaperinference.com',
+    keyHint: 'ci_live_...',
+    nativeModelPrefixes: ['gpt-5', 'deepseek-v4', 'glm-5'],
+    models: [
+      'gpt-5.4',
+      'gpt-5.4-mini',
+      'claude-sonnet-5',
+      'deepseek-v4-flash',
+      'glm-5.3',
+    ],
+    tiers: {
+      flagship: 'gpt-5.4',
+      standard: 'claude-sonnet-5',
+      fast: 'gpt-5.4-mini',
+      reasoning: 'gpt-5.4',
+    },
+  },
 ];
 
 // ─── User-defined presets (~/.cligate/provider-presets.json) ────────────────
