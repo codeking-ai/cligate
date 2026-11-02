@@ -31,9 +31,9 @@ test('every preset declares the required fields and a unique id', () => {
     }
 });
 
-test('this batch ships openai_chat presets (qwen, openrouter, zhipu/moonshot/minimax, clinepass, ollama-cloud)', () => {
+test('this batch ships openai_chat presets (qwen, openrouter, zhipu/moonshot/minimax, clinepass, ollama-cloud, cheaper-inference)', () => {
     assert.deepEqual(presetIdsByFormat('openai_chat').sort(),
-        ['clinepass', 'minimax', 'moonshot', 'ollama-cloud', 'openrouter', 'qwen', 'zhipu']);
+        ['cheaper-inference', 'clinepass', 'minimax', 'moonshot', 'ollama-cloud', 'openrouter', 'qwen', 'zhipu']);
     // Nothing in this batch should claim the Responses or Anthropic formats.
     assert.deepEqual(presetIdsByFormat('openai_responses'), []);
     assert.deepEqual(presetIdsByFormat('anthropic'), []);
@@ -227,5 +227,30 @@ test('clinepass and ollama-cloud are registered providers with the Anthropic bri
         } finally {
             removeApiKey(keyId);
         }
+    }
+});
+
+// ─── Built-in gateway preset (cheaper-inference) ────────────────────────────
+
+test('cheaper-inference passes bare gateway ids through and tier-maps the rest', () => {
+    // GPT, DeepSeek and GLM ids are served under the same bare names.
+    assert.equal(resolveModel('cheaper-inference', 'gpt-5.4'), 'gpt-5.4');
+    assert.equal(resolveModel('cheaper-inference', 'deepseek-v4-flash'), 'deepseek-v4-flash');
+    assert.equal(resolveModel('cheaper-inference', 'glm-5.3'), 'glm-5.3');
+    // Claude Code ids use another spelling upstream, so they remap by tier.
+    assert.equal(resolveModel('cheaper-inference', 'claude-sonnet-4-6'), 'claude-sonnet-5');
+    assert.equal(resolveModel('cheaper-inference', 'claude-opus-4-6'), 'gpt-5.4');
+});
+
+test('cheaper-inference is a registered provider with the Anthropic bridge', () => {
+    const { success, id: keyId } = addApiKey({ type: 'cheaper-inference', name: 'builtin-cheaper-inference', apiKey: 'sk-test' });
+    assert.equal(success, true, 'cheaper-inference must be a registered, addable provider type');
+    try {
+        const provider = getProviderById(keyId);
+        assert.equal(provider.type, 'cheaper-inference');
+        assert.equal(typeof provider.sendAnthropicRequest, 'function', 'cheaper-inference must serve /v1/messages via the bridge');
+        assert.equal(provider.sendResponsesRequest, undefined, 'cheaper-inference must NOT claim native /responses');
+    } finally {
+        removeApiKey(keyId);
     }
 });
